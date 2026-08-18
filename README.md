@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/sosoj92-jarvis-assistant-vocal-badge.png)](https://mseep.ai/app/sosoj92-jarvis-assistant-vocal)
+
 # 🤖 Jarvis — assistant vocal local
 
 *[English version](README.en.md)*
