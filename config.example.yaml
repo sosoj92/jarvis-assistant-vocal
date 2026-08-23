@@ -47,9 +47,16 @@ hue:                           # Philips Hue, API locale
   pont: "192.168.1.XXX"        # adresse du pont sur ton reseau
   cle: "ta-cle-hue"            # cle generee via le bouton du pont
 
-mail:                          # Gmail via IMAP/SMTP (facultatif)
+mail:                          # Gmail via IMAP/SMTP (facultatif) ; voir docs/mail.md
   adresse: "ton.adresse@gmail.com"
-  mot_de_passe_app: ""         # mot de passe d'application Google (2FA requise)
+  mot_de_passe_app: ""         # compte Gmail PERSO : mot de passe d'application (2FA requise)
+  oauth: false                 # GOOGLE WORKSPACE : true, car l'admin peut interdire les
+                               # mots de passe d'application. Autorise une fois avec
+                               # uv run python scripts/google_login.py mail
+  token: ""                    # vide = google_token_mail.json a la racine
+
+google:                        # identifiants OAuth partages (Gmail + Agenda)
+  credentials: ""              # vide = google_credentials.json a la racine
 
 audio:
   micro: 1                     # index du micro (voir sounddevice.query_devices())
@@ -67,11 +74,37 @@ whisper:
   # medium 8,5 s. « small » est le meilleur compromis hors GPU NVIDIA.
   modele: "medium"             # tiny | base | small | medium | large-v3
 
-interruption:                  # couper Jarvis quand tu dis "attends/stop/arrete" par-dessus
-  facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis (baisse si ca ne coupe pas)
+  # Noms propres a ancrer : Whisper les rend BEAUCOUP mieux quand il les attend.
+  # Mesure : "Uber Eats" est entendu "UB et ITS" sans, correct avec.
+  # Les cles de `apps` sont ajoutees automatiquement, pas besoin de les repeter.
+  vocabulaire: ["YorkHost", "Uber Eats", "Deliveroo", "Spotify", "Discord",
+                "OBS", "Philips Hue"]
+
+  # L'amorce ne suffit PAS pour les sigles courts : "OBS" reste entendu "au bas",
+  # "Hue" devient "rues" — trop peu de matiere sonore. Corrige-les ici, sur le
+  # texte final. Ajoute ce que TU entends de travers, c'est propre a ta voix.
+  corrections:
+    "au bas": "OBS"
+    "obese": "OBS"
+    "lumi-rues": "lumieres Hue"
+    # Ce que Whisper rend pour "YorkHost" SANS l'amorce (mesure) : avec le
+    # vocabulaire ci-dessus il tombe juste, ces lignes ne servent que de filet.
+    "york coast": "YorkHost"
+    "yark host": "YorkHost"
+    "york host": "YorkHost"
+    "iacoste": "YorkHost"
+
+interruption:                  # couper Jarvis pendant qu'il parle. DEUX voies :
+  # Voie 1 : redire "Hey Jarvis" par-dessus.
+  seuil_reveil: 0.7            # plus strict que assistant.seuil_reveil (le micro entend
+                               # aussi l'enceinte). Au CASQUE il n'y a pas d'echo :
+                               # descends a 0.5, sinon couper est quasi impossible.
+  # Voie 2 : dire "attends", "stop", "arrete"... par-dessus.
+  facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis
+                               # (baisse a 1.2-1.4 si ca ne coupe jamais)
   seuil: 0.025                 # niveau minimum absolu de ta voix (baisse si micro peu sensible)
   blocs: 5                     # blocs de 80 ms de parole continue avant de verifier (5 = 0,4 s)
-  debug: false                 # true = affiche niv/base/seuil + ce qu'il entend (pour calibrer)
+  debug: true                  # affiche les scores en direct : indispensable pour calibrer
 
 assistant:
   duree_suite: 10              # secondes d'ecoute apres une reponse

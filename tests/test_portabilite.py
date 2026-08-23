@@ -229,3 +229,44 @@ def test_dependances_windows_marquees():
                  if l.strip().startswith(f'"{paquet}')]
         assert ligne, f"{paquet} introuvable dans pyproject.toml"
         assert ";" in ligne[0], f"{paquet} n'a pas de marqueur de plateforme"
+
+
+# --------------------------------------------- vocabulaire de transcription
+
+def test_corrections_respectent_les_frontieres_de_mots():
+    """« au bas » -> OBS ne doit pas casser « au bassin »."""
+    jarvis14 = pytest.importorskip("jarvis14")
+    table = {"au bas": "OBS", "york coast": "YorkHost"}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(jarvis14, "CORRECTIONS", table)
+        assert jarvis14.corriger_vocabulaire("Lance au bas") == "Lance OBS"
+        assert jarvis14.corriger_vocabulaire("l'etat de York Coast") == "l'etat de YorkHost"
+        # frontieres : ces mots ne doivent PAS etre touches
+        assert jarvis14.corriger_vocabulaire("le bateau est au bassin") \
+            == "le bateau est au bassin"
+
+
+def test_corrections_vides_ne_changent_rien():
+    jarvis14 = pytest.importorskip("jarvis14")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(jarvis14, "CORRECTIONS", {})
+        assert jarvis14.corriger_vocabulaire("texte inchange") == "texte inchange"
+        assert jarvis14.corriger_vocabulaire("") == ""
+
+
+def test_amorce_contient_les_apps_configurees(monkeypatch):
+    """Les apps declarees n'ont pas a etre repetees dans whisper.vocabulaire."""
+    jarvis14 = pytest.importorskip("jarvis14")
+    valeurs = {"whisper.vocabulaire": ["YorkHost"], "apps": {"borderlands": "x"}}
+    monkeypatch.setattr(jarvis14.config, "reglage",
+                        lambda chemin, defaut=None: valeurs.get(chemin, defaut))
+    amorce = jarvis14._amorce_whisper()
+    assert "YorkHost" in amorce and "borderlands" in amorce
+
+
+def test_amorce_absente_si_aucun_vocabulaire(monkeypatch):
+    """Sans vocabulaire, pas d'amorce : on ne biaise pas Whisper pour rien."""
+    jarvis14 = pytest.importorskip("jarvis14")
+    monkeypatch.setattr(jarvis14.config, "reglage",
+                        lambda chemin, defaut=None: [] if "vocab" in chemin else {})
+    assert jarvis14._amorce_whisper() is None

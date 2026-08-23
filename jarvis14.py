@@ -58,11 +58,43 @@ def _haut_parleur():
 # par les providers (core/llm.py, core/tts.py), selon config.yaml (mode: cloud|local).
 MODELE_WHISPER = config.reglage("whisper.modele", "medium")
 
+
+def _amorce_whisper():
+    """Phrase d'amorce donnee a Whisper pour ancrer le vocabulaire attendu.
+
+    Whisper transcrit par probabilite : sans contexte, « Uber Eats » devient
+    « hubveritz », « OBS » devient « eaubéesse ». L'amorce (initial_prompt) est
+    le levier prevu pour ca : les mots qu'elle contient deviennent nettement
+    plus probables. On y met le vocabulaire de config.yaml, plus les noms que
+    Jarvis connait deja (applications configurees, pieces de la maison).
+    """
+    mots = list(config.reglage("whisper.vocabulaire", []) or [])
+    try:                                    # les apps que l'utilisateur a declarees
+        mots += [str(k) for k in (config.reglage("apps", {}) or {})]
+    except Exception:
+        pass
+    vus, propres = set(), []
+    for m in mots:
+        m = str(m).strip()
+        if m and m.lower() not in vus:
+            vus.add(m.lower())
+            propres.append(m)
+    if not propres:
+        return None
+    return ("Conversation en francais avec un assistant vocal nomme Jarvis. "
+            "Vocabulaire attendu : " + ", ".join(propres) + ".")
+
+
+AMORCE_WHISPER = _amorce_whisper()
+
 TAUX = 16000
 BLOC = 1280
 
 SEUIL_REVEIL = config.reglage("assistant.seuil_reveil", 0.5)   # sensibilite du mot d'activation
-SEUIL_INTERRUPTION = 0.7   # plus strict : le micro entend aussi l'enceinte
+# Mot d'activation redit PAR-DESSUS Jarvis : plus strict que l'eveil normal, car
+# le micro entend aussi l'enceinte. Reglable : sur un micro peu sensible ou en
+# casque (pas d'echo), 0.7 est inatteignable et couper devient impossible.
+SEUIL_INTERRUPTION = config.reglage("interruption.seuil_reveil", 0.7)
 SEUIL_PAROLE_SUR = 0.025
 BLOCS_AVANT_VERIF = 5      # 5 x 80 ms = 0,4 s de parole continue
 DELAI_ENTRE_VERIFS = 1.0
@@ -447,9 +479,37 @@ def _est_toujours(texte):
     return bool(texte) and "toujours" in sans_accents(texte)
 
 
+def _corrections():
+    """Table de corrections phonetiques, depuis config.yaml (whisper.corrections).
+
+    L'amorce (initial_prompt) suffit pour les noms a plusieurs syllabes — elle
+    corrige « UB et ITS » en « Uber Eats ». Elle NE suffit PAS pour les sigles
+    courts : « OBS » reste entendu « au bas », « Hue » devient « rues ». Trop
+    peu de matiere sonore pour que le contexte tranche. D'ou cette table, qui
+    remplace sur le texte final ce que le modele ne peut pas deviner.
+    """
+    brut = config.reglage("whisper.corrections", {}) or {}
+    return {sans_accents(str(k).lower()): str(v) for k, v in brut.items() if k}
+
+
+CORRECTIONS = _corrections()
+
+
+def corriger_vocabulaire(texte):
+    """Remplace les confusions connues, en respectant les frontieres de mots."""
+    if not CORRECTIONS or not texte:
+        return texte
+    for faux, vrai in CORRECTIONS.items():
+        motif = re.compile(r"\b" + re.escape(faux) + r"\b", re.IGNORECASE)
+        # sans_accents pour comparer, mais on remplace dans le texte d'origine :
+        # on cherche donc aussi la forme accentuee telle qu'elle a ete entendue.
+        texte = motif.sub(vrai, texte)
+    return texte
+
+
 def nettoyer(texte):
-    """Retire le residu du mot d'activation en tete de transcription."""
-    t = texte.strip()
+    """Retire le residu du mot d'activation, puis corrige le vocabulaire connu."""
+    t = corriger_vocabulaire(texte.strip())
 
     plat = sans_accents(t)
     if any(h in plat for h in HALLUCINATIONS):
@@ -851,7 +911,11 @@ def repondre_en_ecoutant(historique, flux, reveil, whisper):
 
         # voie 1 : le mot d'activation
         scores = reveil.predict((bloc * 32767).astype(np.int16))
-        if max(scores.values()) >= SEUIL_INTERRUPTION:
+        score_reveil = max(scores.values())
+        if debug and score_reveil > 0.2:
+            print(f"  [micro debug] mot-cle par-dessus : {score_reveil:.2f} "
+                  f"(seuil {SEUIL_INTERRUPTION})")
+        if score_reveil >= SEUIL_INTERRUPTION:
             couper_parole()
             interrompu, relancer = True, True
             print("  [micro] Je me tais.")
@@ -883,7 +947,8 @@ def repondre_en_ecoutant(historique, flux, reveil, whisper):
             tampon = []
             blocs_sur = 0
             try:
-                segments, _ = whisper.transcribe(extrait, language="fr", beam_size=1)
+                segments, _ = whisper.transcribe(extrait, language="fr", beam_size=1,
+                                              initial_prompt=AMORCE_WHISPER)
                 dit = " ".join(s.text for s in segments).strip()
             except Exception:
                 dit = ""
@@ -919,7 +984,8 @@ def _confirmer(interrompu, relancer, whisper, historique, flux):
     audio_conf = capturer(flux, deque())
     reponse = ""
     if audio_conf is not None:
-        seg, _ = whisper.transcribe(audio_conf, language="fr", beam_size=5)
+        seg, _ = whisper.transcribe(audio_conf, language="fr", beam_size=5,
+                                initial_prompt=AMORCE_WHISPER)
         reponse = nettoyer(" ".join(s.text for s in seg).strip())
     print(f"  [confirmation] {reponse or '(rien)'}")
 
@@ -950,7 +1016,8 @@ def _tronquer(historique):
 
 def traiter(audio, whisper, historique, flux, reveil):
     """Transcrit, repond, parle. Renvoie True si on doit enchainer (relance)."""
-    segments, _ = whisper.transcribe(audio, language="fr", beam_size=5)
+    segments, _ = whisper.transcribe(audio, language="fr", beam_size=5,
+                                 initial_prompt=AMORCE_WHISPER)
     question = nettoyer(" ".join(s.text for s in segments).strip())
 
     if not question or len(question) < 3:
@@ -1118,11 +1185,13 @@ def main():
     # Les appels telephoniques reutilisent ce Whisper pour transcrire les reponses.
     from tools.appels import definir_transcripteur
     definir_transcripteur(lambda chemin: " ".join(
-        s.text for s in whisper.transcribe(chemin, language="fr", beam_size=5)[0]).strip())
+        s.text for s in whisper.transcribe(chemin, language="fr", beam_size=5,
+                           initial_prompt=AMORCE_WHISPER)[0]).strip())
     # V2 (conversation temps reel) : transcription d'un tableau audio (16kHz float32).
     from tools.appel_direct import definir_transcripteur_direct
     definir_transcripteur_direct(lambda audio: " ".join(
-        s.text for s in whisper.transcribe(audio, language="fr", beam_size=1)[0]).strip())
+        s.text for s in whisper.transcribe(audio, language="fr", beam_size=1,
+                           initial_prompt=AMORCE_WHISPER)[0]).strip())
 
     charger_pieces_hue()
     allumer_si_nuit()
