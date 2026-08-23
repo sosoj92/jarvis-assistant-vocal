@@ -75,3 +75,32 @@ def test_ouverture_navigateur_desactivable(monkeypatch):
                         False if chemin == "hud.ouvrir_navigateur" else defaut)
     jarvis14._demarrer_hud()
     assert faux.appels == [False]
+
+
+# ------------------------------------------- enveloppe de la voix pour le HUD
+
+def test_enveloppe_suit_la_parole():
+    """Le coeur doit battre au rythme des syllabes, pas rester fige."""
+    np = pytest.importorskip("numpy")
+    freq = 22050
+    # 1 s de silence puis 1 s de son fort.
+    audio = np.concatenate([
+        np.zeros(freq, dtype=np.int16),
+        (np.sin(np.arange(freq) * 0.1) * 12000).astype(np.int16),
+    ])
+    assert jarvis14._enveloppe_voix(audio, freq, 0.5) < 0.05      # silence
+    assert jarvis14._enveloppe_voix(audio, freq, 1.5) > 0.5       # parole
+
+
+def test_enveloppe_hors_limites_est_nulle():
+    """Apres la fin de la phrase (ou avant), pas d'index negatif ni d'erreur."""
+    np = pytest.importorskip("numpy")
+    audio = np.zeros(1000, dtype=np.int16)
+    assert jarvis14._enveloppe_voix(audio, 22050, 99.0) == 0.0
+    assert jarvis14._enveloppe_voix(audio, 22050, 0.0) == 0.0
+
+
+def test_enveloppe_ne_leve_jamais():
+    """Elle tourne dans la boucle de lecture : une erreur couperait la parole."""
+    assert jarvis14._enveloppe_voix(None, 22050, 1.0) == 0.0
+    assert jarvis14._enveloppe_voix([], 0, 1.0) == 0.0

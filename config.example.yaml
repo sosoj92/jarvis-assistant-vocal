@@ -21,6 +21,11 @@ voix_locale: piper             # mode local : "piper" (recommande FR) ou "kokoro
 
 piper:                         # mode local : voix francaise Piper (voir docs/local.md)
   modele: ""                   # chemin d'un .onnx ; vide = 1er trouve dans voix/
+  # Rendre la voix moins mecanique. Vide = defauts du modele (1.0 / 0.667 / 0.8).
+  vitesse: 1.05                # length_scale : >1 ralentit un peu, plus naturel
+  expressivite: 0.80           # noise_scale : variation de l'intonation
+  variation: 1.0               # noise_w : variation de la duree des syllabes
+  volume: 1.0
 
 kokoro:                        # TTS local alternatif (voix FR unique ; uv add kokoro-onnx)
   modele: ""                   # chemin de kokoro-v1.0.onnx
@@ -57,7 +62,10 @@ audio:
   raccourci_mute: "ctrl+alt+m" # raccourci clavier global : couper/reactiver le wake word ("" = off)
 
 whisper:
-  modele: "medium"
+  # medium est le plus precis, mais le PLUS LENT sur CPU (donc sur Mac, ou il n'y
+  # a pas de CUDA). Mesure sur une phrase de 3,8 s : base 1,4 s | small 3,5 s |
+  # medium 8,5 s. « small » est le meilleur compromis hors GPU NVIDIA.
+  modele: "medium"             # tiny | base | small | medium | large-v3
 
 interruption:                  # couper Jarvis quand tu dis "attends/stop/arrete" par-dessus
   facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis (baisse si ca ne coupe pas)
@@ -274,7 +282,9 @@ spotify:                       # ajouter les musiques reconnues a une playlist ;
 hud:                           # interface « reacteur arc » (page web locale, temps reel)
   actif: true                  # false = pas de HUD du tout
   port: 8770                   # http://127.0.0.1:8770/
-  ouvrir_navigateur: true      # ouvrir l'onglet automatiquement au demarrage
+  ouvrir_navigateur: true      # ouvrir la page automatiquement au demarrage
+  plein_ecran: true            # fenetre DEDIEE plein ecran (Chrome --app) au lieu
+                               # d'un onglet. Touche F dans la page pour basculer.
                                # Sur macOS c'est LA interface : l'overlay flottant
                                # y est impossible (voir INSTALL_MAC.md)
 

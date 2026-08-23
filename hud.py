@@ -280,13 +280,45 @@ def demarrer(ouvrir=True):
     thread = threading.Thread(target=_SERVEUR.serve_forever, daemon=True)
     thread.start()
 
-    print(f"HUD sur http://127.0.0.1:{PORT}/")
+    url = f"http://127.0.0.1:{PORT}/"
+    print(f"HUD sur {url}")
     if ouvrir:
-        try:
-            webbrowser.open(f"http://127.0.0.1:{PORT}/")
-        except Exception:
-            pass
+        _ouvrir_page(url)
     return _SERVEUR
+
+
+def _ouvrir_page(url):
+    """Ouvre le HUD, si possible dans une FENETRE DEDIEE plein ecran.
+
+    Chrome/Edge en mode --app donnent une fenetre sans barre d'adresse ni
+    onglets : le HUD occupe tout l'ecran, comme un vrai tableau de bord. A
+    defaut, on retombe sur l'onglet classique du navigateur par defaut.
+    """
+    plein = True
+    try:
+        from core.config import reglage
+        plein = bool(reglage("hud.plein_ecran", True))
+    except Exception:
+        pass
+
+    if plein:
+        try:
+            from core import plateforme
+            exe = plateforme.chrome_exe()
+            if exe:
+                import subprocess
+                subprocess.Popen(
+                    [exe, f"--app={url}", "--start-fullscreen", "--new-window",
+                     f"--user-data-dir={plateforme.dossier_donnees('ChromeJarvisHUD')}"],
+                    **plateforme.detache())
+                return
+        except Exception:
+            pass          # pas de Chrome, ou lancement refuse : onglet classique
+
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- demonstration

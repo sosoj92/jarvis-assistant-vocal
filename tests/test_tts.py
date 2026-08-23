@@ -143,3 +143,34 @@ def test_hybride_sans_cle_bascule_sur_piper(monkeypatch):
 def test_hybride_sans_cle_ni_piper_reste_sur_elevenlabs(monkeypatch):
     """Rien d'installe : on garde ElevenLabs, qui rendra None -> voix de l'OS."""
     assert _fabrique(monkeypatch, "hybride", "", False).nom == "ElevenLabs"
+
+
+# ------------------------------------------------- reglages de voix (Piper)
+
+def test_sans_reglage_on_garde_les_defauts_du_modele(monkeypatch):
+    """Aucun SynthesisConfig si rien n'est configure : le .onnx decide."""
+    monkeypatch.setattr(tts, "reglage", lambda chemin, defaut=None: defaut)
+    assert tts.PiperProvider()._synthese() is None
+
+
+def test_reglages_transmis_a_piper(monkeypatch):
+    pytest.importorskip("piper")
+    vals = {"piper.vitesse": 1.05, "piper.expressivite": 0.8,
+            "piper.variation": 1.0, "piper.volume": 1.0}
+    monkeypatch.setattr(tts, "reglage",
+                        lambda chemin, defaut=None: vals.get(chemin, defaut))
+    cfg = tts.PiperProvider()._synthese()
+    assert cfg.length_scale == 1.05
+    assert cfg.noise_scale == 0.8
+    assert cfg.noise_w_scale == 1.0
+
+
+def test_reglage_partiel_ne_force_pas_le_reste(monkeypatch):
+    """Ne regler que la vitesse ne doit pas ecraser l'intonation du modele."""
+    pytest.importorskip("piper")
+    monkeypatch.setattr(tts, "reglage",
+                        lambda chemin, defaut=None:
+                        1.2 if chemin == "piper.vitesse" else defaut)
+    cfg = tts.PiperProvider()._synthese()
+    assert cfg.length_scale == 1.2
+    assert cfg.noise_scale is None and cfg.noise_w_scale is None

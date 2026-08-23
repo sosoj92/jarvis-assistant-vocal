@@ -294,18 +294,42 @@ def couper_parole():
             pass
 
 
+def _enveloppe_voix(audio, frequence, seconde):
+    """Niveau 0..1 de la voix a l'instant `seconde` de la lecture.
+
+    Sert a faire pulser le coeur du HUD au rythme reel de ce que Jarvis dit,
+    au lieu d'un etat « parole » figé. Fenetre de 40 ms, comme un vumetre.
+    """
+    try:
+        debut = int(seconde * frequence)
+        fenetre = audio[debut:debut + max(1, int(frequence * 0.04))]
+        if fenetre.size == 0:
+            return 0.0
+        rms = float(np.sqrt(np.mean((fenetre.astype(np.float32) / 32768.0) ** 2)))
+        return float(min(1.0, rms * 3.2))     # la parole depasse rarement 0.3 en RMS
+    except Exception:
+        return 0.0
+
+
 def _jouer_audio(audio, frequence):
-    """Joue un tableau int16 mono sur le haut-parleur, interruptible."""
+    """Joue un tableau int16 mono sur le haut-parleur, interruptible.
+
+    Pousse au passage l'enveloppe de la voix au HUD : le reacteur bat au rythme
+    de la phrase prononcee.
+    """
     if _INTERRUPTION.is_set():
         return
     sd.play(audio, samplerate=frequence, device=_haut_parleur())
+    debut = time.monotonic()
     while not _INTERRUPTION.is_set():
         courant = sd.get_stream()
         if courant is None or not courant.active:
             break
+        _hud("niveau", _enveloppe_voix(audio, frequence, time.monotonic() - debut))
         time.sleep(0.03)
     if _INTERRUPTION.is_set():
         sd.stop()
+    _hud("niveau", 0.0)          # le coeur retombe des la fin de la phrase
 
 
 def dire(texte, interruptible=True):

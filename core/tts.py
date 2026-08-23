@@ -121,6 +121,34 @@ class PiperProvider(ProviderTTS):
     def __init__(self):
         self.modele = reglage("piper.modele", "")
         self._voix = None
+        self._config = None
+
+    def _synthese(self):
+        """SynthesisConfig depuis config.yaml, ou None pour les defauts du modele.
+
+        Les trois leviers qui rendent une voix Piper moins mecanique :
+          vitesse      (length_scale) : >1 ralentit, <1 accelere
+          expressivite (noise_scale)  : variation de l'intonation
+          variation    (noise_w)      : variation de la duree des syllabes
+        Piper part de 1.0 / 0.667 / 0.8 ; monter les deux derniers donne un
+        debit moins regulier, donc plus humain.
+        """
+        if self._config is not None:
+            return self._config or None
+        try:
+            from piper import SynthesisConfig
+        except ImportError:
+            self._config = False
+            return None
+        reglages = {
+            "length_scale": reglage("piper.vitesse", None),
+            "noise_scale": reglage("piper.expressivite", None),
+            "noise_w_scale": reglage("piper.variation", None),
+            "volume": reglage("piper.volume", None),
+        }
+        reglages = {k: float(v) for k, v in reglages.items() if v is not None}
+        self._config = SynthesisConfig(**reglages) if reglages else False
+        return self._config or None
 
     def _chemin(self):
         if not self.modele:
@@ -143,7 +171,10 @@ class PiperProvider(ProviderTTS):
         """
         if hasattr(self._voix, "synthesize"):
             morceaux, frequence = [], None
-            for bloc in self._voix.synthesize(texte):
+            reglages = self._synthese()
+            flux = (self._voix.synthesize(texte, reglages) if reglages
+                    else self._voix.synthesize(texte))
+            for bloc in flux:
                 morceaux.append(bloc.audio_int16_bytes)
                 if frequence is None:
                     frequence = bloc.sample_rate
