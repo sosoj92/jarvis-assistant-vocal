@@ -2,7 +2,8 @@
 Assistant vocal local, avec mot d'activation et actions.
 
 Dites « Hey Jarvis », parlez, taisez-vous. Il repond et agit.
-Chaine : openWakeWord -> faster-whisper -> Claude (+ outils) -> ElevenLabs/SAPI
+Chaine : openWakeWord -> faster-whisper -> Claude (+ outils) -> ElevenLabs/Piper
+(repli sur la voix integree a l'OS : SAPI, `say` sur macOS, espeak sur Linux)
 
 Architecture : les outils vivent dans tools/ (auto-decouverts via core.registre),
 les reglages et secrets dans config.yaml (via core.config).
@@ -35,21 +36,24 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from openwakeword.model import Model as WakeModel
 
-from core import config, journal, memoire, personnalite, registre, voix
+from core import config, journal, memoire, personnalite, plateforme, registre, voix
 from core.util import sans_accents
 from tools.lumieres import allumer_si_nuit, charger_pieces_hue
 
 # ---------------------------------------------------------------- reglages
 
-MICRO = config.reglage("audio.micro", 1)
-# None = sortie audio par defaut de Windows (suit l'enceinte/casque actif).
-HAUT_PARLEUR = config.reglage("audio.haut_parleur", None)
+# Index (ou nom) du micro. Par defaut : 1 sur Windows (historique), l'entree
+# systeme sur macOS/Linux, ou l'index 1 designe souvent une SORTIE.
+MICRO = plateforme.peripherique_audio(
+    config.reglage("audio.micro", plateforme.micro_defaut()))
+# None = sortie audio par defaut de l'OS (suit l'enceinte/casque actif).
+HAUT_PARLEUR = plateforme.peripherique_audio(config.reglage("audio.haut_parleur", None))
 
 
 def _haut_parleur():
     """Peripherique de sortie TTS COURANT (lu en direct : changeable a la voix via
-    l'outil sortie_audio -> config.definir). None = sortie par defaut de Windows."""
-    return config.reglage("audio.haut_parleur", None)
+    l'outil sortie_audio -> config.definir). None = sortie par defaut de l'OS."""
+    return plateforme.peripherique_audio(config.reglage("audio.haut_parleur", None))
 
 # Le choix du modele LLM (Claude/Ollama) et de la voix (ElevenLabs/Piper) est gere
 # par les providers (core/llm.py, core/tts.py), selon config.yaml (mode: cloud|local).
@@ -254,7 +258,7 @@ def basculer_micro(force=None):
 
 
 def couper_parole():
-    """Arrete immediatement la synthese en cours (ElevenLabs ou SAPI)."""
+    """Arrete immediatement la synthese en cours (ElevenLabs, Piper ou voix OS)."""
     _INTERRUPTION.set()
     try:
         sd.stop()          # coupe la lecture ElevenLabs sur le haut-parleur
@@ -284,7 +288,7 @@ def _jouer_audio(audio, frequence):
 
 def dire(texte, interruptible=True):
     """Prononce un texte via le provider TTS courant (ElevenLabs en cloud, Piper en
-    local) ; repli sur la voix Windows (SAPI) si le provider est indisponible.
+    local) ; repli sur la voix integree a l'OS si le provider est indisponible.
 
     interruptible=False : le barge-in est desactive pendant cette phrase (utilise
     pour la question de confirmation : la reponse de l'utilisateur est un oui/non,
@@ -301,49 +305,36 @@ def dire(texte, interruptible=True):
         if resultat is not None:
             _jouer_audio(*resultat)
         else:
-            _dire_sapi(texte)
+            _dire_voix_systeme(texte)
     finally:
         _PARLE.clear()    # fin de la parole : plus d'interruption possible
 
 
-def _dire_sapi(texte):
-    """Synthese vocale Windows (SAPI), voix francaise si disponible.
+def _dire_voix_systeme(texte):
+    """Voix integree a l'OS : SAPI (Windows), `say` (macOS), espeak (Linux).
 
-    Le texte est envoye au script PowerShell par l'entree standard, jamais dans
-    -Command : une apostrophe francaise ne peut pas casser le littoral. Le flux
-    stdin est lu en UTF-8. L'appel est interruptible via couper_parole().
+    C'est le dernier recours quand ElevenLabs ou Piper ne rendent rien. Le texte
+    est envoye au moteur par l'entree standard, jamais sur la ligne de commande :
+    une apostrophe francaise ne peut donc pas casser le littoral. L'appel est
+    interruptible via couper_parole().
     """
     global _PROCESSUS_PAROLE
 
     if _INTERRUPTION.is_set():
         return
 
-    script = (
-        "[Console]::InputEncoding = [Text.Encoding]::UTF8; "
-        "$t = [Console]::In.ReadToEnd(); "
-        "Add-Type -AssemblyName System.Speech; "
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-        "$fr = $s.GetInstalledVoices() | "
-        "Where-Object { $_.VoiceInfo.Culture.Name -like 'fr*' } | "
-        "Select-Object -First 1; "
-        "if ($fr) { $s.SelectVoice($fr.VoiceInfo.Name) }; "
-        "$s.Rate = 1; "
-        "$s.Speak($t)"
-    )
+    processus = plateforme.parler_systeme(texte)
+    if processus is None:
+        print(f"  [voix] aucune voix systeme disponible ({plateforme.SYSTEME}).")
+        return
 
-    processus = subprocess.Popen(
-        ["powershell", "-NoProfile", "-Command", script],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
     _PROCESSUS_PAROLE = processus
     try:
         _, erreurs = processus.communicate(input=texte.encode("utf-8"))
         if processus.returncode and not _INTERRUPTION.is_set():
             details = (erreurs or b"").decode("utf-8", "replace").strip()
-            print(f"  [SAPI] echec (code {processus.returncode}) : {details}")
+            print(f"  [{plateforme.nom_voix_systeme()}] echec "
+                  f"(code {processus.returncode}) : {details}")
     finally:
         _PROCESSUS_PAROLE = None
 
@@ -633,7 +624,9 @@ def repondre(historique):
 
 
 def _ajouter_dll_nvidia():
-    """Rend les DLL cuBLAS et cuDNN visibles pour faster-whisper."""
+    """Rend les DLL cuBLAS et cuDNN visibles pour faster-whisper (Windows/Linux)."""
+    if plateforme.EST_MAC:
+        return                      # pas de CUDA sur Mac : rien a rendre visible
     racines = []
     try:
         import nvidia
@@ -663,16 +656,27 @@ def _ajouter_dll_nvidia():
 
 
 def charger_whisper():
-    """Charge Whisper sur GPU si possible, sinon sur CPU."""
+    """Charge Whisper sur GPU si possible, sinon sur CPU.
+
+    Sur Mac, CTranslate2 (moteur de faster-whisper) ne gere pas Metal : on va
+    directement au CPU, tres correct sur Apple Silicon en int8. Inutile donc
+    d'afficher un message d'echec CUDA qui inquiete pour rien.
+    """
     _ajouter_dll_nvidia()
 
-    try:
-        modele = WhisperModel(MODELE_WHISPER, device="cuda", compute_type="float16")
-        modele.transcribe(np.zeros(TAUX, dtype=np.float32), language="fr")
-        print(f"Whisper {MODELE_WHISPER} sur GPU.")
-        return modele
-    except Exception as e:
-        print(f"GPU indisponible ({type(e).__name__}), bascule sur CPU.")
+    accelerateur, precision = plateforme.accelerateur_whisper()
+    if accelerateur == "cpu":
+        puce = "Apple Silicon" if plateforme.est_apple_silicon() else "CPU"
+        print(f"Whisper sur {puce} (pas de CUDA sur ce systeme).")
+    else:
+        try:
+            modele = WhisperModel(MODELE_WHISPER, device=accelerateur,
+                                  compute_type=precision)
+            modele.transcribe(np.zeros(TAUX, dtype=np.float32), language="fr")
+            print(f"Whisper {MODELE_WHISPER} sur GPU.")
+            return modele
+        except Exception as e:
+            print(f"GPU indisponible ({type(e).__name__}), bascule sur CPU.")
 
     for taille in (MODELE_WHISPER, "small"):
         try:
@@ -942,10 +946,38 @@ def _feedback_geste(geste):
     _hud("outil", "geste", geste)
 
 
+def _raccourcis_possibles():
+    """Vrai si les raccourcis clavier GLOBAUX sont installables sur ce systeme.
+
+    La lib `keyboard` lit le clavier au niveau du pilote : elle exige les droits
+    root sur macOS et Linux. Plutot que de faire planter Jarvis (ou d'exiger
+    sudo), on saute proprement les raccourcis et on le dit une fois.
+    """
+    if plateforme.EST_WINDOWS:
+        return True
+    return getattr(os, "geteuid", lambda: 1)() == 0
+
+
+_RACCOURCIS_ANNONCES = False
+
+
+def _annoncer_raccourcis_indispo():
+    global _RACCOURCIS_ANNONCES
+    if _RACCOURCIS_ANNONCES:
+        return
+    _RACCOURCIS_ANNONCES = True
+    print("Raccourcis clavier globaux desactives : ils demandent les droits root "
+          f"sur {plateforme.SYSTEME}. Utilise la voix, le panneau web, ou un "
+          "raccourci Automator/Raccourcis (voir TROUBLESHOOTING_MAC.md).")
+
+
 def _installer_raccourci_gestes():
     """Raccourci clavier global pour basculer les gestes (optionnel, via 'keyboard')."""
     combo = config.reglage("gestes.raccourci", "ctrl+alt+g")
     if not combo:
+        return
+    if not _raccourcis_possibles():
+        _annoncer_raccourcis_indispo()
         return
     try:
         import keyboard
@@ -967,6 +999,9 @@ def _installer_raccourci_micro():
     """Raccourci clavier global pour couper/reactiver le wake word (mute micro)."""
     combo = config.reglage("audio.raccourci_mute", "ctrl+alt+m")
     if not combo:
+        return
+    if not _raccourcis_possibles():
+        _annoncer_raccourcis_indispo()
         return
     try:
         import keyboard

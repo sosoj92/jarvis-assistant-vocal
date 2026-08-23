@@ -11,22 +11,21 @@ import subprocess
 import threading
 from pathlib import Path
 
-from core import hub_contenu, voix
+from core import hub_contenu, plateforme, voix
 from core.config import reglage
 from core.registre import outil
 from tools.deleguer_a_hermes import deleguer_en_fond
 
 
 def _bash() -> str:
-    """Git Bash (les scripts du projet Scripts sont en bash + cygpath)."""
+    """Interpreteur bash (les scripts du projet Scripts sont en bash + cygpath).
+
+    Natif sur macOS/Linux ; Git Bash sur Windows.
+    """
     cfg = reglage("integrations.bash", "")
     if cfg:
         return cfg
-    for c in (r"C:\Program Files\Git\bin\bash.exe",
-              r"C:\Program Files\Git\usr\bin\bash.exe"):
-        if Path(c).exists():
-            return c
-    return shutil.which("bash") or "bash"
+    return plateforme.bash_exe()
 
 
 @outil(

@@ -2,8 +2,10 @@
 dit, en complément (ou à la place) de la voix. JARVIS PUR : affichage local, temps
 réel, zéro réseau.
 
-Techno : fenêtre **native tkinter** (stdlib, aucun paquet) + appels **Win32 (ctypes)**.
-C'est la seule voie fiable sur Windows pour la RÈGLE D'OR — jamais de vol de focus :
+Techno : fenêtre **native tkinter** (stdlib, aucun paquet) + appels **Win32 (ctypes)**
+sur Windows, **Cocoa via tkinter** sur macOS.
+
+Sur Windows (RÈGLE D'OR — jamais de vol de focus) :
   - WS_EX_NOACTIVATE  : la fenêtre n'attrape jamais le focus clavier (pas d'alt-tab
                         de ton jeu/appli).
   - WS_EX_TRANSPARENT : clic-transparent par défaut (les clics passent au travers) ;
@@ -13,6 +15,14 @@ C'est la seule voie fiable sur Windows pour la RÈGLE D'OR — jamais de vol de 
   - -topmost          : toujours au-dessus.
   - SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) : visible pour toi, INVISIBLE
                         pour OBS/game-capture (tes réponses n'apparaissent pas en live).
+Sur macOS, tkinter expose deux des quatre garanties : `-topmost` (toujours au-dessus)
+et `-alpha` (opacité). On ajoute `-type utility` quand Tk le supporte, pour ne pas
+apparaître dans le Dock ni voler le focus au premier plan. En revanche il n'existe
+pas d'équivalent tkinter à WS_EX_TRANSPARENT (clic-transparent) ni à
+WDA_EXCLUDEFROMCAPTURE : sur Mac, l'overlay est cliquable, et il EST visible pour
+OBS — si tu streames, place-le sur un écran non capturé (overlay.ecran) ou coupe-le
+(overlay.actif: false). C'est dit honnêtement plutôt que promis à moitié.
+
 Limite honnête : un jeu en plein écran EXCLUSIF (pas borderless) peut masquer tout
 overlay — la plupart des jeux tournent en borderless, donc OK.
 
@@ -28,6 +38,7 @@ import threading
 import time
 
 _WIN = sys.platform == "win32"
+_MAC = sys.platform == "darwin"
 
 # Réglages par défaut (surchargés par config.yaml -> overlay.*).
 _CFG = {
@@ -115,6 +126,15 @@ def configurer(**kw):
     _Q.put(("config", None))
 
 
+def _polices():
+    """(police semi-grasse, police normale) disponibles sur ce système."""
+    if _MAC:
+        return "SF Pro Display Semibold", "SF Pro Display"
+    if _WIN:
+        return "Segoe UI Semibold", "Segoe UI"
+    return "DejaVu Sans Bold", "DejaVu Sans"
+
+
 # ============================================================ thread tkinter
 
 def _boucle():
@@ -145,17 +165,20 @@ def _boucle():
     corps = tk.Frame(cadre, bg=fond)
     corps.pack(side="left", fill="both", expand=True, padx=14, pady=12)
 
+    # Segoe UI n'existe que sur Windows : chaque OS a sa police système.
+    demi, normale = _polices()
+
     lbl_tag = tk.Label(corps, text="JARVIS", bg=fond, fg=accent,
-                       font=("Segoe UI Semibold", 9), anchor="w")
+                       font=(demi, 9), anchor="w")
     lbl_tag.pack(fill="x")
     lbl_titre = tk.Label(corps, text="", bg=fond, fg=txtcol, justify="left",
-                         anchor="w", font=("Segoe UI Semibold", 15),
+                         anchor="w", font=(demi, 15),
                          wraplength=_CFG["largeur"] - 40)
     lbl_corps = tk.Label(corps, text="", bg=fond, fg=txtcol, justify="left",
-                         anchor="w", font=("Segoe UI", 12),
+                         anchor="w", font=(normale, 12),
                          wraplength=_CFG["largeur"] - 40)
     lbl_pied = tk.Label(corps, text="", bg=fond, fg=dim, anchor="w",
-                        font=("Segoe UI", 9))
+                        font=(normale, 9))
 
     _ETAT.update({"root": root, "labels": {
         "tag": lbl_tag, "titre": lbl_titre, "corps": lbl_corps, "pied": lbl_pied,
@@ -175,7 +198,10 @@ def _boucle():
 
 
 def _init_styles(root):
-    """Applique les styles Win32 (une fois la fenêtre créée)."""
+    """Applique les styles natifs (une fois la fenêtre créée)."""
+    if _MAC:
+        _init_styles_mac(root)
+        return
     if not _WIN:
         return
     try:
@@ -185,6 +211,20 @@ def _init_styles(root):
                          | _WS_EX_TOPMOST)
         _set_transparent(h, True)
         _exclure_capture(h, bool(_CFG.get("exclure_obs", True)))
+    except Exception:
+        pass
+
+
+def _init_styles_mac(root):
+    """macOS : fenêtre flottante utilitaire, au-dessus, sans entrée dans le Dock."""
+    for attribut, valeur in (("-topmost", True), ("-type", "utility")):
+        try:
+            root.wm_attributes(attribut, valeur)
+        except Exception:
+            pass          # -type n'existe pas sur toutes les versions de Tk
+    try:
+        # Empêche l'overlay de devenir la fenêtre active au moment de l'affichage.
+        root.wm_attributes("-alpha", float(_CFG["opacite"]))
     except Exception:
         pass
 
@@ -343,6 +383,13 @@ def _rect_moniteur(index):
 
 
 def _enum_moniteurs():
+    """Rectangles des écrans, principal en premier. Liste vide si indisponible."""
+    if _MAC:
+        try:
+            from core import plateforme
+            return plateforme.moniteurs()
+        except Exception:
+            return []
     if not _WIN:
         return []
     try:
@@ -372,7 +419,11 @@ def _enum_moniteurs():
 
 def _surveiller_survol(root):
     """Rend l'overlay interactif UNIQUEMENT quand la souris est dessus (sinon
-    clic-transparent), pour pouvoir épingler/copier sans jamais gêner."""
+    clic-transparent), pour pouvoir épingler/copier sans jamais gêner.
+
+    macOS n'offre pas de clic-transparent via tkinter : l'overlay y reste
+    cliquable en permanence (le pied de carte le signale une fois affiché).
+    """
     if _WIN and _ETAT.get("hwnd"):
         try:
             dedans = _souris_dans(root)

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import yaml
 
+from core import plateforme
 from core.config import reglage
 from core.panneau import _local_seulement   # même garde local que le panneau
 
@@ -32,6 +33,7 @@ _ETAT_ABO = _DOSSIER / ".etat_abonnements.json"   # pour détecter « montant ch
 # ============================================================ fenêtre app
 
 def _navigateur():
+    """Navigateur Chromium a utiliser pour la fenetre app (--app)."""
     chemin = reglage("cockpit.navigateur", "")
     if chemin and Path(chemin).exists():
         return chemin
@@ -39,13 +41,7 @@ def _navigateur():
         exe = shutil.which(nom)
         if exe:
             return exe
-    for p in (r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-              r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-              r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-              r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"):
-        if Path(p).exists():
-            return p
-    return None
+    return plateforme.chrome_exe()
 
 
 def ouvrir_fenetre():
@@ -64,8 +60,7 @@ def ouvrir_fenetre():
         return
     args = [exe, f"--app={url}", "--new-window"]
     try:
-        import overlay
-        rects = overlay._enum_moniteurs()
+        rects = plateforme.moniteurs()
         idx = int(reglage("cockpit.ecran", 0))
         if rects and 0 <= idx < len(rects):
             l, t, _, _ = rects[idx]

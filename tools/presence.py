@@ -5,10 +5,10 @@
 - De retour -> active le mode "retour" (facultatif).
 - Journalise les evenements et se desactive/reactive a la voix.
 """
-import subprocess
 import threading
 import time
 
+from core import plateforme
 from core.config import definir, reglage
 from core.journal import obtenir
 from core.registre import outil
@@ -20,16 +20,8 @@ _ETAT = {"actif": True, "present": None, "absent_depuis": None}
 
 
 def _joignable(ip):
-    """Vrai si l'IP repond au ping (Windows). Sans fenetre console."""
-    try:
-        r = subprocess.run(
-            ["ping", "-n", "1", "-w", "800", ip],
-            capture_output=True, text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        return "TTL=" in r.stdout.upper()
-    except Exception:
-        return False
+    """Vrai si l'IP repond au ping. Multiplateforme, sans fenetre console."""
+    return plateforme.ping(ip, timeout_ms=800)
 
 
 def _boucle():

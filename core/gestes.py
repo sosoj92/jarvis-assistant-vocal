@@ -17,6 +17,7 @@ import threading
 import time
 from pathlib import Path
 
+from core import plateforme
 from core.config import reglage
 from core.util import sans_accents
 
@@ -227,38 +228,25 @@ def _obs_scene(sens, force=False):
 
 # ----- swipe CONTEXTUEL : OBS -> app vidéo (seek) -> Alt+Tab (du + spécifique au + général)
 
+# Noms de processus (Windows : .exe ; macOS : nom de l'application).
 _LECTEURS = ("vlc", "mpv", "wmplayer", "mpc-hc", "mpc-be", "potplayer", "smplayer",
-             "kmplayer", "movies", "films")
+             "kmplayer", "movies", "films",
+             "iina", "quicktime player", "musique", "music", "tv", "infuse")
 _VIDEO_TITRES = ("youtube", "vlc", "netflix", "twitch", "prime video", "disney",
                  "molotov", "- vlc", "lecteur", ".mp4", ".mkv", ".avi", ".mov")
-_NAVIGATEURS = ("chrome", "firefox", "msedge", "brave", "opera")
+_NAVIGATEURS = ("chrome", "firefox", "msedge", "brave", "opera", "safari", "arc",
+                "microsoft edge", "google chrome")
 
 
 def _fenetre_active():
-    """(titre, processus) de la fenêtre au premier plan (Windows). ('', '') sinon."""
-    try:
-        import ctypes
-        from ctypes import wintypes
-        u = ctypes.windll.user32
-        h = u.GetForegroundWindow()
-        n = u.GetWindowTextLengthW(h)
-        buf = ctypes.create_unicode_buffer(n + 1)
-        u.GetWindowTextW(h, buf, n + 1)
-        titre = buf.value or ""
-        pid = wintypes.DWORD()
-        u.GetWindowThreadProcessId(h, ctypes.byref(pid))
-        proc = ""
-        k = ctypes.windll.kernel32
-        hp = k.OpenProcess(0x1000, False, pid.value)   # PROCESS_QUERY_LIMITED_INFORMATION
-        if hp:
-            taille = wintypes.DWORD(260)
-            nom = ctypes.create_unicode_buffer(260)
-            if k.QueryFullProcessImageNameW(hp, 0, nom, ctypes.byref(taille)):
-                proc = nom.value.rsplit("\\", 1)[-1]
-            k.CloseHandle(hp)
-        return titre, proc.lower()
-    except Exception:
-        return "", ""
+    """(titre, processus) de la fenêtre au premier plan. ('', '') si inaccessible.
+
+    Implémenté par OS dans core/plateforme (Win32 sur Windows, NSWorkspace +
+    CoreGraphics sur macOS). Sur macOS, le titre peut rester vide tant que
+    l'autorisation « Enregistrement de l'écran » n'est pas accordée ; le nom de
+    l'application, lui, est toujours là — c'est ce qui décide de la cascade.
+    """
+    return plateforme.fenetre_active()
 
 
 def _obs_actif():
@@ -303,24 +291,16 @@ def _swipe(sens):
     titre, proc = _fenetre_active()
     # 2) app vidéo -> seek
     if _est_app_video(titre, proc):
-        try:
-            import keyboard
-            youtube = "youtube" in sans_accents(titre.lower()) or \
-                any(b in proc for b in _NAVIGATEURS)
-            if youtube:
-                keyboard.send("l" if suivant else "j")     # YouTube ±10 s
-            else:
-                keyboard.send("right" if suivant else "left")  # lecteurs (VLC…)
-        except Exception:
-            pass
+        youtube = "youtube" in sans_accents(titre.lower()) or \
+            any(b in proc for b in _NAVIGATEURS)
+        if youtube:
+            plateforme.envoyer_touches("l" if suivant else "j")     # YouTube ±10 s
+        else:
+            plateforme.envoyer_touches("right" if suivant else "left")  # VLC…
         _overlay_geste("🎬 +10s" if suivant else "🎬 -10s")
         return
-    # 3) défaut -> Alt+Tab
-    try:
-        import keyboard
-        keyboard.send("alt+tab" if suivant else "alt+shift+tab")
-    except Exception:
-        pass
+    # 3) défaut -> bascule de fenêtre (Alt+Tab, ou Cmd+Tab sur macOS)
+    plateforme.envoyer_touches("alt+tab" if suivant else "alt+shift+tab")
     _overlay_geste("🪟 Fenêtre " + ("suivante" if suivant else "précédente"))
 
 

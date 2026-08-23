@@ -34,6 +34,7 @@ try:
 except Exception:
     pass
 
+from core import plateforme
 from core.config import reglage
 
 LOG = logging.getLogger("jarvis")
@@ -54,14 +55,14 @@ if not _LOGH.handlers:
 def _python() -> str:
     """Python qui possede les deps d'ingest.py (yt-dlp, faster-whisper, gallery-dl) :
     le python SYSTEME, PAS le venv de Jarvis (qui ne les a pas). Configurable via
-    integrations.python."""
+    integrations.python.
+
+    Windows : C:\\Python313 ; macOS : le python3 de Homebrew ; sinon le PATH.
+    """
     cfg = reglage("integrations.python", "")
     if cfg:
         return cfg
-    cand = r"C:\Python313\python.exe"
-    if Path(cand).exists():
-        return cand
-    return shutil.which("python") or "python"
+    return plateforme.python_systeme()
 
 
 _URL_INSTA_TIKTOK = re.compile(

@@ -1,31 +1,14 @@
-"""Outils systeme Windows : lancer une application, controler le media, le volume,
-et l'extinction propre du PC (N3, avec delai annulable)."""
-import ctypes
-import os
-import subprocess
-import time
-import webbrowser
-from pathlib import Path
+"""Outils systeme : lancer une application, controler le media, le volume, et
+l'extinction propre de l'ordinateur (N3, avec delai annulable).
 
+Tout le specifique OS (touches multimedia, volume, extinction) est delegue a
+core/plateforme.py : ce module ne connait ni Windows, ni macOS, ni Linux.
+"""
+from core import plateforme
 from core.config import reglage
 from core.registre import outil
 
-# Codes des touches multimedia Windows
-_TOUCHES = {
-    "muet": 0xAD,
-    "baisser": 0xAE,
-    "monter": 0xAF,
-    "suivant": 0xB0,
-    "precedent": 0xB1,
-    "pause": 0xB3,
-}
-
-
-def _presser(code, fois=1):
-    for _ in range(fois):
-        ctypes.windll.user32.keybd_event(code, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(code, 0, 2, 0)
-        time.sleep(0.02)
+_ACTIONS_MEDIA = ("pause", "suivant", "precedent", "muet")
 
 
 @outil(
@@ -47,33 +30,39 @@ def ouvrir_application(nom: str) -> str:
     """Lance une application ou un site."""
     nom_min = nom.lower().strip()
 
-    raccourcis = {
+    # Raccourcis communs, avec la cible propre a chaque systeme quand elle differe.
+    communs = {
         "spotify": "spotify:",
-        "discord": None,  # traite plus bas
         "navigateur": "https://www.google.com",
         "internet": "https://www.google.com",
         "youtube": "https://www.youtube.com",
-        "calculatrice": "calc",
-        "bloc-notes": "notepad",
-        "explorateur": "explorer",
-        "parametres": "ms-settings:",
+        "discord": "Discord" if not plateforme.EST_WINDOWS else None,
     }
+    par_os = {
+        "calculatrice": "Calculator" if plateforme.EST_MAC else "calc",
+        "bloc-notes": "TextEdit" if plateforme.EST_MAC else "notepad",
+        "explorateur": "Finder" if plateforme.EST_MAC else "explorer",
+        "parametres": ("x-apple.systempreferences:" if plateforme.EST_MAC
+                       else "ms-settings:"),
+        "terminal": "Terminal" if plateforme.EST_MAC else "cmd",
+    }
+    raccourcis = {**communs, **par_os}
 
-    if nom_min == "discord":
-        base = Path(os.environ.get("LOCALAPPDATA", "")) / "Discord"
-        maj = base / "Update.exe"
+    if nom_min == "discord" and plateforme.EST_WINDOWS:
+        import subprocess
+        maj = plateforme.dossier_donnees("Discord") / "Update.exe"
         if maj.exists():
             subprocess.Popen([str(maj), "--processStart", "Discord.exe"])
             return "Discord lance."
         return "Discord introuvable."
 
-    cible = raccourcis.get(nom_min, nom)
+    cible = raccourcis.get(nom_min) or nom
 
     try:
         if str(cible).startswith("http"):
-            webbrowser.open(cible)
+            plateforme.ouvrir_url(cible)
         else:
-            subprocess.Popen(f'start "" "{cible}"', shell=True)
+            plateforme.ouvrir(cible)
         return f"{nom} lance."
     except Exception as e:
         return f"Impossible de lancer {nom} : {e}"
@@ -97,15 +86,19 @@ def ouvrir_application(nom: str) -> str:
 def controler_media(action: str) -> str:
     """Controle la lecture et le volume.
 
-    action : pause, suivant, precedent, monter, baisser, muet
+    action : pause, suivant, precedent, muet
     """
     action = action.lower().strip()
-    if action not in _TOUCHES:
+    if action not in _ACTIONS_MEDIA:
         return f"Action inconnue : {action}"
 
-    fois = 5 if action in ("monter", "baisser") else 1
-    _presser(_TOUCHES[action], fois)
-    return f"Fait : {action}."
+    if plateforme.media(action):
+        return f"Fait : {action}."
+    if plateforme.EST_MAC:
+        return ("Je n'ai pas pu piloter la lecture. Autorise Jarvis dans Reglages "
+                "Systeme > Confidentialite et securite > Accessibilite, ou ouvre "
+                "un lecteur reconnu (Spotify, Musique).")
+    return f"Je n'ai pas pu faire : {action}."
 
 
 @outil(
@@ -128,7 +121,12 @@ def regler_volume(sens: str, crans: int = 10) -> str:
     sens = sens.lower().strip()
     if sens not in ("monter", "baisser"):
         return "Sens invalide."
-    _presser(_TOUCHES[sens], max(1, min(crans, 50)))
+    try:
+        niveau = plateforme.volume_ajuster(sens, crans)
+    except Exception as e:
+        return f"Je n'ai pas pu regler le volume ({e})."
+    if niveau >= 0:
+        return f"Volume {sens}, a {niveau} %."
     return f"Volume {sens}."
 
 
@@ -136,23 +134,23 @@ def regler_volume(sens: str, crans: int = 10) -> str:
 
 def _annonce_extinction(_args):
     delai = int(reglage("assistant.delai_extinction", 30))
-    return (f"Je vais couper les lumieres puis eteindre le PC dans {delai} secondes, "
-            "annulable en disant « annule l'extinction »")
+    return (f"Je vais couper les lumieres puis eteindre l'ordinateur dans {delai} "
+            "secondes, annulable en disant « annule l'extinction »")
 
 
 @outil(
     nom="eteindre_pc",
-    description="Eteint proprement l'ordinateur (extinction Windows). A n'utiliser QUE si "
-                "l'utilisateur demande explicitement d'eteindre le PC/l'ordinateur "
-                "('eteins le PC', 'arrete l'ordinateur', 'coupe le PC'). Coupe d'abord les "
-                "lumieres (scene d'extinction), puis programme l'arret avec un delai "
-                "annulable en disant « annule l'extinction ». N'est JAMAIS declenchable a "
-                "distance.",
+    description="Eteint proprement l'ordinateur. A n'utiliser QUE si "
+                "l'utilisateur demande explicitement d'eteindre le PC/le Mac/"
+                "l'ordinateur ('eteins le PC', 'arrete l'ordinateur', 'coupe le "
+                "Mac'). Coupe d'abord les lumieres (scene d'extinction), puis "
+                "programme l'arret avec un delai annulable en disant « annule "
+                "l'extinction ». N'est JAMAIS declenchable a distance.",
     confirmation=True,
     annonce=_annonce_extinction,
 )
 def eteindre_pc() -> str:
-    """Scene d'extinction (lumieres) PUIS arret Windows programme, annulable (shutdown /a)."""
+    """Scene d'extinction (lumieres) PUIS arret programme, annulable."""
     # 1) Scene d'extinction AVANT l'arret (coupe les lumieres, etc.).
     try:
         from tools import modes
@@ -162,32 +160,29 @@ def eteindre_pc() -> str:
     # 2) Arret programme, annulable pendant le delai.
     delai = max(5, int(reglage("assistant.delai_extinction", 30)))
     try:
-        r = subprocess.run(
-            ["shutdown", "/s", "/t", str(delai), "/c",
-             "Extinction demandee via Jarvis. Dis « annule l'extinction » pour l'arreter."],
-            capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if r.returncode == 0x45B:  # 1115 : un arret est deja programme
-            return "Une extinction est deja en cours. Dis « annule l'extinction » pour l'arreter."
-        if r.returncode != 0:
-            return f"Je n'ai pas pu programmer l'extinction ({(r.stderr or '').strip()[:120]})."
+        ok, detail = plateforme.programmer_extinction(delai)
     except Exception as e:
         return f"Je n'ai pas pu programmer l'extinction ({e})."
-    return (f"Lumieres coupees. Le PC s'eteint dans {delai} secondes. "
+    if not ok:
+        if detail == "deja_en_cours":
+            return ("Une extinction est deja en cours. Dis « annule l'extinction » "
+                    "pour l'arreter.")
+        return f"Je n'ai pas pu programmer l'extinction ({detail})."
+    return (f"Lumieres coupees. L'ordinateur s'eteint dans {delai} secondes. "
             "Dis « annule l'extinction » si tu changes d'avis.")
 
 
 @outil(
     nom="annuler_extinction",
-    description="Annule une extinction du PC deja programmee (par 'eteins le PC'). Pour "
-                "'annule l'extinction', 'n'eteins pas', 'annule l'arret', 'finalement non'.",
+    description="Annule une extinction de l'ordinateur deja programmee (par "
+                "'eteins le PC'). Pour 'annule l'extinction', 'n'eteins pas', "
+                "'annule l'arret', 'finalement non'.",
 )
 def annuler_extinction() -> str:
-    """Annule l'arret programme (shutdown /a)."""
+    """Annule l'arret programme."""
     try:
-        r = subprocess.run(["shutdown", "/a"], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
-        if r.returncode == 0:
-            return "C'est annule, le PC reste allume."
+        if plateforme.annuler_extinction():
+            return "C'est annule, l'ordinateur reste allume."
         return "Il n'y avait aucune extinction en cours."
     except Exception as e:
         return f"Je n'ai pas pu annuler l'extinction ({e})."
