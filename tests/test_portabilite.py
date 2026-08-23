@@ -124,6 +124,85 @@ def test_scripts_bash_presents_et_executables():
             assert chemin.stat().st_mode & 0o111, f"{nom} n'est pas exécutable"
 
 
+# Variables d'environnement qui n'existent que sur Windows.
+_ENV_WINDOWS = {"LOCALAPPDATA", "APPDATA", "USERPROFILE", "ProgramFiles",
+                "ProgramFiles(x86)", "ProgramW6432", "SystemRoot", "windir"}
+
+
+def test_pas_de_variable_windows_lue_sans_defaut():
+    """os.environ["LOCALAPPDATA"] leve KeyError sur macOS : il faut os.environ.get.
+
+    C'est exactement le bug qui faisait planter le panneau au chargement.
+    """
+    coupables = []
+    for chemin in fichiers_python():
+        arbre = ast.parse(chemin.read_text(encoding="utf-8", errors="replace"),
+                          filename=str(chemin))
+        for noeud in ast.walk(arbre):
+            # os.environ["X"] -> Subscript sur un Attribute nomme `environ`
+            if not isinstance(noeud, ast.Subscript):
+                continue
+            cible = noeud.value
+            nom = getattr(cible, "attr", None) or getattr(cible, "id", None)
+            if nom != "environ":
+                continue
+            clef = noeud.slice
+            if isinstance(clef, ast.Constant) and clef.value in _ENV_WINDOWS:
+                coupables.append(f"{chemin.relative_to(RACINE)}:{noeud.lineno}: "
+                                 f"os.environ[{clef.value!r}]")
+    assert not coupables, ("variable Windows lue sans defaut (KeyError hors "
+                           "Windows) :\n" + "\n".join(coupables))
+
+
+def test_venvs_secondaires_par_os():
+    """gestes et reconnaissance musicale : bin/python, pas Scripts/python.exe."""
+    from core import plateforme
+    chemin = plateforme.python_venv(RACINE / "gestes" / ".venv-tracker")
+    if plateforme.EST_WINDOWS:
+        assert chemin.parts[-2:] == ("Scripts", "python.exe")
+    else:
+        assert chemin.parts[-2:] == ("bin", "python")
+
+
+# Marqueurs prouvant qu'une ligne « Scripts/python.exe » est bien conditionnelle.
+_MARQUEURS_OS = ("win32", "EST_WINDOWS", "if WIN", "WIN else")
+
+
+def test_aucun_venv_windows_en_dur():
+    """« Scripts/python.exe » ne doit apparaitre que dans une branche Windows.
+
+    core/plateforme.py est la couche systeme : c'est son role de contenir les
+    deux chemins.
+    """
+    coupables = []
+    for chemin in fichiers_python():
+        if chemin.relative_to(RACINE).as_posix() == "core/plateforme.py":
+            continue
+        for num, ligne in enumerate(chemin.read_text(encoding="utf-8",
+                                                     errors="replace").splitlines(), 1):
+            if "Scripts" not in ligne or "python.exe" not in ligne:
+                continue
+            if any(m in ligne for m in _MARQUEURS_OS):
+                continue                       # branche explicite : c'est correct
+            coupables.append(f"{chemin.relative_to(RACINE)}:{num}: {ligne.strip()}")
+    assert not coupables, ("chemin de venv Windows inconditionnel :\n"
+                           + "\n".join(coupables))
+
+
+def test_backend_camera_par_os():
+    """CAP_DSHOW est DirectShow : sur macOS la webcam s'ouvrirait a vide."""
+    source = (RACINE / "gestes" / "tracker.py").read_text(encoding="utf-8")
+    assert "CAP_AVFOUNDATION" in source, "pas de backend AVFoundation pour macOS"
+    assert "cv2.VideoCapture(device, cv2.CAP_DSHOW)" not in source
+
+
+def test_hermes_config_ne_plante_pas():
+    """Le panneau lit la config d'Hermes au chargement : jamais de KeyError."""
+    from core import panneau
+    chemin = panneau._hermes_config()
+    assert chemin.is_absolute() and chemin.name == "config.yaml"
+
+
 def test_dependances_windows_marquees():
     """Les paquets sans roue macOS doivent porter un marqueur d'environnement."""
     pyproject = (RACINE / "pyproject.toml").read_text(encoding="utf-8")

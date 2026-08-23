@@ -139,6 +139,19 @@ def chrome_exe():
     return None
 
 
+def python_venv(dossier) -> Path:
+    """Chemin du python d'un venv, quel que soit l'OS.
+
+    Windows range l'interpreteur dans Scripts/python.exe, macOS et Linux dans
+    bin/python. Les venvs secondaires du projet (gestes, reconnaissance
+    musicale) passent tous par ici.
+    """
+    dossier = Path(dossier)
+    if EST_WINDOWS:
+        return dossier / "Scripts" / "python.exe"
+    return dossier / "bin" / "python"
+
+
 def bash_exe() -> str:
     """Interpréteur bash. Sur Windows il faut Git Bash ; ailleurs il est natif."""
     if EST_WINDOWS:

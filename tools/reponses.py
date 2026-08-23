@@ -14,8 +14,8 @@ except Exception:
 
 
 def _indispo():
-    return ("L'overlay n'est pas disponible (démarré uniquement sous Windows, "
-            "avec overlay.actif dans config.yaml).")
+    return ("L'overlay n'est pas disponible (vérifie overlay.actif dans "
+            "config.yaml, et que tkinter est présent).")
 
 
 @outil(

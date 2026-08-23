@@ -56,9 +56,12 @@ def definir_hooks(couper_tts=None, feedback=None):
 # ---------------------------------------------------------------- lifecycle
 
 def _python_tracker():
-    p = reglage("gestes.python", "") or "gestes/.venv-tracker/Scripts/python.exe"
-    p = Path(p)
-    return p if p.is_absolute() else (_RACINE / p)
+    """Python du venv dédié au tracker (MediaPipe n'a pas de roue 3.13)."""
+    p = reglage("gestes.python", "")
+    if p:
+        p = Path(p)
+        return p if p.is_absolute() else (_RACINE / p)
+    return plateforme.python_venv(_RACINE / "gestes" / ".venv-tracker")
 
 
 def _seuils():

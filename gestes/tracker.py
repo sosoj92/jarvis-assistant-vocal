@@ -27,6 +27,19 @@ from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 import mediapipe as mp
 
+def _backend_camera():
+    """Backend de capture natif de l'OS.
+
+    DirectShow est propre a Windows : sur macOS il faut AVFoundation, sinon
+    VideoCapture s'ouvre a vide et le tracker croit la webcam absente.
+    """
+    if sys.platform == "win32":
+        return cv2.CAP_DSHOW
+    if sys.platform == "darwin":
+        return cv2.CAP_AVFOUNDATION
+    return cv2.CAP_V4L2
+
+
 # Indices des 21 landmarks de la main (MediaPipe).
 POIGNET = 0
 POUCE_TIP, INDEX_TIP, MAJEUR_TIP, ANN_TIP, AURIC_TIP = 4, 8, 12, 16, 20
@@ -214,11 +227,15 @@ def boucle(conf, calibrer=False):
         min_hand_detection_confidence=conf_det, min_tracking_confidence=conf_track)
     landmarker = mp_vision.HandLandmarker.create_from_options(options)
 
-    cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(device, _backend_camera())
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(conf.get("largeur", 640)))
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(conf.get("hauteur", 480)))
     if not cap.isOpened():
         print(f"[gestes] webcam device {device} introuvable", file=sys.stderr)
+        if sys.platform == "darwin":
+            print("[gestes] macOS : autorise la Camera pour ton terminal dans "
+                  "Reglages Systeme > Confidentialite et securite, puis relance.",
+                  file=sys.stderr)
         return
 
     fsm = MachineGestes(conf)

@@ -2,13 +2,14 @@
 
 Chaque provider expose `synthetiser(texte)` qui renvoie (audio_int16, frequence)
 ou None. jarvis14 se charge de JOUER l'audio (avec sa gestion d'interruption) et
-retombe sur la voix Windows (SAPI) si le provider renvoie None.
+retombe sur la voix integree a l'OS si le provider renvoie None (SAPI sur
+Windows, `say` sur macOS, espeak sur Linux — cf. core/plateforme).
 
   - ElevenLabsProvider : cloud (qualite max), voix configurable.
   - PiperProvider      : local, 100% offline, voix francaise Piper (.onnx).
 
 Choix par config.yaml (mode: cloud | local). En local sans modele Piper, ou en
-cloud sans cle ElevenLabs, on retombe proprement sur SAPI.
+cloud sans cle ElevenLabs, on retombe proprement sur la voix de l'OS.
 
 Note honnete sur le TTS local francais : Piper est recommande (voix FR eprouvees
 comme fr_FR-siwis / fr_FR-tom, tres leger, temps reel sur CPU). Kokoro (kokoro-onnx)
@@ -20,14 +21,16 @@ import logging
 import urllib.request
 from pathlib import Path
 
-# Magasin de certificats Windows (Malwarebytes intercepte le TLS : sans ca, l'appel
-# a l'API ElevenLabs echoue et Jarvis retombe sur la voix Windows).
+# Magasin de certificats du SYSTEME plutot que le bundle certifi (un antivirus qui
+# intercepte le TLS ferait sinon echouer l'appel a ElevenLabs). truststore gere les
+# trois OS : magasin Windows, Keychain macOS, magasin Linux.
 try:
     import truststore
     truststore.inject_into_ssl()
 except Exception:
     pass
 
+from core import plateforme
 from core.config import reglage
 
 LOG = logging.getLogger("jarvis")
@@ -105,7 +108,8 @@ class ElevenLabsProvider(ProviderTTS):
                 pass
             return np.frombuffer(decode.samples, dtype=np.int16), 24000
         except Exception as e:
-            print(f"  [ElevenLabs] indisponible ({e}), repli voix Windows.")
+            print(f"  [ElevenLabs] indisponible ({e}), repli "
+                  f"{plateforme.nom_voix_systeme()}.")
             return None
 
 
@@ -147,7 +151,8 @@ class PiperProvider(ProviderTTS):
             brut = b"".join(self._voix.synthesize_stream_raw(texte))
             return np.frombuffer(brut, dtype=np.int16), self._voix.config.sample_rate
         except Exception as e:
-            print(f"  [Piper] echec ({e}), repli voix Windows.")
+            print(f"  [Piper] echec ({e}), repli "
+                  f"{plateforme.nom_voix_systeme()}.")
             return None
 
 
@@ -182,7 +187,8 @@ class KokoroProvider(ProviderTTS):
             audio = (np.asarray(samples) * 32767).astype(np.int16)
             return audio, freq
         except Exception as e:
-            print(f"  [Kokoro] echec ({e}), repli voix Windows.")
+            print(f"  [Kokoro] echec ({e}), repli "
+                  f"{plateforme.nom_voix_systeme()}.")
             return None
 
 

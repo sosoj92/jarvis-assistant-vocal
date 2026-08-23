@@ -20,11 +20,12 @@ import json
 import subprocess
 from pathlib import Path
 
+from core import plateforme
 from core.config import reglage
 from core.registre import outil
 
 _RACINE = Path(__file__).resolve().parent.parent
-_PY_SHAZAM = _RACINE / "musique" / ".venv-shazam" / "Scripts" / "python.exe"
+_PY_SHAZAM = plateforme.python_venv(_RACINE / "musique" / ".venv-shazam")
 _RECONNAISSEUR = _RACINE / "musique" / "reconnaisseur.py"
 _CAPTURES = _RACINE / "musique" / "captures"
 _NOTES = _RACINE / "notes" / "musiques.md"

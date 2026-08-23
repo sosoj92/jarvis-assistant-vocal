@@ -1143,7 +1143,7 @@ def main():
     except Exception:
         LOG.exception("musique: hook capture micro")
 
-    # Overlay de reponses (fenetre flottante Windows) : demarre masque, cout nul au
+    # Overlay de reponses (fenetre flottante) : demarre masque, cout nul au
     # repos ; pilotable par config overlay.* et a la voix ("affiche les reponses").
     if _overlay is not None and config.reglage("overlay.actif", True):
         try:
