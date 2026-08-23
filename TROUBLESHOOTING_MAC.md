@@ -245,6 +245,20 @@ exige `sudo` sur macOS — Jarvis les saute proprement et l'annonce au démarrag
 **Raccourcis** (action « Exécuter un script shell ») auquel tu assignes une
 combinaison de touches.
 
+### « Clique sur X » ne fait rien, ou clique à côté
+
+Deux causes distinctes.
+
+**Rien ne se passe** → autorisation **Accessibilité** manquante. Réglages
+Système → Confidentialité et sécurité → Accessibilité → coche ton terminal, puis
+**relance-le**. C'est la même autorisation que pour les touches média.
+
+**Le clic tombe à côté** → Jarvis n'avait pas de capture d'écran récente, ou
+l'écran a changé entre la capture et le clic. Dis-lui simplement « regarde mon
+écran » avant. Les coordonnées sont converties en fractions du moniteur, donc le
+facteur Retina et le redimensionnement sont déjà gérés — un décalage
+systématique serait un bug, signale-le.
+
 ### `capture_screen` renvoie une image noire
 
 Autorisation **Enregistrement de l'écran** manquante : Réglages Système →

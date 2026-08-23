@@ -101,7 +101,7 @@ Confidentialité et sécurité :
 | Autorisation | Nécessaire pour | Sans elle |
 |---|---|---|
 | **Microphone** | écoute, mot-clé « Hey Jarvis » | ❌ Jarvis n'entend rien |
-| **Accessibilité** | touches média, Cmd+Tab par geste | les commandes « pause », « suivant » retombent sur AppleScript (Spotify/Musique seulement) |
+| **Accessibilité** | touches média, Cmd+Tab, **contrôle de la souris et du clavier** | pas de clic ni de frappe ; « pause » retombe sur AppleScript (Spotify/Musique seulement) |
 | **Enregistrement de l'écran** | `capture_screen`, titres de fenêtres | pas de capture ; le nom de l'app reste connu, pas le titre |
 
 **Le piège :** si tu refuses une fois, macOS ne redemande plus. Il faut cocher

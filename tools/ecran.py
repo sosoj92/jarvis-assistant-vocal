@@ -4,6 +4,22 @@ from core.registre import outil
 # Cote le plus large envoye a Claude (recommandation vision d'Anthropic).
 LARGEUR_CAPTURE = 1568
 
+# Geometrie de la DERNIERE capture, pour que le controle souris puisse
+# convertir les coordonnees vues par Claude en coordonnees ecran.
+#
+# Le piege : sur un ecran Retina, mss capture des PIXELS (2x) alors que la
+# souris travaille en POINTS, et l'image est ensuite REDIMENSIONNEE a 1568 px
+# avant d'etre envoyee a Claude. Trois espaces differents. On evite toute
+# arithmetique fragile en ne gardant que le rectangle du moniteur (en points,
+# tel que mss le donne) et la taille de l'image finale : la conversion se fait
+# alors en FRACTIONS, insensible au facteur Retina.
+_DERNIERE_CAPTURE = {}
+
+
+def derniere_capture():
+    """{"moniteur": {left, top, width, height}, "largeur", "hauteur"} ou {}."""
+    return dict(_DERNIERE_CAPTURE)
+
 
 @outil(
     nom="capture_screen",
@@ -54,12 +70,22 @@ def capture_screen(ecran: int = 0):
             ratio = LARGEUR_CAPTURE / largeur
             image = image.resize((LARGEUR_CAPTURE, max(1, round(hauteur * ratio))))
 
+        _DERNIERE_CAPTURE.clear()
+        _DERNIERE_CAPTURE.update({
+            "moniteur": {"left": cible["left"], "top": cible["top"],
+                         "width": cible["width"], "height": cible["height"]},
+            "largeur": image.size[0], "hauteur": image.size[1],
+        })
+
         tampon = io.BytesIO()
         image.save(tampon, format="JPEG", quality=80)
         b64 = base64.b64encode(tampon.getvalue()).decode("ascii")
         return {
             "image": {"media_type": "image/jpeg", "data": b64},
-            "apercu": f"Capture ecran {ecran or 1} ({image.size[0]}x{image.size[1]}).",
+            "apercu": (f"Capture ecran {ecran or 1} "
+                       f"({image.size[0]}x{image.size[1]}). Pour cliquer sur un "
+                       f"element de cette image, utilise cliquer_ecran avec ses "
+                       f"coordonnees DANS CETTE IMAGE."),
         }
     except Exception as e:
         return f"Impossible de capturer l'ecran : {e}"

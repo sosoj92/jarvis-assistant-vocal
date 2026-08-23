@@ -476,6 +476,220 @@ def envoyer_touches(combo: str) -> bool:
         return False
 
 
+# ============================================================ souris
+
+# Boutons acceptés, vocabulaire commun aux trois OS.
+BOUTONS = ("gauche", "droite", "milieu")
+
+
+def souris_position():
+    """(x, y) du curseur en POINTS écran, ou None si indisponible."""
+    if EST_MAC:
+        try:
+            from Quartz import CGEventCreate, CGEventGetLocation
+            p = CGEventGetLocation(CGEventCreate(None))
+            return int(p.x), int(p.y)
+        except Exception:
+            return None
+    if EST_WINDOWS:
+        try:
+            import ctypes
+
+            class _PT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+            pt = _PT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            return int(pt.x), int(pt.y)
+        except Exception:
+            return None
+    return None
+
+
+def souris_deplacer(x, y) -> bool:
+    """Déplace le curseur en coordonnées ÉCRAN (points, pas pixels)."""
+    x, y = int(x), int(y)
+    if EST_MAC:
+        try:
+            from Quartz import (CGEventCreateMouseEvent, CGEventPost,
+                                kCGEventMouseMoved, kCGHIDEventTap,
+                                kCGMouseButtonLeft)
+            CGEventPost(kCGHIDEventTap, CGEventCreateMouseEvent(
+                None, kCGEventMouseMoved, (x, y), kCGMouseButtonLeft))
+            return True
+        except Exception as e:
+            LOG.debug("plateforme: deplacement souris refuse (%s)", e)
+            return False
+    if EST_WINDOWS:
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.SetCursorPos(x, y))
+        except Exception:
+            return False
+    if shutil.which("xdotool"):
+        return _run(["xdotool", "mousemove", str(x), str(y)], timeout=3).returncode == 0
+    return False
+
+
+def souris_cliquer(bouton="gauche", double=False) -> bool:
+    """Clique là où se trouve le curseur."""
+    bouton = (bouton or "gauche").lower().strip()
+    if bouton not in BOUTONS:
+        raise ValueError("bouton invalide")
+
+    if EST_MAC:
+        return _cliquer_mac(bouton, double)
+    if EST_WINDOWS:
+        try:
+            import ctypes
+            # (down, up) par bouton : gauche 0x02/0x04, droite 0x08/0x10, milieu 0x20/0x40
+            codes = {"gauche": (0x02, 0x04), "droite": (0x08, 0x10),
+                     "milieu": (0x20, 0x40)}[bouton]
+            for _ in range(2 if double else 1):
+                for code in codes:
+                    ctypes.windll.user32.mouse_event(code, 0, 0, 0, 0)
+                time.sleep(0.03)
+            return True
+        except Exception:
+            return False
+    if shutil.which("xdotool"):
+        n = {"gauche": "1", "milieu": "2", "droite": "3"}[bouton]
+        args = ["xdotool", "click", "--repeat", "2" if double else "1", n]
+        return _run(args, timeout=3).returncode == 0
+    return False
+
+
+def _cliquer_mac(bouton, double) -> bool:
+    """Clic macOS. Le double-clic passe par kCGMouseEventClickState = 2 :
+    répéter deux clics simples ne produit PAS un double-clic pour les apps."""
+    try:
+        from Quartz import (CGEventCreateMouseEvent, CGEventPost,
+                            CGEventSetIntegerValueField, kCGEventLeftMouseDown,
+                            kCGEventLeftMouseUp, kCGEventOtherMouseDown,
+                            kCGEventOtherMouseUp, kCGEventRightMouseDown,
+                            kCGEventRightMouseUp, kCGHIDEventTap,
+                            kCGMouseButtonCenter, kCGMouseButtonLeft,
+                            kCGMouseButtonRight, kCGMouseEventClickState)
+    except Exception as e:
+        LOG.debug("plateforme: Quartz absent pour le clic (%s)", e)
+        return False
+
+    evenements = {
+        "gauche": (kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGMouseButtonLeft),
+        "droite": (kCGEventRightMouseDown, kCGEventRightMouseUp, kCGMouseButtonRight),
+        "milieu": (kCGEventOtherMouseDown, kCGEventOtherMouseUp, kCGMouseButtonCenter),
+    }[bouton]
+    bas, haut, code = evenements
+    position = souris_position() or (0, 0)
+
+    try:
+        for n in ((1, 2) if double else (1,)):
+            for type_evt in (bas, haut):
+                ev = CGEventCreateMouseEvent(None, type_evt, position, code)
+                CGEventSetIntegerValueField(ev, kCGMouseEventClickState, n)
+                CGEventPost(kCGHIDEventTap, ev)
+            time.sleep(0.04)
+        return True
+    except Exception as e:
+        LOG.debug("plateforme: clic refuse (%s)", e)
+        return False
+
+
+def souris_defiler(vertical=0, horizontal=0) -> bool:
+    """Fait défiler. Positif = vers le haut / la gauche, comme une molette."""
+    vertical, horizontal = int(vertical), int(horizontal)
+    if EST_MAC:
+        try:
+            from Quartz import (CGEventCreateScrollWheelEvent, CGEventPost,
+                                kCGHIDEventTap, kCGScrollEventUnitPixel)
+            ev = CGEventCreateScrollWheelEvent(
+                None, kCGScrollEventUnitPixel, 2, vertical, horizontal)
+            CGEventPost(kCGHIDEventTap, ev)
+            return True
+        except Exception as e:
+            LOG.debug("plateforme: defilement refuse (%s)", e)
+            return False
+    if EST_WINDOWS:
+        try:
+            import ctypes
+            if vertical:
+                ctypes.windll.user32.mouse_event(0x0800, 0, 0, int(vertical), 0)
+            if horizontal:
+                ctypes.windll.user32.mouse_event(0x01000, 0, 0, int(horizontal), 0)
+            return True
+        except Exception:
+            return False
+    if shutil.which("xdotool") and vertical:
+        return _run(["xdotool", "click", "4" if vertical > 0 else "5"],
+                    timeout=3).returncode == 0
+    return False
+
+
+def souris_disponible():
+    """(possible, raison) — dit pourquoi le contrôle souris ne marchera pas."""
+    if EST_MAC:
+        try:
+            import Quartz  # noqa: F401
+        except Exception:
+            return False, ("PyObjC absent : lance `uv sync`.")
+        return True, ("macOS demande l'autorisation Accessibilite pour ton "
+                      "terminal (Reglages Systeme > Confidentialite et securite).")
+    if EST_WINDOWS:
+        return True, ""
+    if shutil.which("xdotool"):
+        return True, ""
+    return False, "installe xdotool"
+
+
+def taper_texte(texte: str) -> bool:
+    """Saisit du texte dans l'application active, caractère par caractère.
+
+    Passe par la frappe clavier plutôt que le presse-papiers : le collage
+    écraserait ce que l'utilisateur y a mis, et certaines applications le
+    bloquent. Accents et emoji compris — `keystroke` d'AppleScript et
+    l'unicode de CGEvent les gèrent tous les deux.
+    """
+    texte = str(texte or "")
+    if not texte:
+        return False
+
+    if EST_MAC:
+        try:
+            from Quartz import (CGEventCreateKeyboardEvent, CGEventPost,
+                                CGEventKeyboardSetUnicodeString, kCGHIDEventTap)
+            for morceau in _par_paquets(texte, 20):     # CGEvent limite la chaîne
+                for bas in (True, False):
+                    ev = CGEventCreateKeyboardEvent(None, 0, bas)
+                    CGEventKeyboardSetUnicodeString(ev, len(morceau), morceau)
+                    CGEventPost(kCGHIDEventTap, ev)
+                time.sleep(0.01)
+            return True
+        except Exception as e:
+            LOG.debug("plateforme: frappe Quartz refusee (%s), repli osascript", e)
+        try:                                    # repli : System Events
+            echappe = texte.replace("\\", "\\\\").replace('"', '\\"')
+            osascript(f'tell application "System Events" to keystroke "{echappe}"',
+                      timeout=20)
+            return True
+        except Exception:
+            return False
+
+    if not EST_WINDOWS and shutil.which("xdotool"):
+        return _run(["xdotool", "type", "--delay", "12", texte],
+                    timeout=30).returncode == 0
+
+    try:
+        import keyboard
+        keyboard.write(texte, delay=0.01)
+        return True
+    except Exception:
+        return False
+
+
+def _par_paquets(texte, taille):
+    for i in range(0, len(texte), taille):
+        yield texte[i:i + taille]
+
+
 # ============================================================ fenêtre active
 
 def fenetre_active():
