@@ -101,17 +101,20 @@ utilisée, même avec un jeton valide.
 
 **API et services → Écran de consentement OAuth**.
 
-| Type | Qui peut autoriser | Pour toi |
-|---|---|---|
-| **Interne** | uniquement les comptes de ton Workspace | ✅ recommandé si le projet est dans l'organisation |
-| **Externe** | n'importe quel compte Google | à réserver aux **utilisateurs test** |
+| Type | Qui peut autoriser | Jetons | Pour toi |
+|---|---|---|---|
+| **Interne** | uniquement les comptes de ton Workspace | **permanents** | ✅ à prendre si le projet est dans l'organisation |
+| **Externe** + Test | seulement les utilisateurs test déclarés | **expirent en 7 jours** | seulement en voie 2 |
 
-En **Externe**, va dans **Utilisateurs test** et n'ajoute **que ton adresse**.
-Personne d'autre ne pourra passer l'écran de consentement — c'est la barrière la
-plus efficace, et elle ne coûte rien.
+**Le détail qui change tout :** une application **Externe** laissée en statut
+« Test » voit ses **jetons de rafraîchissement expirer au bout de 7 jours**.
+Concrètement, tu devrais relancer `google_login.py` toutes les semaines. Une
+application **Interne** n'a pas cette limite — c'est la raison principale de
+préférer la voie 1 quand elle est possible.
 
-Ne clique **pas** sur « Publier l'application » : en mode test, l'app reste
-limitée à tes utilisateurs test, ce qui est exactement ce que tu veux.
+En **Externe**, va dans **Utilisateurs test** et n'ajoute **que ton adresse** ;
+ne clique **pas** sur « Publier l'application » (cela déclencherait une
+procédure de vérification Google, longue, pour un scope Gmail).
 
 ### 4. Le client OAuth
 
