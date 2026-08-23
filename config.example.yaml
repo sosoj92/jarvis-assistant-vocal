@@ -32,6 +32,15 @@ kokoro:                        # TTS local alternatif (voix FR unique ; uv add k
   voix: ""                     # chemin de voices-v1.0.bin
   voix_nom: "ff_siwis"         # voix francaise de Kokoro
 
+mcp_externes: []               # serveurs MCP distants dont Jarvis peut appeler
+                               # les outils (voir docs/mcp_externe.md). Exemple :
+                               # - nom: yorkhost
+                               #   url: "https://mcp.yorkhost.fr/mcp"
+                               #   entetes:
+                               #     Authorization: "Bearer TON_JETON"
+                               #   sans_confirmation: ["statut_serveur"]
+                               # Par defaut TOUT outil distant demande confirmation.
+
 fournisseur: claude            # claude | gemini — quel service cloud interroger.
                                # Axe independant de `mode` (qui dit local/cloud).
 
