@@ -21,18 +21,42 @@ voix_locale: piper             # mode local : "piper" (recommande FR) ou "kokoro
 
 piper:                         # mode local : voix francaise Piper (voir docs/local.md)
   modele: ""                   # chemin d'un .onnx ; vide = 1er trouve dans voix/
+  # Rendre la voix moins mecanique. Vide = defauts du modele (1.0 / 0.667 / 0.8).
+  vitesse: 1.05                # length_scale : >1 ralentit un peu, plus naturel
+  expressivite: 0.80           # noise_scale : variation de l'intonation
+  variation: 1.0               # noise_w : variation de la duree des syllabes
+  volume: 1.0
 
 kokoro:                        # TTS local alternatif (voix FR unique ; uv add kokoro-onnx)
   modele: ""                   # chemin de kokoro-v1.0.onnx
   voix: ""                     # chemin de voices-v1.0.bin
   voix_nom: "ff_siwis"         # voix francaise de Kokoro
 
+mcp_externes: []               # serveurs MCP distants dont Jarvis peut appeler
+                               # les outils (voir docs/mcp_externe.md). Exemple :
+                               # - nom: yorkhost
+                               #   url: "https://mcp.yorkhost.fr/mcp"
+                               #   entetes:
+                               #     Authorization: "Bearer TON_JETON"
+                               #   sans_confirmation: ["statut_serveur"]
+                               # Par defaut TOUT outil distant demande confirmation.
+
+fournisseur: claude            # claude | gemini — quel service cloud interroger.
+                               # Axe independant de `mode` (qui dit local/cloud).
+
+gemini:                        # alternative a Claude ; palier gratuit sur AI Studio
+  cle: ""                      # https://aistudio.google.com/apikey
+  modele: "gemini-2.5-flash"   # verifie les noms courants sur ai.google.dev
+  modele_qualite: "gemini-2.5-pro"
+  temperature: 0.3
+  max_tokens: 1024
+
 anthropic:
   cle: "sk-ant-..."            # https://console.anthropic.com/ , section API keys
   modele: "claude-haiku-4-5"          # mode hybride : modele economique (reflexes + vision)
   modele_qualite: "claude-sonnet-4-5" # mode qualite : modele le plus fort
 
-elevenlabs:                    # facultatif ; sans cle, Jarvis garde la voix Windows
+elevenlabs:                    # facultatif ; sans cle, Jarvis garde la voix de l'OS
   cle: ""                      # https://elevenlabs.io , profil -> API key (commence par sk_)
   voix: ""                     # ID d'une voix (onglet Voices) ; vide = 1re du compte
   modele: "eleven_flash_v2_5"
@@ -42,26 +66,68 @@ hue:                           # Philips Hue, API locale
   pont: "192.168.1.XXX"        # adresse du pont sur ton reseau
   cle: "ta-cle-hue"            # cle generee via le bouton du pont
 
-mail:                          # Gmail via IMAP/SMTP (facultatif)
+mail:                          # Gmail via IMAP/SMTP (facultatif) ; voir docs/mail.md
   adresse: "ton.adresse@gmail.com"
-  mot_de_passe_app: ""         # mot de passe d'application Google (2FA requise)
+  mot_de_passe_app: ""         # compte Gmail PERSO : mot de passe d'application (2FA requise)
+  oauth: false                 # GOOGLE WORKSPACE : true, car l'admin peut interdire les
+                               # mots de passe d'application. Autorise une fois avec
+                               # uv run python scripts/google_login.py mail
+  token: ""                    # vide = google_token_mail.json a la racine
+
+google:                        # identifiants OAuth partages (Gmail + Agenda)
+  credentials: ""              # vide = google_credentials.json a la racine
 
 audio:
   micro: 1                     # index du micro (voir sounddevice.query_devices())
-  haut_parleur: null           # null = sortie par defaut de Windows (changeable a la voix)
+                               # macOS/Linux : mets null pour l'entree par defaut
+                               # du systeme (l'index 1 y designe souvent une SORTIE)
+  haut_parleur: null           # null = sortie par defaut de l'OS (changeable a la voix)
   sorties:                     # alias pour "passe sur le casque / les enceintes" (nom ou index)
     casque: "Casque"           # sous-chaine du nom de l'appareil de sortie (ou un index)
     enceintes: "Haut-parleurs"
   raccourci_mute: "ctrl+alt+m" # raccourci clavier global : couper/reactiver le wake word ("" = off)
 
 whisper:
-  modele: "medium"
+  # medium est le plus precis, mais le PLUS LENT sur CPU (donc sur Mac, ou il n'y
+  # a pas de CUDA). Mesure sur une phrase de 3,8 s : base 1,4 s | small 3,5 s |
+  # medium 8,5 s. « small » est le meilleur compromis hors GPU NVIDIA.
+  modele: "medium"             # tiny | base | small | medium | large-v3
 
-interruption:                  # couper Jarvis quand tu dis "attends/stop/arrete" par-dessus
-  facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis (baisse si ca ne coupe pas)
+  # Noms propres a ancrer : Whisper les rend BEAUCOUP mieux quand il les attend.
+  # Mesure : "Uber Eats" est entendu "UB et ITS" sans, correct avec.
+  # Les cles de `apps` sont ajoutees automatiquement, pas besoin de les repeter.
+  vocabulaire: ["YorkHost", "Uber Eats", "Deliveroo", "Spotify", "Discord",
+                "OBS", "Philips Hue"]
+
+  # L'amorce ne suffit PAS pour les sigles courts : "OBS" reste entendu "au bas",
+  # "Hue" devient "rues" — trop peu de matiere sonore. Corrige-les ici, sur le
+  # texte final. Ajoute ce que TU entends de travers, c'est propre a ta voix.
+  corrections:
+    "au bas": "OBS"
+    "obese": "OBS"
+    "lumi-rues": "lumieres Hue"
+    # Ce que Whisper rend pour "YorkHost" SANS l'amorce (mesure) : avec le
+    # vocabulaire ci-dessus il tombe juste, ces lignes ne servent que de filet.
+    "york coast": "YorkHost"
+    "yark host": "YorkHost"
+    "york host": "YorkHost"
+    "iacoste": "YorkHost"
+
+interruption:                  # couper Jarvis pendant qu'il parle. DEUX voies :
+  # Voie 1 : redire "Hey Jarvis" par-dessus.
+  seuil_reveil: 0.7            # plus strict que assistant.seuil_reveil (le micro entend
+                               # aussi l'enceinte). Au CASQUE il n'y a pas d'echo :
+                               # descends a 0.5, sinon couper est quasi impossible.
+  # Voie 2 : dire "attends", "stop", "arrete"... par-dessus.
+  facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis
+                               # (baisse a 1.2-1.4 si ca ne coupe jamais)
   seuil: 0.025                 # niveau minimum absolu de ta voix (baisse si micro peu sensible)
-  blocs: 5                     # blocs de 80 ms de parole continue avant de verifier (5 = 0,4 s)
-  debug: false                 # true = affiche niv/base/seuil + ce qu'il entend (pour calibrer)
+  blocs: 3                     # blocs de 80 ms de parole continue avant de verifier
+                               # 3 = 0,24 s. Ne remonte pas a 5 : « stop » dure
+                               # ~0,25 s et ne declencherait plus jamais.
+  creux: 2                     # blocs faibles toleres sans annuler la detection
+                               # (la plosive de « stop » cree une micro-coupure)
+  debug: true                  # affiche les scores en direct : indispensable pour calibrer
 
 assistant:
   duree_suite: 10              # secondes d'ecoute apres une reponse
@@ -269,6 +335,15 @@ spotify:                       # ajouter les musiques reconnues a une playlist ;
   auto_ajout: false            # true = ajoute AUTOMATIQUEMENT chaque musique reconnue
   # Connexion une fois : python scripts/spotify_login.py (refresh_token dans logs/spotify/)
 
+hud:                           # interface « reacteur arc » (page web locale, temps reel)
+  actif: true                  # false = pas de HUD du tout
+  port: 8770                   # http://127.0.0.1:8770/
+  ouvrir_navigateur: true      # ouvrir la page automatiquement au demarrage
+  plein_ecran: true            # fenetre DEDIEE plein ecran (Chrome --app) au lieu
+                               # d'un onglet. Touche F dans la page pour basculer.
+                               # Sur macOS c'est LA interface : l'overlay flottant
+                               # y est impossible (voir INSTALL_MAC.md)
+
 cockpit:                       # tableau de bord perso (app web locale) ; docs/cockpit.md
   actif: false                 # ouvrir le cockpit au demarrage (fenetre app --app)
   ecran: 0                     # ecran cible (0 = principal, 1 = 2e ecran...)
@@ -285,7 +360,9 @@ amaran:                        # lumieres video amaran (BLE mesh via ESP32) ; do
   noms: []                     # alias supplementaires reconnus (ex. ["ma lumiere", "spot"])
 
 overlay:                       # mini-fenetre qui affiche a l'ecrit ce que Jarvis dit ; docs/overlay.md
-  actif: true                  # afficher l'overlay (Windows uniquement ; sinon ignore)
+  actif: true                  # afficher l'overlay (Windows/Linux). IGNORE sur macOS :
+                               # Cocoa interdit une fenetre hors thread principal.
+                               # Sur Mac, utilise panneau.actif (voir INSTALL_MAC.md)
   ecran: 1                     # moniteur cible (0 = principal, 1 = 2e ecran...)
   coin: "bas-droite"           # haut-gauche / haut-droite / bas-gauche / bas-droite
   opacite: 0.92                # 0.3 - 1.0

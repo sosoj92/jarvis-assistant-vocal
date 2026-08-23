@@ -236,6 +236,10 @@ const S = {
   etat: "veille",
   niveauCible: 0,
   niveauLisse: 0,
+  // Historique du niveau : dessine la voix en couronne autour du reacteur.
+  historique: new Array(128).fill(0),
+  // Ondes emises a chaque pic de parole (rayon normalise 0..1).
+  ondes: [],
   modele: "—",
   stt: "—",
   enligne: false,
@@ -308,13 +312,22 @@ window.addEventListener("resize", redimensionner);
 const NB_BOBINES = 10;
 const NB_TICKS = 72;
 
+let tete = 0;              // curseur d'ecriture dans S.historique
+let derniereOnde = 0;      // horodatage de la derniere onde emise
+
 function dessiner(t) {
   requestAnimationFrame(dessiner);
 
-  // Lissage de la couleur et du niveau.
+  const parle = (S.etat === "parole");
+
+  // Lissage de la couleur et du niveau. En parole, on suit la voix de plus
+  // pres (0.34) : les syllabes doivent se voir, pas etre lissees en bouillie.
   versCouleur(COULEURS[S.etat] || COULEURS.veille, 0.05);
-  S.niveauLisse += (S.niveauCible - S.niveauLisse) * 0.15;
+  S.niveauLisse += (S.niveauCible - S.niveauLisse) * (parle ? 0.34 : 0.15);
   const niv = S.niveauLisse;
+
+  S.historique[tete] = niv;
+  tete = (tete + 1) % S.historique.length;
 
   ctx.clearRect(0, 0, L, H);
   const cx = L / 2, cy = H / 2;
@@ -329,7 +342,7 @@ function dessiner(t) {
 
   // --- halo exterieur diffus ---
   const halo = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * 1.15);
-  halo.addColorStop(0, rgba(0.10 + niv * 0.10));
+  halo.addColorStop(0, rgba(0.10 + niv * (parle ? 0.26 : 0.10)));
   halo.addColorStop(1, rgba(0));
   ctx.fillStyle = halo;
   ctx.beginPath();
@@ -410,8 +423,56 @@ function dessiner(t) {
   ctx.restore();
   ctx.shadowBlur = 0;
 
+  // --- ondes emises pendant la parole ---
+  // Chaque pic de voix lache un anneau qui s'eloigne et s'efface : on VOIT la
+  // phrase sortir du reacteur au lieu d'un simple changement de couleur.
+  if (parle) {
+    if (niv > 0.30 && t - derniereOnde > 110) {
+      S.ondes.push({ r: 0.30, a: Math.min(0.55, 0.20 + niv * 0.45) });
+      derniereOnde = t;
+    }
+  } else if (S.ondes.length) {
+    S.ondes.length = 0;
+  }
+  for (let i = S.ondes.length - 1; i >= 0; i--) {
+    const o = S.ondes[i];
+    o.r += 0.011;
+    o.a *= 0.965;
+    if (o.r > 1.35 || o.a < 0.02) { S.ondes.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * o.r, 0, Math.PI * 2);
+    ctx.strokeStyle = rgba(o.a);
+    ctx.lineWidth = 2.4 * (1 - o.r / 1.4);
+    ctx.stroke();
+  }
+
+  // --- trace de voix en couronne ---
+  // L'historique du niveau devient une couronne irreguliere : la signature
+  // visuelle de ce qui est en train d'etre dit.
+  if (parle || niv > 0.02) {
+    const n = S.historique.length;
+    const base = R * 0.70;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const v = S.historique[(i + tete) % n];
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      const rr = base + v * R * 0.24;
+      const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = rgba(parle ? 0.75 : 0.30);
+    ctx.lineWidth = parle ? 2.2 : 1.2;
+    ctx.shadowColor = rgba(parle ? 0.8 : 0);
+    ctx.shadowBlur = parle ? 14 : 0;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
   // --- coeur lumineux en degrade radial, enfle avec le niveau ---
-  const coeurR = R * (0.16 + niv * 0.17 + respire * 0.015);
+  // En parole, il reagit plus fort et scintille : l'etat le plus visible.
+  const ampli = parle ? 0.30 : 0.17;
+  const coeurR = R * (0.16 + niv * ampli + respire * 0.015);
   const rayon = coeurR * 2.4;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rayon);
   g.addColorStop(0, "rgba(255,255,255,0.95)");
@@ -627,6 +688,43 @@ function demonstration() {
   }
   tour();
 }
+
+// ------------------------------------------------------------- plein ecran
+
+// Les navigateurs refusent le plein ecran sans geste de l'utilisateur : on
+// tente quand meme (une fenetre lancee en --start-fullscreen l'est deja), et
+// sinon la touche F ou un clic suffit. L'indice disparait des que c'est fait.
+function basculerPleinEcran() {
+  const d = document;
+  if (!d.fullscreenElement) {
+    (d.documentElement.requestFullscreen || (() => {})).call(d.documentElement)
+      ?.catch(() => {});
+  } else {
+    (d.exitFullscreen || (() => {})).call(d)?.catch(() => {});
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "f" || e.key === "F") basculerPleinEcran();
+  if (e.key === "Escape" && document.fullscreenElement) document.exitFullscreen();
+});
+
+(function indicePleinEcran() {
+  const indice = document.createElement("div");
+  indice.textContent = "F : plein ecran";
+  indice.style.cssText = "position:fixed;bottom:14px;left:50%;transform:translateX(-50%);"
+    + "font:11px/1 ui-monospace,monospace;letter-spacing:.14em;color:rgba(255,255,255,.28);"
+    + "pointer-events:none;transition:opacity .6s;z-index:9";
+  document.body.appendChild(indice);
+  const cacher = () => { indice.style.opacity = "0"; };
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement) cacher();
+  });
+  setTimeout(cacher, 8000);
+})();
+
+// Un clic n'importe ou bascule aussi : pratique sur une fenetre dediee.
+document.addEventListener("dblclick", basculerPleinEcran);
 
 // ------------------------------------------------------------- demarrage
 

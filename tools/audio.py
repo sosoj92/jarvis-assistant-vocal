@@ -1,5 +1,7 @@
 """Sortie audio à la voix : « passe sur le casque / sur les enceintes ». JARVIS PUR
 (matériel, temps réel). N1, non exposé au MCP (périphérique physique, reste local).
+Multiplateforme : sounddevice/PortAudio énumère les sorties de la même façon sur
+Windows, macOS et Linux.
 
 Crucial en stream : envoyer les annonces dans MON casque, pas dans le micro du live.
 Alias configurables dans config.yaml → audio.sorties (nom d'appareil ou index).
@@ -16,10 +18,11 @@ def _sorties():
 
 
 def _resoudre(cible):
-    """(device, label) : device = index int ou None (défaut Windows). Lève si introuvable."""
+    """(device, label) : device = index int ou None (défaut système). Lève si introuvable."""
     c = sans_accents((cible or "").lower()).strip()
-    if c in ("defaut", "par defaut", "defaut windows", "windows", "auto", "systeme"):
-        return None, "la sortie par défaut de Windows"
+    if c in ("defaut", "par defaut", "defaut windows", "windows", "defaut systeme",
+             "mac", "macos", "auto", "systeme"):
+        return None, "la sortie par défaut du système"
 
     # alias config (casque / enceintes / ...) -> nom ou index
     cible_reelle = cible

@@ -97,6 +97,196 @@ class ClaudeProvider(ProviderLLM):
         return rep
 
 
+# --------------------------------------------------------------- Gemini (cloud)
+
+class GeminiProvider(ProviderLLM):
+    """Google Gemini, alternative cloud a Claude.
+
+    Interet principal : Google AI Studio offre un palier GRATUIT, et Gemini gere
+    la VISION — contrairement au mode local, la capture d'ecran et le controle
+    souris continuent donc de fonctionner.
+
+    Comme pour Ollama, tout l'assistant parle le format Anthropic (blocs text /
+    image / tool_use / tool_result) : ce provider traduit dans les deux sens.
+    """
+
+    nom = "Gemini"
+
+    def __init__(self, modele=None):
+        self.cle = reglage("gemini.cle", "")
+        self.modele = modele or reglage("gemini.modele", "gemini-2.5-flash")
+        self._client = None
+
+    def disponible(self):
+        return bool(self.cle)
+
+    def client(self):
+        if self._client is None:
+            from google import genai
+            self._client = genai.Client(api_key=self.cle)
+        return self._client
+
+    # -- outils : schema JSON -> FunctionDeclaration ------------------------
+
+    @staticmethod
+    def _nettoyer_schema(schema):
+        """Retire les mots-cles JSON Schema que Gemini refuse.
+
+        Gemini n'accepte qu'un sous-ensemble d'OpenAPI : additionalProperties,
+        $schema et consorts font echouer TOUTE la requete, pas seulement l'outil
+        fautif. On elague donc en profondeur.
+        """
+        if not isinstance(schema, dict):
+            return schema
+        interdits = {"additionalProperties", "$schema", "$id", "definitions",
+                     "$defs", "examples", "default", "title"}
+        propre = {}
+        for clef, valeur in schema.items():
+            if clef in interdits:
+                continue
+            if clef == "properties" and isinstance(valeur, dict):
+                propre[clef] = {k: GeminiProvider._nettoyer_schema(v)
+                                for k, v in valeur.items()}
+            elif clef == "items":
+                propre[clef] = GeminiProvider._nettoyer_schema(valeur)
+            else:
+                propre[clef] = valeur
+        return propre
+
+    def _outils(self, outils):
+        from google.genai import types
+        declarations = []
+        for o in outils:
+            schema = self._nettoyer_schema(
+                o.get("input_schema") or {"type": "object", "properties": {}})
+            # Un outil sans parametre : Gemini veut un objet vide, pas None.
+            if not schema.get("properties"):
+                schema = {"type": "object", "properties": {}}
+            declarations.append(types.FunctionDeclaration(
+                name=o["name"], description=o.get("description", ""),
+                parameters=schema))
+        return [types.Tool(function_declarations=declarations)] if declarations else None
+
+    # -- historique : format Anthropic -> contents Gemini -------------------
+
+    def _traduire(self, historique):
+        """(contents, noms) — noms mappe tool_use_id -> nom d'outil.
+
+        Gemini identifie une reponse d'outil par le NOM de la fonction, la ou
+        Anthropic utilise un identifiant. On garde donc la correspondance vue
+        dans les tours precedents pour pouvoir renvoyer le bon nom.
+        """
+        from google.genai import types
+        import base64
+
+        contents, noms = [], {}
+        for message in historique:
+            role, contenu = message.get("role"), message.get("content")
+            parts = []
+
+            if isinstance(contenu, str):
+                if contenu.strip():
+                    parts.append(types.Part.from_text(text=contenu))
+                if parts:
+                    contents.append(types.Content(
+                        role="user" if role == "user" else "model", parts=parts))
+                continue
+
+            for item in contenu or []:
+                # Bloc objet (reponse precedente du modele)
+                type_bloc = getattr(item, "type", None)
+                if type_bloc == "text" and getattr(item, "text", ""):
+                    parts.append(types.Part.from_text(text=item.text))
+                    continue
+                if type_bloc == "tool_use":
+                    noms[item.id] = item.name
+                    parts.append(types.Part.from_function_call(
+                        name=item.name, args=item.input or {}))
+                    continue
+
+                if not isinstance(item, dict):
+                    continue
+                t = item.get("type")
+                if t == "text" and item.get("text"):
+                    parts.append(types.Part.from_text(text=item["text"]))
+                elif t == "image":
+                    src = item.get("source", {}) or {}
+                    parts.append(types.Part.from_bytes(
+                        data=base64.b64decode(src.get("data", "")),
+                        mime_type=src.get("media_type", "image/jpeg")))
+                elif t == "tool_use":
+                    noms[item.get("id")] = item.get("name")
+                    parts.append(types.Part.from_function_call(
+                        name=item.get("name"), args=item.get("input") or {}))
+                elif t == "tool_result":
+                    nom = noms.get(item.get("tool_use_id"), "outil")
+                    c = item.get("content")
+                    if isinstance(c, list):
+                        # Capture d'ecran : l'image part en piece jointe, et la
+                        # reponse de fonction dit simplement qu'elle suit.
+                        parts.append(types.Part.from_function_response(
+                            name=nom, response={"result": "image ci-jointe"}))
+                        for bloc in c:
+                            if isinstance(bloc, dict) and bloc.get("type") == "image":
+                                src = bloc.get("source", {}) or {}
+                                parts.append(types.Part.from_bytes(
+                                    data=base64.b64decode(src.get("data", "")),
+                                    mime_type=src.get("media_type", "image/jpeg")))
+                    else:
+                        parts.append(types.Part.from_function_response(
+                            name=nom, response={"result": str(c)}))
+
+            if parts:
+                contents.append(types.Content(
+                    role="user" if role == "user" else "model", parts=parts))
+        return contents, noms
+
+    # -- reponse Gemini -> blocs Anthropic ---------------------------------
+
+    def _parser(self, reponse):
+        blocs = []
+        candidats = getattr(reponse, "candidates", None) or []
+        if candidats:
+            for i, part in enumerate(getattr(candidats[0].content, "parts", None) or []):
+                texte = getattr(part, "text", None)
+                if texte and texte.strip():
+                    blocs.append(Bloc("text", text=texte))
+                appel = getattr(part, "function_call", None)
+                if appel is not None and getattr(appel, "name", None):
+                    blocs.append(Bloc("tool_use",
+                                      id=getattr(appel, "id", None) or f"call_{i}",
+                                      name=appel.name,
+                                      input=dict(appel.args or {})))
+        if not blocs:
+            blocs.append(Bloc("text", text=""))
+        stop = "tool_use" if any(b.type == "tool_use" for b in blocs) else "end"
+        return Reponse(stop, blocs)
+
+    def repondre(self, systeme, historique, outils):
+        from google.genai import types
+        contents, _ = self._traduire(historique)
+        config = types.GenerateContentConfig(
+            system_instruction=systeme,
+            tools=self._outils(outils),
+            temperature=float(reglage("gemini.temperature", 0.3)),
+            max_output_tokens=int(reglage("gemini.max_tokens", 1024)),
+        )
+        reponse = self.client().models.generate_content(
+            model=self.modele, contents=contents, config=config)
+
+        try:                                   # comptabilite (N9), comme Claude
+            u = getattr(reponse, "usage_metadata", None)
+            if u is not None:
+                from core import budget
+                budget.enregistrer(
+                    "Gemini (Jarvis)", self.modele,
+                    getattr(u, "prompt_token_count", 0) or 0,
+                    getattr(u, "candidates_token_count", 0) or 0)
+        except Exception:
+            pass
+        return self._parser(reponse)
+
+
 # --------------------------------------------------------------- Ollama (local)
 
 class OllamaProvider(ProviderLLM):
@@ -208,23 +398,36 @@ class OllamaProvider(ProviderLLM):
 _LLM = None
 
 
+def _provider_cloud(qualite=False):
+    """Claude ou Gemini, selon `fournisseur` dans config.yaml.
+
+    Deux axes independants : `mode` dit OU tourne le modele (local/cloud) et
+    quel niveau, `fournisseur` dit QUEL service cloud. Les melanger dans un
+    seul reglage rendrait impossible « Gemini en qualite ».
+    """
+    choix = (reglage("fournisseur", "claude") or "claude").lower().strip()
+    if choix == "gemini":
+        return GeminiProvider(reglage("gemini.modele_qualite", "gemini-2.5-pro")
+                              if qualite else None)
+    return ClaudeProvider(reglage("anthropic.modele_qualite", "claude-sonnet-4-5")
+                          if qualite else None)
+
+
 def llm():
     """Provider LLM courant selon le mode (local | hybride | qualite).
 
     - local   : Ollama.
-    - hybride : Claude, modele economique (anthropic.modele) — reflexes + vision.
-    - qualite : Claude, modele fort (anthropic.modele_qualite)."""
+    - hybride : cloud, modele economique — reflexes + vision.
+    - qualite : cloud, modele fort.
+    Le service cloud (Claude ou Gemini) vient du reglage `fournisseur`."""
     global _LLM
     if _LLM is None:
         from core.routage import mode_actuel
         m = mode_actuel()
         if m == "local":
             _LLM = OllamaProvider()
-        elif m == "qualite":
-            _LLM = ClaudeProvider(reglage("anthropic.modele_qualite",
-                                          "claude-sonnet-4-5"))
-        else:                                    # hybride (defaut)
-            _LLM = ClaudeProvider(reglage("anthropic.modele", "claude-haiku-4-5"))
+        else:
+            _LLM = _provider_cloud(qualite=(m == "qualite"))
         LOG.info("provider LLM : %s (mode %s, modele %s)",
                  _LLM.nom, m, getattr(_LLM, "modele", "-"))
     return _LLM

@@ -305,9 +305,12 @@ def _whisper_supprimer(nom):
 # ==================================================================== hermes
 
 def _hermes_config():
-    from pathlib import Path as _P
-    import os
-    return _P(os.environ["LOCALAPPDATA"]) / "hermes" / "config.yaml"
+    """Config d'Hermes, dans le dossier de donnees applicatives de l'OS.
+
+    (LOCALAPPDATA sur Windows, ~/Library/Application Support sur macOS.)
+    """
+    from core import plateforme
+    return plateforme.dossier_donnees("hermes") / "config.yaml"
 
 
 def _hermes_modele():

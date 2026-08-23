@@ -2,7 +2,8 @@
 Assistant vocal local, avec mot d'activation et actions.
 
 Dites « Hey Jarvis », parlez, taisez-vous. Il repond et agit.
-Chaine : openWakeWord -> faster-whisper -> Claude (+ outils) -> ElevenLabs/SAPI
+Chaine : openWakeWord -> faster-whisper -> Claude (+ outils) -> ElevenLabs/Piper
+(repli sur la voix integree a l'OS : SAPI, `say` sur macOS, espeak sur Linux)
 
 Architecture : les outils vivent dans tools/ (auto-decouverts via core.registre),
 les reglages et secrets dans config.yaml (via core.config).
@@ -10,10 +11,10 @@ les reglages et secrets dans config.yaml (via core.config).
 Usage : uv run python jarvis14.py
 """
 
+import datetime as dt
 import os
 import queue
 import re
-import subprocess
 import threading
 import time
 import wave
@@ -35,33 +36,76 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from openwakeword.model import Model as WakeModel
 
-from core import config, journal, memoire, personnalite, registre, voix
+from core import config, journal, memoire, personnalite, plateforme, registre, voix
 from core.util import sans_accents
 from tools.lumieres import allumer_si_nuit, charger_pieces_hue
 
 # ---------------------------------------------------------------- reglages
 
-MICRO = config.reglage("audio.micro", 1)
-# None = sortie audio par defaut de Windows (suit l'enceinte/casque actif).
-HAUT_PARLEUR = config.reglage("audio.haut_parleur", None)
+# Index (ou nom) du micro. Par defaut : 1 sur Windows (historique), l'entree
+# systeme sur macOS/Linux, ou l'index 1 designe souvent une SORTIE.
+MICRO = plateforme.peripherique_audio(
+    config.reglage("audio.micro", plateforme.micro_defaut()))
+# None = sortie audio par defaut de l'OS (suit l'enceinte/casque actif).
+HAUT_PARLEUR = plateforme.peripherique_audio(config.reglage("audio.haut_parleur", None))
 
 
 def _haut_parleur():
     """Peripherique de sortie TTS COURANT (lu en direct : changeable a la voix via
-    l'outil sortie_audio -> config.definir). None = sortie par defaut de Windows."""
-    return config.reglage("audio.haut_parleur", None)
+    l'outil sortie_audio -> config.definir). None = sortie par defaut de l'OS."""
+    return plateforme.peripherique_audio(config.reglage("audio.haut_parleur", None))
 
 # Le choix du modele LLM (Claude/Ollama) et de la voix (ElevenLabs/Piper) est gere
 # par les providers (core/llm.py, core/tts.py), selon config.yaml (mode: cloud|local).
 MODELE_WHISPER = config.reglage("whisper.modele", "medium")
 
+
+def _amorce_whisper():
+    """Phrase d'amorce donnee a Whisper pour ancrer le vocabulaire attendu.
+
+    Whisper transcrit par probabilite : sans contexte, « Uber Eats » devient
+    « hubveritz », « OBS » devient « eaubéesse ». L'amorce (initial_prompt) est
+    le levier prevu pour ca : les mots qu'elle contient deviennent nettement
+    plus probables. On y met le vocabulaire de config.yaml, plus les noms que
+    Jarvis connait deja (applications configurees, pieces de la maison).
+    """
+    mots = list(config.reglage("whisper.vocabulaire", []) or [])
+    try:                                    # les apps que l'utilisateur a declarees
+        mots += [str(k) for k in (config.reglage("apps", {}) or {})]
+    except Exception:
+        pass
+    vus, propres = set(), []
+    for m in mots:
+        m = str(m).strip()
+        if m and m.lower() not in vus:
+            vus.add(m.lower())
+            propres.append(m)
+    if not propres:
+        return None
+    return ("Conversation en francais avec un assistant vocal nomme Jarvis. "
+            "Vocabulaire attendu : " + ", ".join(propres) + ".")
+
+
+AMORCE_WHISPER = _amorce_whisper()
+
 TAUX = 16000
 BLOC = 1280
 
 SEUIL_REVEIL = config.reglage("assistant.seuil_reveil", 0.5)   # sensibilite du mot d'activation
-SEUIL_INTERRUPTION = 0.7   # plus strict : le micro entend aussi l'enceinte
+# Mot d'activation redit PAR-DESSUS Jarvis : plus strict que l'eveil normal, car
+# le micro entend aussi l'enceinte. Reglable : sur un micro peu sensible ou en
+# casque (pas d'echo), 0.7 est inatteignable et couper devient impossible.
+SEUIL_INTERRUPTION = config.reglage("interruption.seuil_reveil", 0.7)
 SEUIL_PAROLE_SUR = 0.025
-BLOCS_AVANT_VERIF = 5      # 5 x 80 ms = 0,4 s de parole continue
+# Parole continue requise avant de transcrire ce qui est dit PAR-DESSUS Jarvis.
+# 3 x 80 ms = 0,24 s. C'etait 5 (0,4 s), mais un « stop » sec dure ~0,25 s : le
+# seuil ne pouvait mathematiquement jamais etre atteint pour le mot d'arret le
+# plus utilise.
+BLOCS_AVANT_VERIF = 3
+# Blocs faibles toleres sans remettre le compteur a zero. La plosive de « stop »
+# ou de « attends » cree une micro-coupure naturelle qui, sans cette tolerance,
+# annulait la detection juste avant qu'elle aboutisse.
+BLOCS_CREUX_TOLERES = 2
 DELAI_ENTRE_VERIFS = 1.0
 SEUIL_SILENCE = 0.010
 SILENCE_FIN = 1.2
@@ -108,12 +152,45 @@ def _refaire_systeme(memoire_courante):
                        + memoire.texte_pour_systeme(memoire_courante))
 
 
+_JOURS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+_MOIS_FR = ("janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
+            "aout", "septembre", "octobre", "novembre", "decembre")
+
+
+def _ancrage_temporel():
+    """Rappelle au modele la date et l'heure — recalcule a CHAQUE tour.
+
+    Sans cela, le modele ne sait pas quel jour on est : il interprete « cette
+    semaine » ou « la semaine qui vient » au hasard, ne peut pas verifier ce
+    que l'agenda lui rend, et doit appeler un outil rien que pour donner la
+    date. C'est la cause d'une famille entiere d'erreurs.
+
+    Recalcule a chaque tour, et pas une fois au demarrage : Jarvis tourne des
+    jours d'affilee, et une date figee serait pire que pas de date du tout.
+    """
+    d = dt.datetime.now().astimezone()
+    return (f"\n\nDate et heure actuelles : {_JOURS_FR[d.weekday()]} "
+            f"{d.day} {_MOIS_FR[d.month - 1]} {d.year}, {d.hour}h{d.minute:02d}. "
+            "Sers-t'en pour interpreter « aujourd'hui », « cette semaine », "
+            "« la semaine prochaine » : n'appelle pas d'outil pour connaitre la "
+            "date. Si un resultat d'agenda semble incoherent avec cette date, "
+            "dis-le au lieu de le lire tel quel.")
+
+
+def systeme_courant():
+    """Consigne systeme complete, horodatee a l'instant de l'appel."""
+    return SYSTEME_COURANT + _ancrage_temporel()
+
+
 # ---------------------------------------------------------------- HUD (option)
 
 try:
     import hud
-except Exception:
+except Exception as _e:
     hud = None
+    _ERREUR_HUD = _e
+else:
+    _ERREUR_HUD = None
 
 try:
     import overlay as _overlay
@@ -180,6 +257,26 @@ def _hud(methode, *args):
         getattr(hud, methode)(*args)
     except Exception:
         pass
+
+
+def _demarrer_hud():
+    """Lance le HUD et DIT pourquoi si ca rate.
+
+    C'est la seule interface visuelle sur macOS : la noyer dans le `except:
+    pass` de _hud() laissait l'utilisateur sans aucune trace de l'echec.
+    """
+    if not config.reglage("hud.actif", True):
+        return
+    if hud is None:
+        print(f"HUD indisponible : {_ERREUR_HUD}")
+        return
+    try:
+        hud.demarrer(ouvrir=bool(config.reglage("hud.ouvrir_navigateur", True)))
+    except OSError as e:
+        print(f"HUD non demarre : le port {hud.PORT} est deja pris ({e}).")
+        print(f"  Ferme l'autre Jarvis, ou change hud.port dans config.yaml.")
+    except Exception as e:
+        print(f"HUD non demarre ({type(e).__name__} : {e}).")
 
 
 def _niv_hud(bloc):
@@ -254,7 +351,7 @@ def basculer_micro(force=None):
 
 
 def couper_parole():
-    """Arrete immediatement la synthese en cours (ElevenLabs ou SAPI)."""
+    """Arrete immediatement la synthese en cours (ElevenLabs, Piper ou voix OS)."""
     _INTERRUPTION.set()
     try:
         sd.stop()          # coupe la lecture ElevenLabs sur le haut-parleur
@@ -268,23 +365,47 @@ def couper_parole():
             pass
 
 
+def _enveloppe_voix(audio, frequence, seconde):
+    """Niveau 0..1 de la voix a l'instant `seconde` de la lecture.
+
+    Sert a faire pulser le coeur du HUD au rythme reel de ce que Jarvis dit,
+    au lieu d'un etat « parole » figé. Fenetre de 40 ms, comme un vumetre.
+    """
+    try:
+        debut = int(seconde * frequence)
+        fenetre = audio[debut:debut + max(1, int(frequence * 0.04))]
+        if fenetre.size == 0:
+            return 0.0
+        rms = float(np.sqrt(np.mean((fenetre.astype(np.float32) / 32768.0) ** 2)))
+        return float(min(1.0, rms * 3.2))     # la parole depasse rarement 0.3 en RMS
+    except Exception:
+        return 0.0
+
+
 def _jouer_audio(audio, frequence):
-    """Joue un tableau int16 mono sur le haut-parleur, interruptible."""
+    """Joue un tableau int16 mono sur le haut-parleur, interruptible.
+
+    Pousse au passage l'enveloppe de la voix au HUD : le reacteur bat au rythme
+    de la phrase prononcee.
+    """
     if _INTERRUPTION.is_set():
         return
     sd.play(audio, samplerate=frequence, device=_haut_parleur())
+    debut = time.monotonic()
     while not _INTERRUPTION.is_set():
         courant = sd.get_stream()
         if courant is None or not courant.active:
             break
+        _hud("niveau", _enveloppe_voix(audio, frequence, time.monotonic() - debut))
         time.sleep(0.03)
     if _INTERRUPTION.is_set():
         sd.stop()
+    _hud("niveau", 0.0)          # le coeur retombe des la fin de la phrase
 
 
 def dire(texte, interruptible=True):
     """Prononce un texte via le provider TTS courant (ElevenLabs en cloud, Piper en
-    local) ; repli sur la voix Windows (SAPI) si le provider est indisponible.
+    local) ; repli sur la voix integree a l'OS si le provider est indisponible.
 
     interruptible=False : le barge-in est desactive pendant cette phrase (utilise
     pour la question de confirmation : la reponse de l'utilisateur est un oui/non,
@@ -301,49 +422,36 @@ def dire(texte, interruptible=True):
         if resultat is not None:
             _jouer_audio(*resultat)
         else:
-            _dire_sapi(texte)
+            _dire_voix_systeme(texte)
     finally:
         _PARLE.clear()    # fin de la parole : plus d'interruption possible
 
 
-def _dire_sapi(texte):
-    """Synthese vocale Windows (SAPI), voix francaise si disponible.
+def _dire_voix_systeme(texte):
+    """Voix integree a l'OS : SAPI (Windows), `say` (macOS), espeak (Linux).
 
-    Le texte est envoye au script PowerShell par l'entree standard, jamais dans
-    -Command : une apostrophe francaise ne peut pas casser le littoral. Le flux
-    stdin est lu en UTF-8. L'appel est interruptible via couper_parole().
+    C'est le dernier recours quand ElevenLabs ou Piper ne rendent rien. Le texte
+    est envoye au moteur par l'entree standard, jamais sur la ligne de commande :
+    une apostrophe francaise ne peut donc pas casser le littoral. L'appel est
+    interruptible via couper_parole().
     """
     global _PROCESSUS_PAROLE
 
     if _INTERRUPTION.is_set():
         return
 
-    script = (
-        "[Console]::InputEncoding = [Text.Encoding]::UTF8; "
-        "$t = [Console]::In.ReadToEnd(); "
-        "Add-Type -AssemblyName System.Speech; "
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-        "$fr = $s.GetInstalledVoices() | "
-        "Where-Object { $_.VoiceInfo.Culture.Name -like 'fr*' } | "
-        "Select-Object -First 1; "
-        "if ($fr) { $s.SelectVoice($fr.VoiceInfo.Name) }; "
-        "$s.Rate = 1; "
-        "$s.Speak($t)"
-    )
+    processus = plateforme.parler_systeme(texte)
+    if processus is None:
+        print(f"  [voix] aucune voix systeme disponible ({plateforme.SYSTEME}).")
+        return
 
-    processus = subprocess.Popen(
-        ["powershell", "-NoProfile", "-Command", script],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
     _PROCESSUS_PAROLE = processus
     try:
         _, erreurs = processus.communicate(input=texte.encode("utf-8"))
         if processus.returncode and not _INTERRUPTION.is_set():
             details = (erreurs or b"").decode("utf-8", "replace").strip()
-            print(f"  [SAPI] echec (code {processus.returncode}) : {details}")
+            print(f"  [{plateforme.nom_voix_systeme()}] echec "
+                  f"(code {processus.returncode}) : {details}")
     finally:
         _PROCESSUS_PAROLE = None
 
@@ -410,9 +518,37 @@ def _est_toujours(texte):
     return bool(texte) and "toujours" in sans_accents(texte)
 
 
+def _corrections():
+    """Table de corrections phonetiques, depuis config.yaml (whisper.corrections).
+
+    L'amorce (initial_prompt) suffit pour les noms a plusieurs syllabes — elle
+    corrige « UB et ITS » en « Uber Eats ». Elle NE suffit PAS pour les sigles
+    courts : « OBS » reste entendu « au bas », « Hue » devient « rues ». Trop
+    peu de matiere sonore pour que le contexte tranche. D'ou cette table, qui
+    remplace sur le texte final ce que le modele ne peut pas deviner.
+    """
+    brut = config.reglage("whisper.corrections", {}) or {}
+    return {sans_accents(str(k).lower()): str(v) for k, v in brut.items() if k}
+
+
+CORRECTIONS = _corrections()
+
+
+def corriger_vocabulaire(texte):
+    """Remplace les confusions connues, en respectant les frontieres de mots."""
+    if not CORRECTIONS or not texte:
+        return texte
+    for faux, vrai in CORRECTIONS.items():
+        motif = re.compile(r"\b" + re.escape(faux) + r"\b", re.IGNORECASE)
+        # sans_accents pour comparer, mais on remplace dans le texte d'origine :
+        # on cherche donc aussi la forme accentuee telle qu'elle a ete entendue.
+        texte = motif.sub(vrai, texte)
+    return texte
+
+
 def nettoyer(texte):
-    """Retire le residu du mot d'activation en tete de transcription."""
-    t = texte.strip()
+    """Retire le residu du mot d'activation, puis corrige le vocabulaire connu."""
+    t = corriger_vocabulaire(texte.strip())
 
     plat = sans_accents(t)
     if any(h in plat for h in HALLUCINATIONS):
@@ -579,7 +715,7 @@ def repondre(historique):
             return ""
         try:
             reponse = fournisseur.repondre(
-                SYSTEME_COURANT, historique,
+                systeme_courant(), historique,
                 registre.schemas_api(local_seulement=(fournisseur.nom == "Ollama")))
         except Exception as e:
             print(f"  [{fournisseur.nom}] erreur : {e}")
@@ -633,7 +769,9 @@ def repondre(historique):
 
 
 def _ajouter_dll_nvidia():
-    """Rend les DLL cuBLAS et cuDNN visibles pour faster-whisper."""
+    """Rend les DLL cuBLAS et cuDNN visibles pour faster-whisper (Windows/Linux)."""
+    if plateforme.EST_MAC:
+        return                      # pas de CUDA sur Mac : rien a rendre visible
     racines = []
     try:
         import nvidia
@@ -663,16 +801,27 @@ def _ajouter_dll_nvidia():
 
 
 def charger_whisper():
-    """Charge Whisper sur GPU si possible, sinon sur CPU."""
+    """Charge Whisper sur GPU si possible, sinon sur CPU.
+
+    Sur Mac, CTranslate2 (moteur de faster-whisper) ne gere pas Metal : on va
+    directement au CPU, tres correct sur Apple Silicon en int8. Inutile donc
+    d'afficher un message d'echec CUDA qui inquiete pour rien.
+    """
     _ajouter_dll_nvidia()
 
-    try:
-        modele = WhisperModel(MODELE_WHISPER, device="cuda", compute_type="float16")
-        modele.transcribe(np.zeros(TAUX, dtype=np.float32), language="fr")
-        print(f"Whisper {MODELE_WHISPER} sur GPU.")
-        return modele
-    except Exception as e:
-        print(f"GPU indisponible ({type(e).__name__}), bascule sur CPU.")
+    accelerateur, precision = plateforme.accelerateur_whisper()
+    if accelerateur == "cpu":
+        puce = "Apple Silicon" if plateforme.est_apple_silicon() else "CPU"
+        print(f"Whisper sur {puce} (pas de CUDA sur ce systeme).")
+    else:
+        try:
+            modele = WhisperModel(MODELE_WHISPER, device=accelerateur,
+                                  compute_type=precision)
+            modele.transcribe(np.zeros(TAUX, dtype=np.float32), language="fr")
+            print(f"Whisper {MODELE_WHISPER} sur GPU.")
+            return modele
+        except Exception as e:
+            print(f"GPU indisponible ({type(e).__name__}), bascule sur CPU.")
 
     for taille in (MODELE_WHISPER, "small"):
         try:
@@ -766,11 +915,13 @@ def repondre_en_ecoutant(historique, flux, reveil, whisper):
     facteur = float(config.reglage("interruption.facteur", 1.8))
     seuil_min = float(config.reglage("interruption.seuil", SEUIL_PAROLE_SUR))
     blocs_requis = int(config.reglage("interruption.blocs", BLOCS_AVANT_VERIF))
+    creux_toleres = int(config.reglage("interruption.creux", BLOCS_CREUX_TOLERES))
     debug = bool(config.reglage("interruption.debug", False))
 
     base = None            # niveau moyen de l'echo de Jarvis (suivi en continu)
     tampon = []            # audio de TA parole par-dessus
     blocs_sur = 0
+    creux = 0              # blocs faibles consecutifs, toleres jusqu'a un seuil
     derniere_verif = 0.0
 
     while thread.is_alive():
@@ -796,12 +947,17 @@ def repondre_en_ecoutant(historique, flux, reveil, whisper):
         if not _PARLE.is_set():
             base = None
             blocs_sur = 0
+            creux = 0
             tampon = []
             continue
 
         # voie 1 : le mot d'activation
         scores = reveil.predict((bloc * 32767).astype(np.int16))
-        if max(scores.values()) >= SEUIL_INTERRUPTION:
+        score_reveil = max(scores.values())
+        if debug and score_reveil > 0.2:
+            print(f"  [micro debug] mot-cle par-dessus : {score_reveil:.2f} "
+                  f"(seuil {SEUIL_INTERRUPTION})")
+        if score_reveil >= SEUIL_INTERRUPTION:
             couper_parole()
             interrompu, relancer = True, True
             print("  [micro] Je me tais.")
@@ -817,10 +973,17 @@ def repondre_en_ecoutant(historique, flux, reveil, whisper):
         if niv > seuil_sur:
             tampon.append(bloc)
             blocs_sur += 1
+            creux = 0
         else:
-            if 0 < blocs_sur < blocs_requis:
-                tampon = []                # trop court : simple bruit, on oublie
-            blocs_sur = 0
+            if blocs_sur:
+                creux += 1
+                if creux <= creux_toleres:
+                    tampon.append(bloc)    # micro-coupure : on garde le fil
+                else:
+                    if blocs_sur < blocs_requis:
+                        tampon = []        # trop court : simple bruit, on oublie
+                    blocs_sur = 0
+                    creux = 0
 
         # On ne coupe QUE si on reconnait un mot d'arret ("attends", "stop"...)
         # dans ce que tu dis par-dessus. Ainsi Jarvis ne peut jamais se couper
@@ -832,8 +995,10 @@ def repondre_en_ecoutant(historique, flux, reveil, whisper):
             extrait = np.concatenate(tampon[-30:])
             tampon = []
             blocs_sur = 0
+            creux = 0
             try:
-                segments, _ = whisper.transcribe(extrait, language="fr", beam_size=1)
+                segments, _ = whisper.transcribe(extrait, language="fr", beam_size=1,
+                                              initial_prompt=AMORCE_WHISPER)
                 dit = " ".join(s.text for s in segments).strip()
             except Exception:
                 dit = ""
@@ -869,7 +1034,8 @@ def _confirmer(interrompu, relancer, whisper, historique, flux):
     audio_conf = capturer(flux, deque())
     reponse = ""
     if audio_conf is not None:
-        seg, _ = whisper.transcribe(audio_conf, language="fr", beam_size=5)
+        seg, _ = whisper.transcribe(audio_conf, language="fr", beam_size=5,
+                                initial_prompt=AMORCE_WHISPER)
         reponse = nettoyer(" ".join(s.text for s in seg).strip())
     print(f"  [confirmation] {reponse or '(rien)'}")
 
@@ -900,7 +1066,8 @@ def _tronquer(historique):
 
 def traiter(audio, whisper, historique, flux, reveil):
     """Transcrit, repond, parle. Renvoie True si on doit enchainer (relance)."""
-    segments, _ = whisper.transcribe(audio, language="fr", beam_size=5)
+    segments, _ = whisper.transcribe(audio, language="fr", beam_size=5,
+                                 initial_prompt=AMORCE_WHISPER)
     question = nettoyer(" ".join(s.text for s in segments).strip())
 
     if not question or len(question) < 3:
@@ -942,10 +1109,38 @@ def _feedback_geste(geste):
     _hud("outil", "geste", geste)
 
 
+def _raccourcis_possibles():
+    """Vrai si les raccourcis clavier GLOBAUX sont installables sur ce systeme.
+
+    La lib `keyboard` lit le clavier au niveau du pilote : elle exige les droits
+    root sur macOS et Linux. Plutot que de faire planter Jarvis (ou d'exiger
+    sudo), on saute proprement les raccourcis et on le dit une fois.
+    """
+    if plateforme.EST_WINDOWS:
+        return True
+    return getattr(os, "geteuid", lambda: 1)() == 0
+
+
+_RACCOURCIS_ANNONCES = False
+
+
+def _annoncer_raccourcis_indispo():
+    global _RACCOURCIS_ANNONCES
+    if _RACCOURCIS_ANNONCES:
+        return
+    _RACCOURCIS_ANNONCES = True
+    print("Raccourcis clavier globaux desactives : ils demandent les droits root "
+          f"sur {plateforme.SYSTEME}. Utilise la voix, le panneau web, ou un "
+          "raccourci Automator/Raccourcis (voir TROUBLESHOOTING_MAC.md).")
+
+
 def _installer_raccourci_gestes():
     """Raccourci clavier global pour basculer les gestes (optionnel, via 'keyboard')."""
     combo = config.reglage("gestes.raccourci", "ctrl+alt+g")
     if not combo:
+        return
+    if not _raccourcis_possibles():
+        _annoncer_raccourcis_indispo()
         return
     try:
         import keyboard
@@ -968,6 +1163,9 @@ def _installer_raccourci_micro():
     combo = config.reglage("audio.raccourci_mute", "ctrl+alt+m")
     if not combo:
         return
+    if not _raccourcis_possibles():
+        _annoncer_raccourcis_indispo()
+        return
     try:
         import keyboard
     except Exception:
@@ -979,10 +1177,65 @@ def _installer_raccourci_micro():
         LOG.exception("micro: raccourci clavier")
 
 
+def _entrees_audio():
+    """[(index, nom)] des peripheriques d'ENTREE, ou [] si aucun."""
+    try:
+        return [(i, d.get("name", "?")) for i, d in enumerate(sd.query_devices())
+                if d.get("max_input_channels", 0) > 0]
+    except Exception:
+        return []
+
+
+def _ouvrir_micro():
+    """Ouvre le flux du micro, ou explique precisement ce qui manque.
+
+    PortAudio leve « Error querying device -1 » quand AUCUNE entree n'existe :
+    trace illisible pour un message qui veut juste dire « pas de micro ». Les
+    deux causes sur Mac sont l'autorisation Microphone non accordee au terminal,
+    et le Mac mini / Mac Studio, qui n'ont pas de micro integre du tout.
+    """
+    entrees = _entrees_audio()
+    if not entrees:
+        print("\nAucun peripherique d'ENTREE audio detecte : Jarvis ne peut pas ecouter.")
+        if plateforme.EST_MAC:
+            print("  1. Autorise le Microphone pour ton terminal : Reglages Systeme >")
+            print("     Confidentialite et securite > Microphone, puis RELANCE le terminal.")
+            print("  2. Les Mac mini et Mac Studio n'ont pas de micro integre : branche")
+            print("     un micro USB, un casque, ou connecte des AirPods.")
+            print("  Detail : TROUBLESHOOTING_MAC.md")
+        else:
+            print("  Branche un micro, puis relance.")
+        raise SystemExit(1)
+
+    try:
+        return sd.InputStream(samplerate=TAUX, channels=1, dtype="float32",
+                              device=MICRO, blocksize=BLOC)
+    except Exception as e:
+        print(f"\nImpossible d'ouvrir le micro configure (audio.micro = {MICRO!r}) : {e}")
+        print("Entrees disponibles :")
+        for i, nom in entrees:
+            print(f"  {i} : {nom}")
+        print("Mets l'index voulu dans config.yaml (audio.micro), ou null pour "
+              "laisser le systeme choisir.")
+        raise SystemExit(1)
+
+
 def main():
     print("Chargement des modeles...")
 
     registre.charger_outils()
+
+    # Serveurs MCP externes : leurs outils rejoignent le registre, a confirmation.
+    try:
+        from core import mcp_externe
+        resume = mcp_externe.charger()
+        if resume:
+            print(f"MCP externe : {resume}")
+        import atexit
+        atexit.register(mcp_externe.arreter)
+    except Exception:
+        LOG.exception("mcp externe: chargement")
+
     voix.definir_parleur(dire)
 
     reveil = WakeModel(wakeword_model_paths=[str(
@@ -994,11 +1247,13 @@ def main():
     # Les appels telephoniques reutilisent ce Whisper pour transcrire les reponses.
     from tools.appels import definir_transcripteur
     definir_transcripteur(lambda chemin: " ".join(
-        s.text for s in whisper.transcribe(chemin, language="fr", beam_size=5)[0]).strip())
+        s.text for s in whisper.transcribe(chemin, language="fr", beam_size=5,
+                           initial_prompt=AMORCE_WHISPER)[0]).strip())
     # V2 (conversation temps reel) : transcription d'un tableau audio (16kHz float32).
     from tools.appel_direct import definir_transcripteur_direct
     definir_transcripteur_direct(lambda audio: " ".join(
-        s.text for s in whisper.transcribe(audio, language="fr", beam_size=1)[0]).strip())
+        s.text for s in whisper.transcribe(audio, language="fr", beam_size=1,
+                           initial_prompt=AMORCE_WHISPER)[0]).strip())
 
     charger_pieces_hue()
     allumer_si_nuit()
@@ -1050,7 +1305,7 @@ def main():
             print("ATTENTION : aucune cle Claude dans config.yaml (anthropic.cle). "
                   "L'assistant ne pourra pas repondre.")
 
-    _hud("demarrer")
+    _demarrer_hud()
     _modele_hud = getattr(_fournisseur, "modele", "")
     _hud("config", f"{_fournisseur.nom} · {_modele_hud}" if _modele_hud
          else _fournisseur.nom, f"whisper {MODELE_WHISPER}")
@@ -1067,10 +1322,7 @@ def main():
     _refaire_systeme(faits)
     historique = []
 
-    flux = sd.InputStream(
-        samplerate=TAUX, channels=1, dtype="float32",
-        device=MICRO, blocksize=BLOC,
-    )
+    flux = _ouvrir_micro()
     flux.start()
 
     # Reconnaissance musicale : capture depuis le micro en SUSPENDANT proprement le
@@ -1108,7 +1360,7 @@ def main():
     except Exception:
         LOG.exception("musique: hook capture micro")
 
-    # Overlay de reponses (fenetre flottante Windows) : demarre masque, cout nul au
+    # Overlay de reponses (fenetre flottante) : demarre masque, cout nul au
     # repos ; pilotable par config overlay.* et a la voix ("affiche les reponses").
     if _overlay is not None and config.reglage("overlay.actif", True):
         try:

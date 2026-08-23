@@ -17,6 +17,7 @@ memoire.json
 memory.json
 google_credentials.json
 google_token.json
+google_token_mail.json
 notes/
 reminders.json
 

@@ -20,11 +20,12 @@ import json
 import subprocess
 from pathlib import Path
 
+from core import plateforme
 from core.config import reglage
 from core.registre import outil
 
 _RACINE = Path(__file__).resolve().parent.parent
-_PY_SHAZAM = _RACINE / "musique" / ".venv-shazam" / "Scripts" / "python.exe"
+_PY_SHAZAM = plateforme.python_venv(_RACINE / "musique" / ".venv-shazam")
 _RECONNAISSEUR = _RACINE / "musique" / "reconnaisseur.py"
 _CAPTURES = _RACINE / "musique" / "captures"
 _NOTES = _RACINE / "notes" / "musiques.md"
@@ -54,10 +55,16 @@ def _capturer_micro(secondes):
 
 
 def _capturer_systeme(secondes):
-    """Audio joué par le PC (loopback WASAPI du haut-parleur par défaut)."""
+    """Audio joué par l'ordinateur (loopback du haut-parleur par défaut).
+
+    Windows (WASAPI) et Linux (PulseAudio) savent le faire nativement. macOS n'a
+    aucun loopback système : il faut un pilote virtuel (BlackHole, Loopback...)
+    puis le choisir comme sortie — sinon on retombe sur la capture micro.
+    """
     try:
         import soundcard as sc
-    except ImportError as e:
+    except Exception as e:
+        # macOS : soundcard lève NotImplementedError, pas ImportError.
         raise ImportError("soundcard-absent") from e
     import numpy as np
     sr = 44100
@@ -157,6 +164,11 @@ def _capturer_et_reconnaitre(source, secondes):
             samples, sr = _capturer_micro(secondes)
             src_log = "micro"
     except ImportError:
+        from core import plateforme
+        if plateforme.EST_MAC:
+            return ("macOS n'a pas de capture du son système : il faut un pilote "
+                    "virtuel (BlackHole ou Loopback) choisi comme sortie. Sinon, "
+                    "dis « c'est quoi cette musique » et j'écoute au micro.")
         return ("Pour identifier le son du PC, installe d'abord soundcard : "
                 "« uv add soundcard ». Sinon, dis « c'est quoi cette musique » "
                 "(via le micro).")

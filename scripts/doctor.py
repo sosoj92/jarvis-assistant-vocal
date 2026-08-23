@@ -7,12 +7,15 @@ et chaque integration configuree) avec des marques claires et comment corriger.
 Ne lance PAS l'assistant : il se contente de verifier.
 """
 import importlib
+import shutil
 import socket
 import sys
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
+
+from core import plateforme  # noqa: E402  (apres l'ajout de RACINE au sys.path)
 
 OK, KO, WARN, INFO = "  \033[92m[OK]\033[0m", "  \033[91m[X]\033[0m", "  \033[93m[!]\033[0m", "  [i]"
 try:
@@ -56,6 +59,27 @@ def reglage(chemin, defaut=None):
 
 
 # ---------------------------------------------------------------- verifs
+
+def v_systeme():
+    titre("Systeme")
+    ok(plateforme.nom_machine())
+    if plateforme.EST_MAC:
+        # Homebrew fournit portaudio, dont depend sounddevice (micro + wake word).
+        if shutil.which("brew"):
+            ok("Homebrew present")
+        else:
+            warn("Homebrew absent",
+                 "installe-le (brew.sh) : il fournit portaudio, dont depend le micro.")
+        if plateforme.est_apple_silicon():
+            print(f"{INFO} Apple Silicon : Whisper tourne sur CPU (int8), c'est normal "
+                  "et rapide. Pas de CUDA sur Mac.")
+        else:
+            print(f"{INFO} Mac Intel : onnxruntime plafonne a la 1.23.2 (plus de roue "
+                  "x86_64 macOS au-dela). C'est gere par pyproject.toml.")
+        print(f"{INFO} Permissions a accorder au terminal qui lance Jarvis : Micro "
+              "(obligatoire), Accessibilite (touches media/fenetres), "
+              "Enregistrement de l'ecran (capture + titres de fenetres).")
+
 
 def v_python():
     titre("Python")
@@ -114,8 +138,31 @@ def v_materiel():
             print(f"{INFO} modele local conseille : {_reco_modele(vram)}")
         pynvml.nvmlShutdown()
     except Exception:
+        if plateforme.EST_MAC:
+            gpu = plateforme.infos_gpu()
+            ok(f"GPU Apple : {gpu}" if gpu else "GPU integre a la puce Apple")
+            print(f"{INFO} memoire unifiee : le modele local partage la RAM. "
+                  f"Modele conseille : {_reco_modele_apple()}")
+            print(f"{INFO} pas de CUDA sur Mac : Whisper tourne sur CPU (int8).")
+            return
         print(f"{INFO} modele local conseille : {_reco_modele(None)}")
         warn("aucun GPU NVIDIA detecte", "ca marche en CPU, mais Whisper sera plus lent.")
+
+
+def _reco_modele_apple():
+    """Suggestion Ollama selon la memoire unifiee du Mac (partagee CPU/GPU)."""
+    try:
+        import psutil
+        go = psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        return "qwen3.5:4b"
+    if go >= 32:
+        return "qwen3.5:27b (ou 9b si tu gardes OBS ouvert)"
+    if go >= 16:
+        return "qwen3.5:9b"
+    if go >= 8:
+        return "qwen3.5:4b"
+    return "qwen3.5:2b (tool-calling limite) ou mode cloud"
 
 
 def _reco_modele(vram):
@@ -165,7 +212,8 @@ def v_voix():
                 ok("voix Kokoro trouvee")
             else:
                 warn("Kokoro selectionne mais modele introuvable (kokoro.modele)",
-                     "voir docs/local.md ; sinon Jarvis parle avec la voix Windows.")
+                     f"voir docs/local.md ; sinon Jarvis parle avec la "
+                     f"{plateforme.nom_voix_systeme()}.")
         else:
             modele = reglage("piper.modele", "")
             voix_dir = list((RACINE / "voix").glob("*.onnx")) if (RACINE / "voix").exists() else []
@@ -173,12 +221,19 @@ def v_voix():
                 ok("voix Piper trouvee")
             else:
                 warn("aucune voix Piper (.onnx)", "telecharge une voix FR dans voix/ (voir "
-                     "docs/local.md). Sinon Jarvis parle avec la voix Windows.")
+                     f"docs/local.md). Sinon Jarvis parle avec la "
+                     f"{plateforme.nom_voix_systeme()}.")
     else:
         if reglage("elevenlabs.cle", ""):
             ok("cle ElevenLabs presente")
         else:
-            warn("pas de cle ElevenLabs", "Jarvis parlera avec la voix Windows (SAPI). Optionnel.")
+            warn("pas de cle ElevenLabs",
+                 f"Jarvis parlera avec la {plateforme.nom_voix_systeme()}. Optionnel.")
+    if plateforme.voix_systeme_disponible():
+        ok(f"voix de secours disponible : {plateforme.nom_voix_systeme()}")
+    else:
+        warn("aucune voix de secours integree a l'OS",
+             "sans ElevenLabs ni Piper, Jarvis restera muet.")
 
 
 def _port_ouvert(hote, port, timeout=2):
@@ -233,18 +288,31 @@ def v_micro():
     titre("Micro")
     try:
         import sounddevice as sd
-        idx = reglage("audio.micro", 1)
+        idx = plateforme.peripherique_audio(
+            reglage("audio.micro", plateforme.micro_defaut()))
         entrees = [d for d in sd.query_devices() if d["max_input_channels"] > 0]
         if not entrees:
-            ko("aucun micro detecte", "branche un micro.")
+            ko("aucun micro detecte",
+               "branche un micro." + ("  Sur macOS, verifie aussi Reglages Systeme > "
+                                      "Confidentialite > Microphone." if plateforme.EST_MAC
+                                      else ""))
             return
-        ok(f"{len(entrees)} entree(s) audio ; micro configure : index {idx}")
+        libelle = "entree par defaut du systeme" if idx is None else f"index {idx}"
+        ok(f"{len(entrees)} entree(s) audio ; micro configure : {libelle}")
         try:
-            nom = sd.query_devices(idx)["name"]
-            print(f"{INFO} index {idx} = {nom}")
+            nom = sd.query_devices(sd.default.device[0] if idx is None else idx)["name"]
+            print(f"{INFO} {libelle} = {nom}")
         except Exception:
-            warn(f"l'index audio.micro={idx} semble invalide",
-                 "choisis un index valide (voir la liste ci-dessus).")
+            warn(f"le reglage audio.micro={idx} semble invalide",
+                 "choisis un index valide (voir la liste ci-dessus), ou mets null "
+                 "pour laisser le systeme choisir.")
+    except OSError as e:
+        # PortAudio absent : c'est LE probleme d'installation classique sur Mac.
+        if plateforme.EST_MAC:
+            ko(f"PortAudio indisponible ({e})",
+               "installe-le : brew install portaudio, puis relance uv sync.")
+        else:
+            warn(f"impossible de tester le micro ({e})")
     except Exception as e:
         warn(f"impossible de tester le micro ({e})")
 
@@ -253,6 +321,7 @@ def main():
     print("=" * 48)
     print("  Diagnostic de Jarvis (doctor)")
     print("=" * 48)
+    v_systeme()
     v_python()
     v_dependances()
     if v_config():

@@ -1,13 +1,18 @@
 """Lancement d'applications et de jeux, via un mapping dans config.yaml.
 
-apps: { "borderlands": "C:\\...\\game.exe", "spotify": "spotify:",
+apps: { "borderlands": "C:\\...\\game.exe",           # Windows : chemin .exe
+        "borderlands_mac": "/Applications/Jeu.app",   # macOS : bundle .app
+        "obs": "OBS",                                 # macOS : nom d'application
+        "spotify": "spotify:",
         "un_jeu_steam": "steam://rungameid/XXXX" }
+
+Le lancement passe par core/plateforme.ouvrir() : os.startfile sur Windows,
+`open` sur macOS (gere .app, fichiers, URL et protocoles), xdg-open sur Linux.
 
 Si l'app demandee est inconnue, Jarvis propose de l'ajouter ; l'ajout passe par
 ajouter_app (confirmation requise) qui ecrit dans config.yaml.
 """
-import os
-
+from core import plateforme
 from core.config import definir, reglage
 from core.registre import outil
 from core.util import sans_accents
@@ -53,7 +58,8 @@ def launch_app(nom: str) -> str:
                 "slash numero), et je l'ajouterai.")
     cible = apps[clef]
     try:
-        os.startfile(cible)   # gere .exe, fichiers, et protocoles (steam://, spotify:)
+        # gere .exe/.app, fichiers, et protocoles (steam://, spotify:)
+        plateforme.ouvrir(cible)
         return f"{clef} lance."
     except Exception as e:
         return f"Impossible de lancer {clef} : {e}"
@@ -66,14 +72,17 @@ def _annonce_ajout(args):
 @outil(
     nom="ajouter_app",
     description="Ajoute une application ou un jeu au mapping (config.yaml) : un nom "
-                "et un chemin .exe OU un identifiant Steam (steam://rungameid/NUMERO). "
+                "et un chemin .exe (Windows) ou .app / nom d'application (macOS), "
+                "OU un identifiant Steam (steam://rungameid/NUMERO). "
                 "A utiliser quand l'utilisateur donne le chemin d'une app inconnue.",
     parametres={
         "type": "object",
         "properties": {
             "nom": {"type": "string", "description": "Nom court de l'application."},
             "chemin": {"type": "string",
-                       "description": "Chemin du .exe ou identifiant steam://rungameid/..."},
+                       "description": "Chemin du .exe (Windows) ou du .app / nom "
+                                      "d'application (macOS), ou identifiant "
+                                      "steam://rungameid/..."},
         },
         "required": ["nom", "chemin"],
     },

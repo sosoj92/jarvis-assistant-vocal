@@ -2,13 +2,14 @@
 
 Chaque provider expose `synthetiser(texte)` qui renvoie (audio_int16, frequence)
 ou None. jarvis14 se charge de JOUER l'audio (avec sa gestion d'interruption) et
-retombe sur la voix Windows (SAPI) si le provider renvoie None.
+retombe sur la voix integree a l'OS si le provider renvoie None (SAPI sur
+Windows, `say` sur macOS, espeak sur Linux — cf. core/plateforme).
 
   - ElevenLabsProvider : cloud (qualite max), voix configurable.
   - PiperProvider      : local, 100% offline, voix francaise Piper (.onnx).
 
 Choix par config.yaml (mode: cloud | local). En local sans modele Piper, ou en
-cloud sans cle ElevenLabs, on retombe proprement sur SAPI.
+cloud sans cle ElevenLabs, on retombe proprement sur la voix de l'OS.
 
 Note honnete sur le TTS local francais : Piper est recommande (voix FR eprouvees
 comme fr_FR-siwis / fr_FR-tom, tres leger, temps reel sur CPU). Kokoro (kokoro-onnx)
@@ -20,14 +21,16 @@ import logging
 import urllib.request
 from pathlib import Path
 
-# Magasin de certificats Windows (Malwarebytes intercepte le TLS : sans ca, l'appel
-# a l'API ElevenLabs echoue et Jarvis retombe sur la voix Windows).
+# Magasin de certificats du SYSTEME plutot que le bundle certifi (un antivirus qui
+# intercepte le TLS ferait sinon echouer l'appel a ElevenLabs). truststore gere les
+# trois OS : magasin Windows, Keychain macOS, magasin Linux.
 try:
     import truststore
     truststore.inject_into_ssl()
 except Exception:
     pass
 
+from core import plateforme
 from core.config import reglage
 
 LOG = logging.getLogger("jarvis")
@@ -105,7 +108,8 @@ class ElevenLabsProvider(ProviderTTS):
                 pass
             return np.frombuffer(decode.samples, dtype=np.int16), 24000
         except Exception as e:
-            print(f"  [ElevenLabs] indisponible ({e}), repli voix Windows.")
+            print(f"  [ElevenLabs] indisponible ({e}), repli "
+                  f"{plateforme.nom_voix_systeme()}.")
             return None
 
 
@@ -117,6 +121,34 @@ class PiperProvider(ProviderTTS):
     def __init__(self):
         self.modele = reglage("piper.modele", "")
         self._voix = None
+        self._config = None
+
+    def _synthese(self):
+        """SynthesisConfig depuis config.yaml, ou None pour les defauts du modele.
+
+        Les trois leviers qui rendent une voix Piper moins mecanique :
+          vitesse      (length_scale) : >1 ralentit, <1 accelere
+          expressivite (noise_scale)  : variation de l'intonation
+          variation    (noise_w)      : variation de la duree des syllabes
+        Piper part de 1.0 / 0.667 / 0.8 ; monter les deux derniers donne un
+        debit moins regulier, donc plus humain.
+        """
+        if self._config is not None:
+            return self._config or None
+        try:
+            from piper import SynthesisConfig
+        except ImportError:
+            self._config = False
+            return None
+        reglages = {
+            "length_scale": reglage("piper.vitesse", None),
+            "noise_scale": reglage("piper.expressivite", None),
+            "noise_w_scale": reglage("piper.variation", None),
+            "volume": reglage("piper.volume", None),
+        }
+        reglages = {k: float(v) for k, v in reglages.items() if v is not None}
+        self._config = SynthesisConfig(**reglages) if reglages else False
+        return self._config or None
 
     def _chemin(self):
         if not self.modele:
@@ -129,6 +161,31 @@ class PiperProvider(ProviderTTS):
     def disponible(self):
         c = self._chemin()
         return bool(c and c.exists())
+
+    def _rendre(self, np, texte):
+        """(audio int16, frequence) — gere les deux API de piper-tts.
+
+        Depuis la 1.3, `synthesize(texte)` rend un flux d'AudioChunk (un par
+        phrase) au lieu d'octets bruts ; `synthesize_stream_raw` a disparu. On
+        garde les deux chemins pour ne pas casser une installation plus ancienne.
+        """
+        if hasattr(self._voix, "synthesize"):
+            morceaux, frequence = [], None
+            reglages = self._synthese()
+            flux = (self._voix.synthesize(texte, reglages) if reglages
+                    else self._voix.synthesize(texte))
+            for bloc in flux:
+                morceaux.append(bloc.audio_int16_bytes)
+                if frequence is None:
+                    frequence = bloc.sample_rate
+            brut = b"".join(morceaux)
+            if not brut:
+                return None
+            return (np.frombuffer(brut, dtype=np.int16),
+                    frequence or self._voix.config.sample_rate)
+
+        brut = b"".join(self._voix.synthesize_stream_raw(texte))    # piper < 1.3
+        return np.frombuffer(brut, dtype=np.int16), self._voix.config.sample_rate
 
     def synthetiser(self, texte):
         try:
@@ -144,10 +201,10 @@ class PiperProvider(ProviderTTS):
         try:
             if self._voix is None:
                 self._voix = PiperVoice.load(str(chemin))
-            brut = b"".join(self._voix.synthesize_stream_raw(texte))
-            return np.frombuffer(brut, dtype=np.int16), self._voix.config.sample_rate
+            return self._rendre(np, texte)
         except Exception as e:
-            print(f"  [Piper] echec ({e}), repli voix Windows.")
+            print(f"  [Piper] echec ({e}), repli "
+                  f"{plateforme.nom_voix_systeme()}.")
             return None
 
 
@@ -182,7 +239,8 @@ class KokoroProvider(ProviderTTS):
             audio = (np.asarray(samples) * 32767).astype(np.int16)
             return audio, freq
         except Exception as e:
-            print(f"  [Kokoro] echec ({e}), repli voix Windows.")
+            print(f"  [Kokoro] echec ({e}), repli "
+                  f"{plateforme.nom_voix_systeme()}.")
             return None
 
 
@@ -191,18 +249,35 @@ class KokoroProvider(ProviderTTS):
 _TTS = None
 
 
+def _provider_local():
+    """Piper ou Kokoro, selon voix_locale."""
+    moteur = (reglage("voix_locale", "piper") or "piper").lower()
+    return KokoroProvider() if moteur == "kokoro" else PiperProvider()
+
+
 def tts():
-    """Provider TTS courant : local -> Piper/Kokoro (config voix_locale) ;
-    hybride/qualite -> ElevenLabs."""
+    """Provider TTS courant.
+
+    - mode local              -> Piper/Kokoro (config voix_locale).
+    - mode hybride/qualite    -> ElevenLabs.
+    - hybride SANS cle ElevenLabs, mais avec une voix locale installee -> cette
+      voix locale. Elle est bien meilleure que le repli de l'OS, et c'est le cas
+      de figure de quiconque veut Claude sans payer un second service.
+    """
     global _TTS
     if _TTS is None:
         from core.routage import mode_actuel
         m = mode_actuel()
         if m == "local":
-            moteur = (reglage("voix_locale", "piper") or "piper").lower()
-            _TTS = KokoroProvider() if moteur == "kokoro" else PiperProvider()
+            _TTS = _provider_local()
         else:
-            _TTS = ElevenLabsProvider()
+            cloud = ElevenLabsProvider()
+            local = _provider_local()
+            if not cloud.disponible() and local.disponible():
+                _TTS = local
+                LOG.info("pas de cle ElevenLabs : repli sur la voix locale %s", local.nom)
+            else:
+                _TTS = cloud
         LOG.info("provider TTS : %s (mode %s)", _TTS.nom, m)
     return _TTS
 
