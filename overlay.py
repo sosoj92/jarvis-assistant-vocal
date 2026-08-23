@@ -87,8 +87,11 @@ def demarrer(cfg=None):
         # de faire tomber l'assistant pour une fenêtre d'agrément.
         _CFG["actif"] = False
         print("Overlay desactive sur macOS : tkinter ne peut pas creer de fenetre "
-              "hors du thread principal. Utilise le panneau web (panneau.actif) "
-              "pour l'affichage. Details : TROUBLESHOOTING_MAC.md")
+              "hors du thread principal.\n"
+              "  Pour une interface, active le panneau web dans config.yaml :\n"
+              "      serveur:\n        actif: true\n"
+              "  puis ouvre http://localhost:8790/panneau\n"
+              "  Details : TROUBLESHOOTING_MAC.md")
         return
 
     if _THREAD is not None:

@@ -271,17 +271,45 @@ antérieure :
 git pull
 ```
 
-### Je veux l'affichage écrit des réponses sur Mac
+### Aucune interface ne s'ouvre
 
-L'overlay flottant est indisponible (voir ci-dessus). Le **panneau web** rend le
-même service dans le navigateur :
+C'est normal : l'overlay flottant est indisponible sur Mac (voir ci-dessus), et
+le **panneau web** est désactivé par défaut. Pour l'activer, dans `config.yaml` :
 
 ```yaml
-panneau:
+serveur:
   actif: true
+  port: 8790
 ```
 
-Puis ouvre l'adresse affichée au démarrage de Jarvis.
+Relance Jarvis, puis ouvre dans ton navigateur :
+
+- **http://localhost:8790/panneau** — état, budget, permissions, réglages
+- **http://localhost:8790/cockpit** — tableau de bord (si `cockpit.actif: true`)
+
+Le panneau n'est accessible qu'en **local** : une garde refuse toute requête
+venant d'une autre machine.
+
+### « Hey Jarvis » ne déclenche rien
+
+Quand il t'entend, Jarvis affiche `[micro] Oui ?` et émet un bip. Si rien
+n'apparaît, le score du mot-clé n'atteint jamais le seuil. Un seul outil pour
+trancher entre les trois causes possibles :
+
+```bash
+uv run python scripts/test_micro.py
+```
+
+Il affiche un vumètre **et** le score du mot-clé en direct, puis conclut :
+
+- **barre plate** → aucun son n'arrive : mauvais périphérique dans
+  `audio.micro`, autorisation refusée, ou micro coupé matériellement.
+- **barre qui bouge, score qui plafonne** → parle plus près, ou baisse le
+  seuil : `assistant.seuil_reveil` (0.5 par défaut, essaie `0.35`).
+- **`DETECTE`** → le mot-clé marche ; le blocage est en aval (clé API, LLM).
+  Enchaîne sur `uv run python scripts/doctor.py`.
+
+Détache bien les deux mots — « HEY … JARVIS » — à 30-50 cm du micro.
 
 ---
 
