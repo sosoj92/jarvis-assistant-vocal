@@ -93,6 +93,25 @@ Terminal.app, puis « Toujours ouvrir avec ».
 
 ## Micro et mot-clé
 
+### `PortAudioError: Error querying device -1` au démarrage
+
+Aucun périphérique d'**entrée** n'est visible. Deux causes, dans cet ordre :
+
+1. **Ton Mac n'a pas de micro intégré.** Les **Mac mini** et **Mac Studio** n'en
+   ont aucun (contrairement aux MacBook et iMac). Branche un micro USB, un
+   casque avec micro, ou connecte des AirPods.
+2. **L'autorisation Microphone n'est pas accordée** au terminal. Sans elle,
+   PortAudio ne voit *aucune* entrée. Réglages Système → Confidentialité et
+   sécurité → Microphone → coche ton terminal, puis **relance-le**.
+
+Pour voir ce que le système expose :
+
+```bash
+uv run python -c "import sounddevice as sd; print(sd.query_devices())"
+```
+
+Une liste vide (ou sans ligne « in ») confirme le diagnostic.
+
 ### Jarvis ne réagit pas à « Hey Jarvis »
 
 Dans l'ordre :
@@ -128,6 +147,23 @@ périphérique d'entrée dans `audio.micro`, ou un micro USB dédié.
 ---
 
 ## Voix
+
+### Je veux Claude mais pas payer ElevenLabs
+
+Installe une voix **Piper** (locale, gratuite, illimitée) : Jarvis la prend
+automatiquement dès qu'aucune clé ElevenLabs n'est configurée.
+
+```bash
+mkdir -p voix
+curl -L -o voix/fr_FR-siwis-medium.onnx \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx
+curl -L -o voix/fr_FR-siwis-medium.onnx.json \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json
+```
+
+Les **deux** fichiers sont nécessaires. Laisse `elevenlabs.cle` vide dans
+`config.yaml` : au démarrage, le journal indique alors
+« pas de cle ElevenLabs : repli sur la voix locale Piper ».
 
 ### Jarvis répond par écrit mais ne parle pas
 
@@ -258,6 +294,17 @@ whisper:
 Le modèle Ollama partage la mémoire unifiée avec tout le reste. Choisis un
 modèle adapté : `qwen3.5:9b` à partir de 16 Go, `qwen3.5:4b` à 8 Go. Ou passe
 en `mode: cloud`.
+
+### `UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names`
+
+Sans conséquence. onnxruntime annonce simplement que CUDA n'existe pas sur Mac
+et bascule sur `CoreMLExecutionProvider` / `CPUExecutionProvider`. Le mot-clé
+fonctionne normalement.
+
+### `Warning: You are sending unauthenticated requests to the HF Hub`
+
+Sans conséquence non plus : c'est le téléchargement du modèle Whisper, en
+anonyme. Il réussit, juste avec une limite de débit plus basse.
 
 ### « GPU indisponible » au démarrage
 

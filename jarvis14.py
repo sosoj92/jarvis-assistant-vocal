@@ -1013,6 +1013,49 @@ def _installer_raccourci_micro():
         LOG.exception("micro: raccourci clavier")
 
 
+def _entrees_audio():
+    """[(index, nom)] des peripheriques d'ENTREE, ou [] si aucun."""
+    try:
+        return [(i, d.get("name", "?")) for i, d in enumerate(sd.query_devices())
+                if d.get("max_input_channels", 0) > 0]
+    except Exception:
+        return []
+
+
+def _ouvrir_micro():
+    """Ouvre le flux du micro, ou explique precisement ce qui manque.
+
+    PortAudio leve « Error querying device -1 » quand AUCUNE entree n'existe :
+    trace illisible pour un message qui veut juste dire « pas de micro ». Les
+    deux causes sur Mac sont l'autorisation Microphone non accordee au terminal,
+    et le Mac mini / Mac Studio, qui n'ont pas de micro integre du tout.
+    """
+    entrees = _entrees_audio()
+    if not entrees:
+        print("\nAucun peripherique d'ENTREE audio detecte : Jarvis ne peut pas ecouter.")
+        if plateforme.EST_MAC:
+            print("  1. Autorise le Microphone pour ton terminal : Reglages Systeme >")
+            print("     Confidentialite et securite > Microphone, puis RELANCE le terminal.")
+            print("  2. Les Mac mini et Mac Studio n'ont pas de micro integre : branche")
+            print("     un micro USB, un casque, ou connecte des AirPods.")
+            print("  Detail : TROUBLESHOOTING_MAC.md")
+        else:
+            print("  Branche un micro, puis relance.")
+        raise SystemExit(1)
+
+    try:
+        return sd.InputStream(samplerate=TAUX, channels=1, dtype="float32",
+                              device=MICRO, blocksize=BLOC)
+    except Exception as e:
+        print(f"\nImpossible d'ouvrir le micro configure (audio.micro = {MICRO!r}) : {e}")
+        print("Entrees disponibles :")
+        for i, nom in entrees:
+            print(f"  {i} : {nom}")
+        print("Mets l'index voulu dans config.yaml (audio.micro), ou null pour "
+              "laisser le systeme choisir.")
+        raise SystemExit(1)
+
+
 def main():
     print("Chargement des modeles...")
 
@@ -1101,10 +1144,7 @@ def main():
     _refaire_systeme(faits)
     historique = []
 
-    flux = sd.InputStream(
-        samplerate=TAUX, channels=1, dtype="float32",
-        device=MICRO, blocksize=BLOC,
-    )
+    flux = _ouvrir_micro()
     flux.start()
 
     # Reconnaissance musicale : capture depuis le micro en SUSPENDANT proprement le
