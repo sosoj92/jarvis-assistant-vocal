@@ -6,7 +6,6 @@ Hermes lit le Vault + le projet Scripts en LECTURE SEULE dans son conteneur Dock
 """
 import os
 import re
-import shutil
 import subprocess
 import threading
 from pathlib import Path

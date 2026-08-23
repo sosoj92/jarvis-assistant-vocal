@@ -203,6 +203,23 @@ def test_hermes_config_ne_plante_pas():
     assert chemin.is_absolute() and chemin.name == "config.yaml"
 
 
+def test_config_generee_adaptee_a_l_os():
+    """setup.py doit ecrire audio.micro=null hors Windows (l'index 1 y est une sortie)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("setup_jarvis",
+                                                  RACINE / "scripts" / "setup.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+
+    conf = setup.charger_exemple()
+    attendu = 1 if sys.platform == "win32" else None
+    assert conf["audio"]["micro"] == attendu
+
+    # Et la valeur Windows reste intacte quand on est sur Windows.
+    setup.WIN = True
+    assert setup.adapter_a_l_os({"audio": {"micro": 1}})["audio"]["micro"] == 1
+
+
 def test_dependances_windows_marquees():
     """Les paquets sans roue macOS doivent porter un marqueur d'environnement."""
     pyproject = (RACINE / "pyproject.toml").read_text(encoding="utf-8")

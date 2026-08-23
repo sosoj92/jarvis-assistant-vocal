@@ -233,6 +233,84 @@ def test_touche_inconnue_est_refusee(mac, commandes):
     assert commandes == []
 
 
+# ------------------------------------------------------------------- ecrans
+
+class _Taille:
+    def __init__(self, w, h):
+        self.width, self.height = w, h
+
+
+class _Origine:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+
+class _Cadre:
+    def __init__(self, x, y, w, h):
+        self.origin, self.size = _Origine(x, y), _Taille(w, h)
+
+
+class _Ecran:
+    def __init__(self, cadre):
+        self._c = cadre
+
+    def frame(self):
+        return self._c
+
+
+def _faux_appkit(monkeypatch, ecrans):
+    """Injecte un faux module AppKit exposant NSScreen.screens()."""
+    import sys
+    import types
+    faux = types.ModuleType("AppKit")
+
+    class NSScreen:
+        @staticmethod
+        def screens():
+            return [_Ecran(c) for c in ecrans]
+
+    faux.NSScreen = NSScreen
+    monkeypatch.setitem(sys.modules, "AppKit", faux)
+
+
+def test_moniteurs_mac_ecran_unique(mac, monkeypatch):
+    _faux_appkit(monkeypatch, [_Cadre(0, 0, 1920, 1080)])
+    assert plateforme.moniteurs() == [(0, 0, 1920, 1080)]
+
+
+def test_moniteurs_mac_retourne_l_axe_vertical(mac, monkeypatch):
+    """Cocoa a l'origine en bas a gauche, tkinter en haut a gauche.
+
+    Un ecran secondaire pose AU-DESSUS du principal a, chez Cocoa, un y positif
+    (1080). En coordonnees tkinter il commence a -1080. Sans ce retournement,
+    l'overlay atterrit hors champ.
+    """
+    _faux_appkit(monkeypatch, [_Cadre(0, 0, 1920, 1080),        # principal
+                               _Cadre(0, 1080, 1920, 1080)])    # au-dessus
+    rects = plateforme.moniteurs()
+    assert (0, 0, 1920, 1080) in rects
+    assert (0, -1080, 1920, 0) in rects
+
+
+def test_moniteurs_mac_ecran_a_droite(mac, monkeypatch):
+    _faux_appkit(monkeypatch, [_Cadre(0, 0, 1920, 1080),
+                               _Cadre(1920, 0, 1280, 1080)])
+    assert plateforme.moniteurs() == [(0, 0, 1920, 1080),
+                                      (1920, 0, 3200, 1080)]
+
+
+def test_moniteurs_mac_principal_en_premier(mac, monkeypatch):
+    """L'index overlay.ecran doit rester stable : le principal est toujours 0."""
+    _faux_appkit(monkeypatch, [_Cadre(0, 0, 1920, 1080),
+                               _Cadre(-1280, 0, 1280, 1080)])
+    assert plateforme.moniteurs()[0] == (0, 0, 1920, 1080)
+
+
+def test_moniteurs_mac_sans_ecran(mac, monkeypatch):
+    _faux_appkit(monkeypatch, [])
+    assert plateforme.moniteurs() == []
+
+
 # ------------------------------------------------------------------ chemins
 
 def test_dossier_donnees_mac(mac):

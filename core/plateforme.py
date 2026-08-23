@@ -359,29 +359,35 @@ def volume_muet(etat=None) -> bool:
     return bool(etat) if etat is not None else True
 
 
-# Applications macOS qu'on sait piloter en AppleScript, par ordre de préférence.
-_LECTEURS_MAC = ("Spotify", "Music", "VLC", "IINA", "QuickTime Player")
+# Lecteurs macOS pilotables en AppleScript, par ordre de préférence.
+# Spotify et Musique comprennent playpause / next track / previous track ;
+# le `play` de VLC bascule lecture-pause, mais lui seul (celui d'IINA ou de
+# QuickTime ne fait que lancer la lecture), d'où sa place à part.
+_LECTEURS_MAC = ("Spotify", "Music")
+_VERBES_MAC = {"pause": "playpause", "suivant": "next track",
+               "precedent": "previous track"}
 
 
 def _media_applescript(action: str) -> bool:
-    """Repli macOS : pilote le lecteur ouvert (Spotify, Musique, VLC...)."""
-    verbe = {"pause": "playpause", "suivant": "next track",
-             "precedent": "previous track"}.get(action)
+    """Repli macOS quand l'évènement multimédia n'a pas pu être posté."""
+    verbe = _VERBES_MAC.get(action)
     if not verbe:
         return False
     for app in _LECTEURS_MAC:
         try:
             if osascript(f'application "{app}" is running') != "true":
                 continue
-            if app in ("VLC", "IINA", "QuickTime Player"):
-                if action != "pause":
-                    continue
-                osascript(f'tell application "{app}" to play')
-            else:
-                osascript(f'tell application "{app}" to {verbe}')
+            osascript(f'tell application "{app}" to {verbe}')
             return True
         except Exception:
             continue
+    if action == "pause":
+        try:
+            if osascript('application "VLC" is running') == "true":
+                osascript('tell application "VLC" to play')   # bascule
+                return True
+        except Exception:
+            pass
     return False
 
 
@@ -519,15 +525,15 @@ def _fenetre_active_mac():
     l'application, ce qui suffit à la plupart des décisions (OBS actif, lecteur
     vidéo au premier plan...).
     """
-    proc = ""
     try:
         from AppKit import NSWorkspace
         app = NSWorkspace.sharedWorkspace().frontmostApplication()
-        if app is not None:
-            proc = (app.localizedName() or "").lower()
-            pid = app.processIdentifier()
     except Exception:
         return _fenetre_active_mac_applescript()
+    if app is None:
+        return _fenetre_active_mac_applescript()
+    proc = (app.localizedName() or "").lower()
+    pid = app.processIdentifier()
 
     try:
         from Quartz import (CGWindowListCopyWindowInfo, kCGNullWindowID,
@@ -568,12 +574,23 @@ def moniteurs():
     if EST_MAC:
         try:
             from AppKit import NSScreen
+            ecrans = list(NSScreen.screens())
+            if not ecrans:
+                return []
+            # Cocoa place l'origine en BAS a gauche de l'ecran principal et fait
+            # croitre y vers le haut ; tkinter (et le reste du code) attend
+            # l'origine en HAUT a gauche avec y vers le bas. D'ou le retournement
+            # autour de la hauteur de l'ecran principal, sans quoi l'overlay
+            # atterrit hors champ sur un second ecran.
+            hauteur_principale = ecrans[0].frame().size.height
             rects = []
-            for e in NSScreen.screens():
+            for e in ecrans:
                 c = e.frame()
-                rects.append((int(c.origin.x), int(c.origin.y),
-                              int(c.origin.x + c.size.width),
-                              int(c.origin.y + c.size.height)))
+                gauche = int(c.origin.x)
+                haut = int(hauteur_principale - (c.origin.y + c.size.height))
+                rects.append((gauche, haut,
+                              gauche + int(c.size.width),
+                              haut + int(c.size.height)))
             rects.sort(key=lambda rc: (rc[0] != 0 or rc[1] != 0, rc[0], rc[1]))
             return rects
         except Exception:

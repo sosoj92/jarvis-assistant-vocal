@@ -15,7 +15,6 @@ SECURITE (ton Chrome = toutes tes sessions connectees) :
   - Fermer des onglets passe par une confirmation vocale (action destructive).
 """
 import logging
-import os
 import socket
 import subprocess
 import time

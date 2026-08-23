@@ -115,9 +115,28 @@ def test_ping_localhost():
     assert plateforme.ping("127.0.0.1", timeout_ms=1500) is True
 
 
-@sans_ping
-def test_ping_ip_injoignable_est_faux():
-    assert plateforme.ping("192.0.2.1", timeout_ms=300) is False   # TEST-NET-1
+def test_ping_sans_reponse_est_faux(monkeypatch):
+    """Une IP muette doit rendre False.
+
+    On simule la sortie de ping plutot que d'interroger une vraie adresse
+    « injoignable » : certains reseaux (conteneurs, portails captifs, DNS
+    menteur) repondent a tout, et le test parlerait alors du reseau, pas du code.
+    """
+    muet = ("PING 192.0.2.1 (192.0.2.1): 56 data bytes\n\n"
+            "--- 192.0.2.1 ping statistics ---\n"
+            "1 packets transmitted, 0 packets received, 100.0% packet loss\n")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a, 2, muet, ""))
+    assert plateforme.ping("192.0.2.1", timeout_ms=300) is False
+
+
+def test_ping_survit_a_un_echec_de_commande(monkeypatch):
+    """ping absent du systeme : False, jamais une exception qui tue le thread."""
+    def explose(*a, **kw):
+        raise FileNotFoundError("ping")
+    monkeypatch.setattr(subprocess, "run", explose)
+    assert plateforme.ping("192.168.1.20") is False
 
 
 def test_ping_ip_vide_est_faux():

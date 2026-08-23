@@ -155,7 +155,21 @@ def relancer_dans_venv():
 
 def charger_exemple():
     import yaml
-    return yaml.safe_load((RACINE / "config.example.yaml").read_text(encoding="utf-8")) or {}
+    conf = yaml.safe_load(
+        (RACINE / "config.example.yaml").read_text(encoding="utf-8")) or {}
+    return adapter_a_l_os(conf)
+
+
+def adapter_a_l_os(conf):
+    """Ajuste les reglages dont la bonne valeur depend du systeme.
+
+    audio.micro vaut 1 dans l'exemple (index eprouve sous Windows). Sur macOS
+    et Linux, l'index 1 designe souvent une SORTIE : on met null, qui laisse
+    PortAudio prendre l'entree par defaut du systeme.
+    """
+    if not WIN:
+        conf.setdefault("audio", {})["micro"] = None
+    return conf
 
 
 def ecrire_config(conf):

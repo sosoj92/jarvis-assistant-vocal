@@ -155,9 +155,13 @@ autorisations à accorder.
 
 ## 6. Régler le micro
 
-Sur Windows, `audio.micro` valait `1` par défaut. Sur macOS cet index désigne
-souvent une **sortie** : le défaut y est donc `null` (Jarvis prend l'entrée
-système). Pour forcer un micro précis :
+Sur Windows, `audio.micro` vaut `1`. Sur macOS cet index désigne souvent une
+**sortie** : `scripts/setup.py` écrit donc `null` dans ton `config.yaml`, ce qui
+laisse Jarvis prendre l'entrée système.
+
+⚠️ Si tu as copié `config.example.yaml` **à la main** plutôt que de lancer
+l'installateur, mets `audio.micro: null` toi-même — sinon Jarvis écoutera le
+mauvais périphérique. Pour forcer un micro précis :
 
 ```bash
 uv run python -c "import sounddevice as sd; print(sd.query_devices())"

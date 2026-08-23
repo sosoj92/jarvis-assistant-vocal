@@ -14,7 +14,6 @@ Usage : uv run python jarvis14.py
 import os
 import queue
 import re
-import subprocess
 import threading
 import time
 import wave
