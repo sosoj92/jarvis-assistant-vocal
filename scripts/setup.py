@@ -17,7 +17,9 @@ from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
+
 WIN = sys.platform == "win32"
+MAC = sys.platform == "darwin"
 
 
 def dire_titre(t):
@@ -47,6 +49,63 @@ def lire_cle(prompt):
         except Exception:
             pass
     return input(prompt).strip()
+
+
+# --------------------------------------------------------- pre-requis systeme
+
+def verifier_prerequis_mac():
+    """portaudio est indispensable : sounddevice (micro + wake word) s'appuie
+    dessus, et la roue Python ne l'embarque pas sur macOS. Sans lui, Jarvis
+    installe tout puis echoue au premier `import sounddevice`."""
+    if not MAC:
+        return
+    dire_titre("Pre-requis macOS")
+
+    if not shutil.which("brew"):
+        print("Homebrew n'est pas installe. Il fournit portaudio, dont depend le micro.")
+        print("  Installe-le :")
+        print('    /bin/bash -c "$(curl -fsSL '
+              'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"')
+        input("  Appuie sur Entree une fois Homebrew installe (ou pour continuer sans)...")
+
+    if not shutil.which("brew"):
+        print("  (!) Sans Homebrew, installe portaudio a la main, sinon le micro "
+              "ne marchera pas.")
+        return
+
+    deja = subprocess.run(["brew", "list", "portaudio"],
+                          capture_output=True, text=True).returncode == 0
+    if deja:
+        print("  portaudio deja installe.")
+    elif oui("Installer portaudio (requis pour le micro) maintenant ?", True):
+        subprocess.run(["brew", "install", "portaudio"], check=False)
+    else:
+        print("  (!) Sans portaudio, le micro et le mot-cle ne fonctionneront pas.")
+
+    import platform as _pf
+    puce = "Apple Silicon" if _pf.machine() in ("arm64", "aarch64") else "Intel"
+    print(f"\n  Mac {puce} detecte.")
+    if puce == "Apple Silicon":
+        print("  Whisper tournera sur le CPU (int8) : c'est normal et rapide. "
+              "Pas de CUDA sur Mac.")
+    else:
+        print("  Mac Intel : onnxruntime est plafonne a la 1.23.2 (plus de roue "
+              "x86_64 macOS au-dela). C'est deja gere par pyproject.toml.")
+
+
+def rappeler_permissions_mac():
+    """macOS demande une autorisation explicite pour le micro et le clavier."""
+    if not MAC:
+        return
+    dire_titre("Autorisations macOS")
+    print("Au premier lancement, macOS demandera des autorisations pour le")
+    print("TERMINAL (ou l'app) qui lance Jarvis. A accorder dans")
+    print("Reglages Systeme > Confidentialite et securite :\n")
+    print("  - Microphone .................. obligatoire (ecoute + mot-cle)")
+    print("  - Accessibilite ............... touches media, bascule de fenetres")
+    print("  - Enregistrement de l'ecran ... capture d'ecran, titres de fenetres")
+    print("\nSi tu refuses une fois, la demande ne revient pas : il faut cocher")
+    print("la case a la main dans ces reglages. Details : TROUBLESHOOTING_MAC.md")
 
 
 # --------------------------------------------------------------- bootstrap
@@ -109,7 +168,8 @@ def ecrire_config(conf):
 CLES_CLOUD = [
     ("anthropic", "cle", True, "Claude (obligatoire en cloud)",
      "https://console.anthropic.com/  ->  API keys"),
-    ("elevenlabs", "cle", False, "ElevenLabs (voix ; optionnel, sinon voix Windows)",
+    ("elevenlabs", "cle", False,
+     "ElevenLabs (voix ; optionnel, sinon la voix integree a l'OS)",
      "https://elevenlabs.io  ->  profil  ->  API key"),
 ]
 
@@ -146,13 +206,29 @@ def config_local(conf):
         subprocess.run(["ollama", "pull", modele], check=False)
     print("\nWhisper (transcription) se telecharge tout seul au 1er lancement.")
     print("Voix Piper (francais) : telecharge un .onnx dans voix/ (voir docs/local.md). "
-          "Sinon Jarvis parlera avec la voix Windows.")
+          "Sinon Jarvis parlera avec la voix integree a l'OS "
+          + ("(`say`)." if MAC else "(SAPI)." if WIN else "(espeak)."))
 
 
 # --------------------------------------------------------------- materiel + tests
 
 def detecter_materiel():
     dire_titre("Materiel")
+    if MAC:
+        try:
+            from core import plateforme
+            gpu = plateforme.infos_gpu()
+            print(f"  {plateforme.nom_machine()}")
+            if gpu:
+                print(f"  GPU : {gpu} (memoire unifiee, partagee avec la RAM)")
+            import psutil
+            go = psutil.virtual_memory().total / (1024 ** 3)
+            print(f"  Memoire : {go:.0f} Go")
+            if go < 16:
+                print("  (!) <16 Go : en local, prefere qwen3.5:4b (ou reste en cloud).")
+        except Exception as e:
+            print(f"  (detection materiel partielle : {e})")
+        return
     try:
         import pynvml
         pynvml.nvmlInit()
@@ -212,6 +288,7 @@ def main():
     print(f"Python {v.major}.{v.minor}.{v.micro} OK.")
 
     if "--suite" not in sys.argv and not deps_presentes():
+        verifier_prerequis_mac()
         if oui("Installer les dependances maintenant ?", True):
             installer_dependances()
             relancer_dans_venv()
@@ -236,9 +313,15 @@ def main():
     tester_integrations()
     test_micro_et_bienvenue()
 
+    rappeler_permissions_mac()
+
     dire_titre("Termine !")
-    print("Lance Jarvis :  uv run python jarvis14.py   (puis dis « Hey Jarvis »)")
-    print("Un souci ? Diagnostic :  python scripts/doctor.py")
+    lanceur = "./launch_jarvis.sh" if not WIN else "lancer_jarvis.bat"
+    print(f"Lance Jarvis :  {lanceur}   (puis dis « Hey Jarvis »)")
+    print("           ou :  uv run python jarvis14.py")
+    print("Un souci ? Diagnostic :  uv run python scripts/doctor.py")
+    if MAC:
+        print("Problemes courants sur Mac : TROUBLESHOOTING_MAC.md")
 
 
 if __name__ == "__main__":

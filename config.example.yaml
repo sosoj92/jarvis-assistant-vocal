@@ -32,7 +32,7 @@ anthropic:
   modele: "claude-haiku-4-5"          # mode hybride : modele economique (reflexes + vision)
   modele_qualite: "claude-sonnet-4-5" # mode qualite : modele le plus fort
 
-elevenlabs:                    # facultatif ; sans cle, Jarvis garde la voix Windows
+elevenlabs:                    # facultatif ; sans cle, Jarvis garde la voix de l'OS
   cle: ""                      # https://elevenlabs.io , profil -> API key (commence par sk_)
   voix: ""                     # ID d'une voix (onglet Voices) ; vide = 1re du compte
   modele: "eleven_flash_v2_5"
@@ -48,7 +48,9 @@ mail:                          # Gmail via IMAP/SMTP (facultatif)
 
 audio:
   micro: 1                     # index du micro (voir sounddevice.query_devices())
-  haut_parleur: null           # null = sortie par defaut de Windows (changeable a la voix)
+                               # macOS/Linux : mets null pour l'entree par defaut
+                               # du systeme (l'index 1 y designe souvent une SORTIE)
+  haut_parleur: null           # null = sortie par defaut de l'OS (changeable a la voix)
   sorties:                     # alias pour "passe sur le casque / les enceintes" (nom ou index)
     casque: "Casque"           # sous-chaine du nom de l'appareil de sortie (ou un index)
     enceintes: "Haut-parleurs"
@@ -285,7 +287,8 @@ amaran:                        # lumieres video amaran (BLE mesh via ESP32) ; do
   noms: []                     # alias supplementaires reconnus (ex. ["ma lumiere", "spot"])
 
 overlay:                       # mini-fenetre qui affiche a l'ecrit ce que Jarvis dit ; docs/overlay.md
-  actif: true                  # afficher l'overlay (Windows uniquement ; sinon ignore)
+  actif: true                  # afficher l'overlay. Sur macOS il est flottant mais
+                               # cliquable et VISIBLE par OBS (voir INSTALL_MAC.md)
   ecran: 1                     # moniteur cible (0 = principal, 1 = 2e ecran...)
   coin: "bas-droite"           # haut-gauche / haut-droite / bas-gauche / bas-droite
   opacite: 0.92                # 0.3 - 1.0
