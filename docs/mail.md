@@ -42,6 +42,9 @@ qui se rafraîchit tout seul.
 
 ### 1. Créer les identifiants OAuth
 
+> Guide détaillé, avec la sécurité expliquée : **[docs/google.md](google.md)**.
+> Résumé ci-dessous.
+
 Dans la [console Google Cloud](https://console.cloud.google.com/) :
 
 1. Crée un projet (ou prends-en un existant).

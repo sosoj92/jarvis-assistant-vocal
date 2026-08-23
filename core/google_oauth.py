@@ -66,7 +66,7 @@ def identifiants(scopes, fichier_token, fichier_ident=None, interactif=True):
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            fichier_token.write_text(creds.to_json(), encoding="utf-8")
+            _ecrire_jeton(fichier_token, creds)
             return creds
         except Exception as e:
             LOG.warning("google_oauth: rafraichissement refuse (%s)", e)
@@ -82,12 +82,26 @@ def identifiants(scopes, fichier_token, fichier_ident=None, interactif=True):
 
     flow = InstalledAppFlow.from_client_secrets_file(str(fichier_ident), scopes)
     creds = flow.run_local_server(port=0)
-    fichier_token.write_text(creds.to_json(), encoding="utf-8")
-    try:
-        fichier_token.chmod(0o600)      # le jeton vaut un acces au compte
-    except Exception:
-        pass
+    _ecrire_jeton(fichier_token, creds)
     return creds
+
+
+def _ecrire_jeton(fichier, creds):
+    """Ecrit le jeton en 0600 : lui seul donne acces au compte.
+
+    Le fichier d'identifiants (client_id/client_secret d'une app « bureau »)
+    n'est PAS un secret au sens strict — Google documente qu'il ne peut pas
+    l'etre pour une application installee. Le jeton de rafraichissement, lui,
+    ouvre la boite mail : il doit etre illisible par les autres comptes de la
+    machine, et n'est ecrit qu'ici pour que ce soit vrai a chaque ecriture,
+    rafraichissement compris.
+    """
+    fichier = Path(fichier)
+    fichier.write_text(creds.to_json(), encoding="utf-8")
+    try:
+        fichier.chmod(0o600)
+    except Exception:
+        LOG.warning("google_oauth: permissions non appliquees sur %s", fichier.name)
 
 
 def chaine_xoauth2(adresse, jeton):
