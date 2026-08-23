@@ -45,16 +45,47 @@ et révoquer en cas de doute.
 [console.cloud.google.com](https://console.cloud.google.com/) → sélecteur de
 projet → **Nouveau projet**.
 
-**Choix important pour l'isolation :** au moment de créer le projet, le champ
-**Organisation** détermine qui pourra le voir.
+**Choix important pour l'isolation.** Connecté avec un compte Workspace, Google
+place **d'office** le projet dans l'organisation du domaine : l'option « Aucune
+organisation » n'apparaît pas, et ce n'est pas un réglage que tu peux changer.
 
-- **Organisation = `ton-domaine.fr`** → les super-administrateurs Workspace
-  voient le projet dans la console. Ils voient le client OAuth, pas tes mails.
-- **Organisation = « Aucune organisation »** → projet rattaché à ton compte
-  seul. Cette option n'apparaît que si la politique de ton Workspace l'autorise,
-  ou si tu crées le projet depuis un compte Google personnel.
+Deux voies, selon ce dont tu veux te protéger.
 
-Nomme-le clairement (« Jarvis perso »), ça t'évitera de le confondre plus tard.
+### Voie 1 — rester dans l'organisation (le cas normal)
+
+Qui verra le projet ?
+
+| Qui | Voit le projet ? |
+|---|---|
+| Les utilisateurs normaux du domaine | **non** — il faut un rôle IAM explicite |
+| Toi (créateur, donc Propriétaire) | oui |
+| Un **super-administrateur** du domaine | **s'il le décide** — il peut s'attribuer le rôle d'administrateur d'organisation dans Cloud |
+
+Si tu es le seul admin de ton domaine, cette voie est parfaitement sûre : tes
+collaborateurs ne verront rien. Et rappel : même en voyant le projet, on ne peut
+pas lire tes mails sans que tu aies cliqué « Autoriser ».
+
+### Voie 2 — projet hors du domaine (isolation réelle)
+
+Crée le projet depuis un **compte Google personnel** (`@gmail.com`), puis
+autorise-le avec ton adresse Workspace :
+
+1. Déconnecte-toi, ou ouvre la console en navigation privée avec ton compte perso.
+2. Crée le projet là-bas — il n'appartiendra à aucune organisation.
+3. Écran de consentement : type **Externe**, et ajoute **ton adresse Workspace**
+   (`toi@ton-domaine.fr`) comme **utilisateur test**.
+4. Crée le client « Application de bureau », télécharge le JSON.
+5. Lance `scripts/google_login.py` et connecte-toi avec ton compte **Workspace**.
+
+Le client OAuth vit alors dans un projet que **personne du domaine ne peut
+voir**, et il accède quand même à ta boîte Workspace — parce que c'est toi qui
+consens.
+
+Seule réserve : si l'administrateur du domaine a restreint l'accès des
+applications tierces (Console d'admin → Sécurité → Contrôle des API), il faudra
+approuver ton ID client. Si tu es cet administrateur, c'est deux clics.
+
+Nomme le projet clairement (« Jarvis perso »), ça t'évitera de le confondre.
 
 ### 2. Activer les API
 
@@ -115,10 +146,13 @@ mail:
 Même si le client OAuth n'est pas exploitable seul, autant limiter qui le voit.
 
 **IAM et administration → IAM** : tu dois être le seul **Propriétaire**. Retire
-tout compte que tu n'as pas mis là toi-même. Sur un projet créé dans une
-organisation, les super-admins du domaine gardent un accès hérité — c'est une
-propriété de Workspace, pas quelque chose que tu peux désactiver depuis le
-projet.
+tout compte que tu n'as pas mis là toi-même, et vérifie la case « Inclure les
+attributions de rôles fournies par Google » pour voir les accès hérités.
+
+Sur un projet créé dans une organisation, un super-administrateur du domaine
+peut toujours s'attribuer un accès au niveau de l'organisation. Ça ne se
+désactive pas depuis le projet — c'est une propriété de Workspace. Si c'est ton
+souci, prends la **voie 2** ci-dessus.
 
 **Ne crée jamais de clé de compte de service** pour cet usage. Une clé de compte
 de service, elle, est un vrai secret exploitable sans consentement — et avec la
