@@ -115,8 +115,11 @@ def _refaire_systeme(memoire_courante):
 
 try:
     import hud
-except Exception:
+except Exception as _e:
     hud = None
+    _ERREUR_HUD = _e
+else:
+    _ERREUR_HUD = None
 
 try:
     import overlay as _overlay
@@ -183,6 +186,26 @@ def _hud(methode, *args):
         getattr(hud, methode)(*args)
     except Exception:
         pass
+
+
+def _demarrer_hud():
+    """Lance le HUD et DIT pourquoi si ca rate.
+
+    C'est la seule interface visuelle sur macOS : la noyer dans le `except:
+    pass` de _hud() laissait l'utilisateur sans aucune trace de l'echec.
+    """
+    if not config.reglage("hud.actif", True):
+        return
+    if hud is None:
+        print(f"HUD indisponible : {_ERREUR_HUD}")
+        return
+    try:
+        hud.demarrer(ouvrir=bool(config.reglage("hud.ouvrir_navigateur", True)))
+    except OSError as e:
+        print(f"HUD non demarre : le port {hud.PORT} est deja pris ({e}).")
+        print(f"  Ferme l'autre Jarvis, ou change hud.port dans config.yaml.")
+    except Exception as e:
+        print(f"HUD non demarre ({type(e).__name__} : {e}).")
 
 
 def _niv_hud(bloc):
@@ -1127,7 +1150,7 @@ def main():
             print("ATTENTION : aucune cle Claude dans config.yaml (anthropic.cle). "
                   "L'assistant ne pourra pas repondre.")
 
-    _hud("demarrer")
+    _demarrer_hud()
     _modele_hud = getattr(_fournisseur, "modele", "")
     _hud("config", f"{_fournisseur.nom} · {_modele_hud}" if _modele_hud
          else _fournisseur.nom, f"whisper {MODELE_WHISPER}")

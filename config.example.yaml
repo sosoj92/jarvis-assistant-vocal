@@ -271,6 +271,13 @@ spotify:                       # ajouter les musiques reconnues a une playlist ;
   auto_ajout: false            # true = ajoute AUTOMATIQUEMENT chaque musique reconnue
   # Connexion une fois : python scripts/spotify_login.py (refresh_token dans logs/spotify/)
 
+hud:                           # interface « reacteur arc » (page web locale, temps reel)
+  actif: true                  # false = pas de HUD du tout
+  port: 8770                   # http://127.0.0.1:8770/
+  ouvrir_navigateur: true      # ouvrir l'onglet automatiquement au demarrage
+                               # Sur macOS c'est LA interface : l'overlay flottant
+                               # y est impossible (voir INSTALL_MAC.md)
+
 cockpit:                       # tableau de bord perso (app web locale) ; docs/cockpit.md
   actif: false                 # ouvrir le cockpit au demarrage (fenetre app --app)
   ecran: 0                     # ecran cible (0 = principal, 1 = 2e ecran...)

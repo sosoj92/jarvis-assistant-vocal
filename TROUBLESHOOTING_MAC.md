@@ -271,6 +271,30 @@ antérieure :
 git pull
 ```
 
+### Le HUD (« réacteur arc ») ne s'ouvre pas
+
+C'est **l'interface principale sur Mac** : une page animée en temps réel
+(veille / écoute / réflexion / parole, niveau du micro, transcription, outils
+appelés). Elle s'ouvre normalement toute seule au démarrage, et Jarvis affiche :
+
+```
+HUD sur http://127.0.0.1:8770/
+```
+
+Si cette ligne n'apparaît pas, Jarvis dit maintenant pourquoi (port occupé,
+module absent…). Auparavant l'échec était **totalement silencieux**.
+
+Ouvre-le à la main : **http://127.0.0.1:8770/**
+
+Réglages dans `config.yaml` :
+
+```yaml
+hud:
+  actif: true
+  port: 8770                 # change-le si 8770 est déjà pris
+  ouvrir_navigateur: true    # false = ne pas ouvrir l'onglet tout seul
+```
+
 ### Aucune interface ne s'ouvre
 
 C'est normal : l'overlay flottant est indisponible sur Mac (voir ci-dessus), et

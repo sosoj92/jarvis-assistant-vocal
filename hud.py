@@ -32,7 +32,16 @@ from pathlib import Path
 
 # ---------------------------------------------------------------- reglages
 
-PORT = 8770
+def _port_configure():
+    """Port du HUD (config hud.port), 8770 par defaut."""
+    try:
+        from core.config import reglage
+        return int(reglage("hud.port", 8770))
+    except Exception:
+        return 8770
+
+
+PORT = _port_configure()
 _FICHIER_HTML = Path(__file__).parent / "hud.html"
 
 # Etats possibles, envoyes tels quels a la page.

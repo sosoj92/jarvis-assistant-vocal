@@ -197,6 +197,7 @@ voix Piper confirmés en conditions réelles.)*
 | **Température GPU** | non exposée par macOS sans droits admin. `get_system_stats` donne la puce et le nombre de cœurs, pas la température — il ne l'invente pas. |
 | **Whisper** | tourne sur CPU. CTranslate2 n'a pas de backend Metal. En int8 sur Apple Silicon, c'est rapide. |
 | **Extinction** | macOS n'a pas de `shutdown` différé sans mot de passe admin. Jarvis tient donc la minuterie lui-même puis demande l'arrêt à System Events. « Annule l'extinction » marche pareil. |
+| **Interface** | le **HUD** (`http://127.0.0.1:8770/`) est l'interface visuelle sur Mac : page animée temps réel, ouverte automatiquement au démarrage. Le panneau web (`serveur.actif: true` → `/panneau`) gère les réglages. |
 | **Overlay** | **indisponible**, et c'est structurel. Cocoa impose que toute fenêtre naisse sur le thread principal, que l'assistant occupe déjà ; Tk appelé depuis le thread de l'overlay avorte le processus entier. Jarvis refuse donc de le démarrer sur Mac. Utilise le **panneau web** à la place (`panneau.actif` dans `config.yaml`). |
 | **Raccourcis clavier globaux** | désactivés : la lib `keyboard` exige `sudo` sur macOS. Utilise la voix, le panneau web, ou un raccourci Automator. |
 | **Son du système (Shazam)** | macOS n'a pas de loopback. Il faut [BlackHole](https://github.com/ExistentialAudio/BlackHole) (`brew install blackhole-2ch`). Sans lui, la reconnaissance passe par le micro, ce qui marche très bien. |
