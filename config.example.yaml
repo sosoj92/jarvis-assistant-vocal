@@ -32,6 +32,16 @@ kokoro:                        # TTS local alternatif (voix FR unique ; uv add k
   voix: ""                     # chemin de voices-v1.0.bin
   voix_nom: "ff_siwis"         # voix francaise de Kokoro
 
+fournisseur: claude            # claude | gemini — quel service cloud interroger.
+                               # Axe independant de `mode` (qui dit local/cloud).
+
+gemini:                        # alternative a Claude ; palier gratuit sur AI Studio
+  cle: ""                      # https://aistudio.google.com/apikey
+  modele: "gemini-2.5-flash"   # verifie les noms courants sur ai.google.dev
+  modele_qualite: "gemini-2.5-pro"
+  temperature: 0.3
+  max_tokens: 1024
+
 anthropic:
   cle: "sk-ant-..."            # https://console.anthropic.com/ , section API keys
   modele: "claude-haiku-4-5"          # mode hybride : modele economique (reflexes + vision)
@@ -103,7 +113,11 @@ interruption:                  # couper Jarvis pendant qu'il parle. DEUX voies :
   facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis
                                # (baisse a 1.2-1.4 si ca ne coupe jamais)
   seuil: 0.025                 # niveau minimum absolu de ta voix (baisse si micro peu sensible)
-  blocs: 5                     # blocs de 80 ms de parole continue avant de verifier (5 = 0,4 s)
+  blocs: 3                     # blocs de 80 ms de parole continue avant de verifier
+                               # 3 = 0,24 s. Ne remonte pas a 5 : « stop » dure
+                               # ~0,25 s et ne declencherait plus jamais.
+  creux: 2                     # blocs faibles toleres sans annuler la detection
+                               # (la plosive de « stop » cree une micro-coupure)
   debug: true                  # affiche les scores en direct : indispensable pour calibrer
 
 assistant:
