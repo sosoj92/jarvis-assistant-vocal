@@ -256,22 +256,32 @@ fenêtres aux gestes.
 
 ## Overlay et interface
 
-### L'overlay vole le focus / bloque les clics
+### `NSWindow should only be instantiated on the main thread!` puis Jarvis meurt (code 134)
 
-Sur Mac, tkinter n'offre pas l'équivalent de `WS_EX_TRANSPARENT` : l'overlay est
-cliquable. Si ça gêne un jeu ou un montage, déplace-le
-(`overlay.coin`, `overlay.ecran`) ou coupe-le :
+C'était l'overlay. Cocoa exige que toute fenêtre naisse sur le thread principal
+— occupé par l'assistant — alors que l'overlay vit dans un thread secondaire.
+Tk y lève une exception **Objective-C**, qui n'est pas rattrapable en Python :
+elle avorte tout le processus.
 
-```yaml
-overlay:
-  actif: false
+**Corrigé** : Jarvis refuse désormais de démarrer l'overlay sur macOS et
+l'annonce au lancement. Si tu vois encore ce plantage, tu es sur une version
+antérieure :
+
+```bash
+git pull
 ```
 
-### L'overlay apparaît dans mon stream OBS
+### Je veux l'affichage écrit des réponses sur Mac
 
-Attendu : `WDA_EXCLUDEFROMCAPTURE` est une API Windows, sans équivalent macOS.
-Mets l'overlay sur un écran que tu ne captures pas (`overlay.ecran`), ou
-coupe-le pendant le live.
+L'overlay flottant est indisponible (voir ci-dessus). Le **panneau web** rend le
+même service dans le navigateur :
+
+```yaml
+panneau:
+  actif: true
+```
+
+Puis ouvre l'adresse affichée au démarrage de Jarvis.
 
 ---
 

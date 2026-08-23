@@ -15,13 +15,14 @@ Sur Windows (RÈGLE D'OR — jamais de vol de focus) :
   - -topmost          : toujours au-dessus.
   - SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) : visible pour toi, INVISIBLE
                         pour OBS/game-capture (tes réponses n'apparaissent pas en live).
-Sur macOS, tkinter expose deux des quatre garanties : `-topmost` (toujours au-dessus)
-et `-alpha` (opacité). On ajoute `-type utility` quand Tk le supporte, pour ne pas
-apparaître dans le Dock ni voler le focus au premier plan. En revanche il n'existe
-pas d'équivalent tkinter à WS_EX_TRANSPARENT (clic-transparent) ni à
-WDA_EXCLUDEFROMCAPTURE : sur Mac, l'overlay est cliquable, et il EST visible pour
-OBS — si tu streames, place-le sur un écran non capturé (overlay.ecran) ou coupe-le
-(overlay.actif: false). C'est dit honnêtement plutôt que promis à moitié.
+**L'overlay ne tourne PAS sur macOS**, et c'est structurel, pas un réglage manquant :
+Cocoa impose que toute NSWindow soit créée sur le thread principal. Ici le thread
+principal fait tourner l'assistant et l'overlay vit dans un thread daemon — Tk lève
+alors une exception Objective-C qui AVORTE le processus (code 134), sans que Python
+puisse l'intercepter. Le faire marcher demanderait de donner le thread principal à
+la boucle Tk et de déplacer tout l'assistant dans un worker : une refonte, pas un
+correctif. `demarrer()` refuse donc de démarrer sur Mac. Le panneau web (core/panneau)
+rend le même service, dans le navigateur.
 
 Limite honnête : un jeu en plein écran EXCLUSIF (pas borderless) peut masquer tout
 overlay — la plupart des jeux tournent en borderless, donc OK.
@@ -61,11 +62,35 @@ _ETAT = {"root": None, "hwnd": None, "labels": {}, "cache_hide": None,
 
 # ============================================================ API publique
 
+def disponible():
+    """Vrai si l'overlay peut tourner sur ce système.
+
+    Faux sur macOS : voir _boucle(). On l'expose pour que l'assistant puisse
+    le dire à l'utilisateur au lieu de le laisser deviner.
+    """
+    return not _MAC
+
+
 def demarrer(cfg=None):
     """Démarre l'overlay dans un thread daemon. Sans effet s'il tourne déjà."""
     global _THREAD
     if cfg:
         _CFG.update({k: v for k, v in cfg.items() if v is not None})
+
+    if _MAC:
+        # Cocoa exige que toute NSWindow naisse sur le thread principal. Or le
+        # thread principal fait tourner l'assistant, et l'overlay vit dans un
+        # thread daemon : sur macOS, Tk lève alors une exception OBJECTIVE-C
+        # ("NSWindow should only be instantiated on the main thread!") qui
+        # AVORTE le processus — impossible à rattraper depuis Python, tout
+        # Jarvis meurt avec le code 134. On refuse donc de démarrer, plutôt que
+        # de faire tomber l'assistant pour une fenêtre d'agrément.
+        _CFG["actif"] = False
+        print("Overlay desactive sur macOS : tkinter ne peut pas creer de fenetre "
+              "hors du thread principal. Utilise le panneau web (panneau.actif) "
+              "pour l'affichage. Details : TROUBLESHOOTING_MAC.md")
+        return
+
     if _THREAD is not None:
         return
     _THREAD = threading.Thread(target=_boucle, daemon=True, name="overlay")
@@ -138,6 +163,8 @@ def _polices():
 # ============================================================ thread tkinter
 
 def _boucle():
+    if _MAC:
+        return          # cf. demarrer() : Tk hors thread principal avorte le process
     try:
         import tkinter as tk
     except Exception:

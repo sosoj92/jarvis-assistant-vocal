@@ -187,6 +187,9 @@ premier plan · capture d'écran · extinction différée annulable · stats
 CPU/RAM/disque · Hue, OBS, Gmail, Discord, Agenda, Instagram, Twilio,
 Playwright · serveur MCP · panneau web et cockpit.
 
+*(Vérifié sur un Mac mini M4 sous macOS 26 : démarrage, Whisper, mot-clé et
+voix Piper confirmés en conditions réelles.)*
+
 ### ⚠️ Différences assumées
 
 | Sujet | Sur Mac |
@@ -194,7 +197,7 @@ Playwright · serveur MCP · panneau web et cockpit.
 | **Température GPU** | non exposée par macOS sans droits admin. `get_system_stats` donne la puce et le nombre de cœurs, pas la température — il ne l'invente pas. |
 | **Whisper** | tourne sur CPU. CTranslate2 n'a pas de backend Metal. En int8 sur Apple Silicon, c'est rapide. |
 | **Extinction** | macOS n'a pas de `shutdown` différé sans mot de passe admin. Jarvis tient donc la minuterie lui-même puis demande l'arrêt à System Events. « Annule l'extinction » marche pareil. |
-| **Overlay** | flottant et au-dessus, mais **cliquable** (pas de clic-transparent) et **visible pour OBS** (pas d'exclusion de capture). En stream, mets-le sur un écran non capturé (`overlay.ecran`) ou coupe-le (`overlay.actif: false`). |
+| **Overlay** | **indisponible**, et c'est structurel. Cocoa impose que toute fenêtre naisse sur le thread principal, que l'assistant occupe déjà ; Tk appelé depuis le thread de l'overlay avorte le processus entier. Jarvis refuse donc de le démarrer sur Mac. Utilise le **panneau web** à la place (`panneau.actif` dans `config.yaml`). |
 | **Raccourcis clavier globaux** | désactivés : la lib `keyboard` exige `sudo` sur macOS. Utilise la voix, le panneau web, ou un raccourci Automator. |
 | **Son du système (Shazam)** | macOS n'a pas de loopback. Il faut [BlackHole](https://github.com/ExistentialAudio/BlackHole) (`brew install blackhole-2ch`). Sans lui, la reconnaissance passe par le micro, ce qui marche très bien. |
 

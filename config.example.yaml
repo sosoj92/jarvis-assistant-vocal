@@ -287,8 +287,9 @@ amaran:                        # lumieres video amaran (BLE mesh via ESP32) ; do
   noms: []                     # alias supplementaires reconnus (ex. ["ma lumiere", "spot"])
 
 overlay:                       # mini-fenetre qui affiche a l'ecrit ce que Jarvis dit ; docs/overlay.md
-  actif: true                  # afficher l'overlay. Sur macOS il est flottant mais
-                               # cliquable et VISIBLE par OBS (voir INSTALL_MAC.md)
+  actif: true                  # afficher l'overlay (Windows/Linux). IGNORE sur macOS :
+                               # Cocoa interdit une fenetre hors thread principal.
+                               # Sur Mac, utilise panneau.actif (voir INSTALL_MAC.md)
   ecran: 1                     # moniteur cible (0 = principal, 1 = 2e ecran...)
   coin: "bas-droite"           # haut-gauche / haut-droite / bas-gauche / bas-droite
   opacite: 0.92                # 0.3 - 1.0
