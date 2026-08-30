@@ -3,9 +3,11 @@
 il_fait_nuit() sert aussi a l'allumage automatique au demarrage (voir lumieres).
 """
 import json
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
+from core.config import reglage
 from core.registre import outil
 
 # Position devinee via l'IP publique, mise en cache pour la session.
@@ -26,16 +28,36 @@ _CODES_METEO = {
 
 
 def _localiser():
-    """Devine (lat, lon, ville) via l'IP publique. Repli : Paris."""
+    """Position (lat, lon, ville) pour la météo. Priorité :
+    1. meteo.ville en config (géocodée) — à utiliser si l'IP se trompe (VPN...) ;
+    2. sinon auto via l'IP publique (ip-api) ;
+    3. repli Paris.
+    Mise en cache pour la session."""
     if _LIEU:
         return _LIEU
+    # 1) Ville forcée en config (géocodage Open-Meteo, gratuit sans clé).
+    ville_cfg = (reglage("meteo.ville", "") or "").strip()
+    if ville_cfg:
+        try:
+            q = urllib.parse.quote(ville_cfg)
+            url = f"https://geocoding-api.open-meteo.com/v1/search?name={q}&count=1&language=fr"
+            with urllib.request.urlopen(url, timeout=5) as reponse:
+                res = (json.loads(reponse.read().decode("utf-8")).get("results") or [])
+            if res:
+                r0 = res[0]
+                _LIEU.update({"lat": r0["latitude"], "lon": r0["longitude"],
+                              "ville": r0.get("name", ville_cfg)})
+                return _LIEU
+        except Exception:
+            pass  # géocodage KO -> on retombe sur l'IP
+    # 2) Auto via IP publique.
     try:
         url = "http://ip-api.com/json/?fields=lat,lon,city"
         with urllib.request.urlopen(url, timeout=5) as reponse:
             d = json.loads(reponse.read().decode("utf-8"))
         _LIEU.update({"lat": d["lat"], "lon": d["lon"], "ville": d.get("city", "")})
     except Exception:
-        _LIEU.update({"lat": 48.8566, "lon": 2.3522, "ville": "Paris"})
+        _LIEU.update({"lat": 48.8566, "lon": 2.3522, "ville": "Paris"})   # 3) repli
     return _LIEU
 
 

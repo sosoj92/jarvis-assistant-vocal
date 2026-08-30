@@ -334,3 +334,6 @@ alexa:                         # EXPERIMENTAL (via alexapy, non officiel) ; voir
   url: "amazon.fr"             # domaine Amazon (amazon.fr, amazon.com, amazon.de...)
   dossier: "logs/alexa"        # cookie de session (sous logs/, gitignore)
   proxy_port: 3000             # port du proxy de connexion (scripts/alexa_login.py)
+
+meteo:
+  ville: ""                     # "" = auto par IP (localisation) ; mets ta ville si l'IP se trompe (ex. "Yerres", "Paris")
