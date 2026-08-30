@@ -73,7 +73,12 @@ def ouvrir_application(nom: str) -> str:
         if str(cible).startswith("http"):
             webbrowser.open(cible)
         else:
-            subprocess.Popen(f'start "" "{cible}"', shell=True)
+            # os.startfile (pas de shell) -> évite l'injection de commande via un
+            # nom piégé (ex. 'x" & calc & "'). Repli argv-list si indisponible.
+            try:
+                os.startfile(cible)                        # noqa: S606 (pas de shell)
+            except AttributeError:
+                subprocess.Popen(["cmd", "/c", "start", "", cible], shell=False)
         return f"{nom} lance."
     except Exception as e:
         return f"Impossible de lancer {nom} : {e}"

@@ -656,11 +656,16 @@ def _permissions():
 # ==================================================================== routes
 
 def _local_seulement(request):
-    """True si la requete vient bien du poste local (pas du tunnel ngrok)."""
+    """True si la requete vient VRAIMENT du poste local (pas du LAN ni du tunnel).
+
+    On se base sur l'IP REELLE de la socket (request.client.host), non falsifiable
+    par un en-tete, PLUS l'absence d'en-tetes X-Forwarded-* (que ngrok ajoute
+    toujours -> identifie le trafic tunnelise). L'ancien check sur l'en-tete Host
+    etait contournable (`curl -H "Host: localhost"`)."""
     if request.headers.get("x-forwarded-for") or request.headers.get("x-forwarded-host"):
         return False
-    host = (request.headers.get("host", "") or "").split(":")[0].strip().lower()
-    return host in _HOTES_LOCAUX or host == ""
+    hote = (getattr(request.client, "host", "") or "").strip().lower()
+    return hote in {"127.0.0.1", "::1", "localhost"}
 
 
 def monter_routes(app):

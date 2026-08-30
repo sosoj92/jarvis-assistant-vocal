@@ -334,10 +334,12 @@ _HOTES_LOCAUX = {"localhost", "127.0.0.1", "::1", "[::1]", ""}
 
 
 def _local(request):
+    # IP réelle de la socket (non falsifiable par en-tête) + pas de X-Forwarded
+    # (ngrok les ajoute). Cf. panneau._local_seulement.
     if request.headers.get("x-forwarded-for") or request.headers.get("x-forwarded-host"):
         return False
-    host = (request.headers.get("host", "") or "").split(":")[0].strip().lower()
-    return host in _HOTES_LOCAUX
+    hote = (getattr(request.client, "host", "") or "").strip().lower()
+    return hote in {"127.0.0.1", "::1", "localhost"}
 
 
 def monter_routes(app):
@@ -349,7 +351,8 @@ def monter_routes(app):
     async def api_gestes(request: Request):
         if not _local(request):
             return JSONResponse({"ok": False}, status_code=403)
-        if not _TOKEN or request.headers.get("x-gestes-token", "") != _TOKEN:
+        if not _TOKEN or not secrets.compare_digest(
+                request.headers.get("x-gestes-token", ""), _TOKEN):
             return JSONResponse({"ok": False, "message": "token"}, status_code=401)
         try:
             data = await request.json()

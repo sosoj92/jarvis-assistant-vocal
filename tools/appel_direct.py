@@ -21,12 +21,19 @@ import audioop
 import base64
 import json
 import logging
+import secrets
 import threading
 import time
 from pathlib import Path
 
 from core.config import reglage
 from core.registre import outil
+
+# SÉCURITÉ : le WebSocket /stream est PUBLIC (exposé par le tunnel pour Twilio).
+# On exige un secret partagé, glissé dans le TwiML (customParameter), donc connu
+# de Twilio seul, et vérifié à l'event "start". Sans ça, n'importe qui connaissant
+# le domaine ngrok pouvait ouvrir un tour LLM + TTS (drain de budget API).
+_STREAM_SECRET = reglage("appel.stream_secret", "") or secrets.token_urlsafe(24)
 
 LOG = logging.getLogger("jarvis")
 _RACINE = Path(__file__).resolve().parent.parent
@@ -273,6 +280,11 @@ def monter_ws(app):
                 if ev == "start":
                     info = data["start"]
                     params = info.get("customParameters", {}) or {}
+                    # AUTH : refuse tout /stream sans le bon secret (voir _STREAM_SECRET).
+                    if not secrets.compare_digest(str(params.get("secret", "")), _STREAM_SECRET):
+                        LOG.warning("ws /stream : secret invalide -> fermeture")
+                        await ws.close(code=1008)
+                        return
                     conv = Conversation(ws, info["streamSid"], info["callSid"], params)
                     await conv.demarrer()
                 elif ev == "media" and conv:
@@ -312,6 +324,7 @@ def _twiml_stream(objectif, contraintes):
     stream.parameter(name="objectif", value=objectif)
     stream.parameter(name="contraintes", value=contraintes or "")
     stream.parameter(name="prenom", value=_prenom())
+    stream.parameter(name="secret", value=_STREAM_SECRET)      # auth du /stream
     connect.append(stream)
     vr.append(connect)
     return str(vr)

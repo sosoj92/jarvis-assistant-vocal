@@ -83,7 +83,11 @@ def demarrer():
         return
     import time
     import uvicorn
-    config = uvicorn.Config(app(), host="0.0.0.0", port=port, log_level="warning")
+    # SÉCURITÉ : loopback par défaut. Le tunnel ngrok se connecte en 127.0.0.1
+    # (aucun impact) ; le panneau/cockpit/gestes ne sont donc PAS exposés au LAN.
+    # Ne passe à "0.0.0.0" que si tu SAIS ce que tu fais (accès réseau local).
+    hote = reglage("serveur.host", "127.0.0.1")
+    config = uvicorn.Config(app(), host=hote, port=port, log_level="warning")
     serveur = uvicorn.Server(config)
 
     def run():

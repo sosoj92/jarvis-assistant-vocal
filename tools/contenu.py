@@ -122,6 +122,17 @@ def lancer_ingestion_youtube(url, cible, whisper=False, max=0):
     scripts = Path(reglage("integrations.scripts", "") or str(Path.home() / "Downloads" / "Scripts"))
     if not (scripts / "scripts" / "ingest.sh").exists():
         return f"Projet Scripts introuvable (ingest.sh) sous {scripts}."
+    # SÉCURITÉ : outil déclenchable à distance (mcp_expose=True). On valide l'URL
+    # avant de la passer au downloader -> pas d'injection d'options yt-dlp (URL
+    # commençant par « - ») ni de fetch d'une cible arbitraire (SSRF).
+    from urllib.parse import urlparse
+    url = str(url or "").strip()
+    if url.startswith("-"):
+        return "URL invalide (ne peut pas commencer par « - »)."
+    hote = (urlparse(url).hostname or "").lower()
+    if not any(hote == d or hote.endswith("." + d)
+               for d in ("youtube.com", "youtu.be", "youtube-nocookie.com")):
+        return "URL refusée : seuls les liens YouTube sont acceptés."
     cible = re.sub(r"[^A-Za-z0-9_-]", "-", str(cible)).strip("-") or "youtube"
     args = [_bash(), "scripts/ingest.sh"]
     if whisper:
