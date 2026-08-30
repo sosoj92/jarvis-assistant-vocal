@@ -678,6 +678,14 @@ def monter_routes(app):
             return JSONResponse({"ok": False,
                                  "message": "Panneau accessible en local uniquement."},
                                 status_code=403)
+        # Anti-CSRF : sur les écritures (POST), exiger application/json. Une page
+        # web malveillante ne peut pas envoyer ce Content-Type en « requête simple »
+        # (il déclenche un préflight CORS qu'on ne satisfait pas) -> pas de CSRF.
+        if request.method not in ("GET", "HEAD"):
+            ct = (request.headers.get("content-type", "") or "").lower()
+            if "application/json" not in ct:
+                return JSONResponse({"ok": False, "message": "Content-Type invalide."},
+                                    status_code=415)
         return None
 
     @app.get("/panneau")

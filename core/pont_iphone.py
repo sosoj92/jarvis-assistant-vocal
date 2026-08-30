@@ -9,11 +9,17 @@ l'appelles depuis l'app Raccourcis d'iOS (voir docs/iphone.md).
 Authentification : un token secret (config pont_iphone.token) dans l'en-tete
 X-Jarvis-Token.
 
-SECURITE (essentiel) : une commande a distance ne peut declencher QUE des outils
-surs (domotique/PC exposes via MCP, sans confirmation). Toute action sensible
-(mail, reservation, appel, suppression...) est refusee -> "a faire a la voix a la
-maison". Ainsi un token vole ne peut qu'allumer/eteindre des lumieres, pas reserver
-un resto ni passer un appel.
+SECURITE (essentiel) : une commande a distance ne peut declencher QUE les outils
+reellement surs a distance -> ceux de la liste `pont_iphone.domotique_distante`,
+ou les outils N1 exposes au MCP (mcp_expose=True, sans confirmation). Un N3
+(mail, appel, reservation, suppression, extinction PC) est TOUJOURS refuse a
+distance. Le LLM distant ne recoit d'ailleurs QUE les schemas de ces outils-la
+(cf. _outils_distants) : la surface est reduite au strict executable.
+
+Perimetre reel d'un token vole : domotique (lumieres, clim, musique, volume,
+scenes) + quelques outils N1 exposes (OBS, budget/stats en lecture, ingestion
+YouTube validee). Rien de sensible (pas de mail/appel/argent/suppression), tout
+reversible. Garde ton token secret et regenere-le au moindre doute.
 """
 import logging
 import secrets
@@ -43,6 +49,23 @@ def _token_ok(fourni):
     return bool(attendu) and secrets.compare_digest(str(fourni or ""), str(attendu))
 
 
+def _outils_distants(local_seulement=False):
+    """Schémas des SEULS outils exécutables à distance (surface réduite) : jamais
+    un N3 ; et soit dans domotique_distante, soit N1 exposé au MCP (mcp_expose
+    sans confirmation). Le LLM distant ne voit que ceux-là -> il ne peut même pas
+    tenter d'appeler un outil sensible."""
+    from core import registre
+    domo = set(reglage("pont_iphone.domotique_distante", []) or [])
+    ok = []
+    for s in registre.schemas_api(local_seulement=local_seulement):
+        o = registre.get(s["name"])
+        if o is None or registre.est_n3(s["name"]):
+            continue
+        if s["name"] in domo or (o.mcp_expose and not o.confirmation):
+            ok.append(s)
+    return ok
+
+
 def traiter_commande(phrase):
     """Execute une commande a distance, mais UNIQUEMENT via les outils surs
     (mcp_expose=True et sans confirmation). Renvoie {ok, reponse, faits}."""
@@ -58,7 +81,7 @@ def traiter_commande(phrase):
     for _ in range(4):
         try:
             rep = P.repondre(systeme, messages,
-                             registre.schemas_api(local_seulement=(P.nom == "Ollama")))
+                             _outils_distants(local_seulement=(P.nom == "Ollama")))
         except Exception as e:
             LOG.exception("pont: appel modele")
             return {"ok": False, "reponse": f"Erreur du modele ({e})."}

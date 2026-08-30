@@ -421,6 +421,12 @@ def ingerer_inspiration(url: str, commentaire: str = "") -> dict:
     if not vault.exists():
         _LOGH.error("Vault introuvable : %s", vault)
         return {"ok": False, "message": f"Vault introuvable : {vault}"}
+    # SÉCURITÉ : déclenchable à distance (/api/inbox). On n'ingère QUE des URL
+    # Instagram/TikTok reconnues -> pas de fetch d'une cible arbitraire (SSRF vers
+    # localhost/LAN/metadata) par le downloader côté hôte.
+    if not _URL_INSTA_TIKTOK.search(str(url or "")):
+        _LOGH.warning("inspiration refusee (URL non Insta/TikTok) : %s", url)
+        return {"ok": False, "message": "Lien non reconnu : seuls Instagram et TikTok sont acceptés."}
     try:
         fiche = _ingerer_brut(url, vault)
     except Exception as e:

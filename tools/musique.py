@@ -229,7 +229,8 @@ def identifier_musique(source: str = "micro", secondes: int = 8) -> str:
     },
     lent=True,
     phrase_attente="Je cherche le son de ce fichier.",
-    mcp_expose=True,        # inoffensif : pas de micro, juste un fichier
+    mcp_expose=False,       # SÉCURITÉ : chemin de fichier libre -> local uniquement
+                            # (à distance = oracle d'existence + ffmpeg sur chemin arbitraire)
     affichage="toujours",
 )
 def identifier_musique_fichier(chemin: str) -> str:

@@ -109,6 +109,12 @@ for _o in registre.exposes_mcp():
 def _lancer_http(kind):
     host = reglage("mcp.host", "127.0.0.1")
     port = int(reglage("mcp.port", 8765))
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        # Le transport HTTP n'a PAS d'authentification : hors loopback, n'importe
+        # quelle machine du réseau pourrait appeler les outils exposés (domotique,
+        # OBS...). À ne faire que sur un réseau de confiance, en connaissance de cause.
+        print(f"[MCP] ATTENTION : écoute sur {host} (hors loopback) SANS auth — "
+              f"exposé au réseau. Repasse mcp.host à 127.0.0.1 si non voulu.")
     print(f"Serveur MCP {kind} sur http://{host}:{port}")
     try:
         server.run(kind, host=host, port=port)
