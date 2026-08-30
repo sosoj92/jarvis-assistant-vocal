@@ -17,8 +17,12 @@ $chain = "$ws\start-hermes-chain.ps1"
 if (Test-Path $chain) {
   $up = [bool](Get-NetTCPConnection -State Listen -LocalPort 8642 -ErrorAction SilentlyContinue)
   if (-not $up) {
-    Log "lancement de la chaîne Hermes"
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $chain
+    # EN ARRIÈRE-PLAN : la chaîne attend Docker (parfois plusieurs minutes). On ne
+    # BLOQUE PAS le démarrage du Jarvis vocal derrière ça -> il démarre tout de suite,
+    # Hermes suit quand Docker est prêt.
+    Log "lancement de la chaîne Hermes (arrière-plan)"
+    Start-Process powershell -WindowStyle Hidden `
+      -ArgumentList "-NoProfile","-WindowStyle","Hidden","-ExecutionPolicy","Bypass","-File",$chain
   } else { Log "chaîne Hermes déjà UP (8642)" }
 } else { Log "start-hermes-chain.ps1 absent -> Jarvis vocal seul" }
 
