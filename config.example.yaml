@@ -194,6 +194,7 @@ presence:                      # detection de presence (ping de l'iPhone sur le 
 
 scenes:                        # scenes composites (musique + lumieres + voix + OBS + PC)
   au_demarrage_actif: true     # jouer la scene du matin au 1er lancement du jour
+  brief_complet: true          # true = brief complet au demarrage (meteo+mails+deadlines) ; false = accueil court (meteo+1er rdv)
   spotify: true                # lancer Spotify + play au demarrage
   spotify_app: "spotify"       # appli a ouvrir (nom pour ouvrir_application)
   spotify_delai: 4.0           # secondes avant d'envoyer "play" (le temps que Spotify ouvre)

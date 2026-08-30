@@ -94,6 +94,20 @@ def _brief_hermes():
         return None
 
 
+def _accueil():
+    """Accueil vocal du matin. Par défaut le BRIEF COMPLET (faire_brief : heure,
+    météo, aperçu mails, deadlines) ; accueil court si scenes.brief_complet = false."""
+    if reglage("scenes.brief_complet", True):
+        try:
+            from tools.brief import faire_brief
+            t = str(faire_brief() or "").strip()
+            if t:
+                return t
+        except Exception:
+            pass
+    return _accueil_court()
+
+
 def _accueil_court():
     """Petit accueil vocal : salutation + météo + premier rendez-vous."""
     morceaux = []
@@ -143,7 +157,7 @@ def scene_au_demarrage(forcer=False):
     # 3) Accueil vocal : brief Hermes si dispo, sinon accueil court local.
     try:
         from core import voix
-        texte = _brief_hermes() or _accueil_court()
+        texte = _brief_hermes() or _accueil()
         if texte:
             voix.parler(texte)
     except Exception:
