@@ -162,7 +162,12 @@ navigateur:                    # assistance sur TON Chrome (voir docs/navigateur
     - "boursorama.com"
     - "credit-agricole.fr"
     - "paypal.com"
+    - "facture.net"              # facturation : lecture seule (outil factures_statut)
     # ajoute tes banques / sites sante / administration
+
+factures:                      # statut de facturation (facture.net) — LECTURE SEULE via ChromeJarvis
+  url: ""                      # URL de TON tableau de bord facture.net (copie-la depuis
+                               # ChromeJarvis une fois connecte : "https://www.facture.net/...")
 
 mcp:                           # serveur MCP (expose les outils domotique/PC ; voir docs/mcp.md)
   transport: "stdio"           # "stdio" (clients desktop) ou "http" (client distant)
