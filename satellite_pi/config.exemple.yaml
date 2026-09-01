@@ -1,0 +1,12 @@
+# Config du satellite Pi — copie en config.yaml et remplis.
+pc_url: "ws://192.168.1.10:8790/satellite"   # IP de TON PC (Jarvis) sur le reseau + /satellite
+satellite_id: "cuisine"        # doit exister cote PC (config.yaml -> satellites[].id)
+token: ""                      # le meme token que cote PC pour ce satellite
+# Peripheriques audio (indices : `python -c "import sounddevice as sd; print(sd.query_devices())"`)
+micro: null                    # null = micro par defaut ; sinon l'index
+haut_parleur: null             # null = sortie par defaut ; sinon l'index
+# Reglages capture (facultatif)
+seuil_reveil: 0.5              # sensibilite "Hey Jarvis" (0.3 facile .. 0.7 strict)
+seuil_silence: 0.010           # niveau en dessous duquel c'est du silence
+silence_fin: 1.0               # secondes de silence = fin de phrase
+duree_max: 15                  # duree max d'un enonce (s)

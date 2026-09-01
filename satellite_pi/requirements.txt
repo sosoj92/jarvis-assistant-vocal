@@ -1,0 +1,6 @@
+# Dépendances du satellite Pi (Raspberry Pi OS 64-bit, Python 3.11+).
+sounddevice
+numpy
+openwakeword
+websockets
+pyyaml
