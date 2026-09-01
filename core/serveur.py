@@ -64,6 +64,11 @@ def app():
             monter_ws(_APP)                        # /stream (Twilio Media Streams)
         except Exception:
             LOG.exception("montage du websocket /stream")
+        try:
+            from core.satellite import monter_routes as monter_satellite
+            monter_satellite(_APP)                 # /satellite (LAN, token par satellite)
+        except Exception:
+            LOG.exception("montage du websocket /satellite")
     return _APP
 
 

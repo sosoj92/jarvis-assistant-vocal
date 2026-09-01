@@ -1098,7 +1098,8 @@ def main():
 
     # Serveur web unifie (pont iPhone + webhook Twilio + panneau + gestes en loopback).
     if (config.reglage("serveur.actif", False) or config.reglage("pont_iphone.actif", False)
-            or config.reglage("gestes.actif", False) or config.reglage("cockpit.actif", False)):
+            or config.reglage("gestes.actif", False) or config.reglage("cockpit.actif", False)
+            or (config.reglage("satellites", []) or [])):     # satellites -> serveur requis
         from core.serveur import demarrer as demarrer_serveur_web
         demarrer_serveur_web()
         # Cockpit : ouvre l'app web en fenetre dediee (--app) sur l'ecran choisi.

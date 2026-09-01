@@ -342,3 +342,12 @@ alexa:                         # EXPERIMENTAL (via alexapy, non officiel) ; voir
 
 meteo:
   ville: ""                     # "" = auto par IP (localisation) ; mets ta ville si l'IP se trompe (ex. "Yerres", "Paris")
+
+satellites:                    # Jarvis dans d'autres pieces (Raspberry Pi, futur ESP32) — cf. docs/satellite.md
+  # LAN uniquement (jamais expose via ngrok). Pour un satellite sur le reseau, mets
+  # serveur.host: "0.0.0.0" (les gardes IP-socket protegent panneau/cockpit). Le test
+  # local (scripts/satellite_test.py) marche meme avec host 127.0.0.1.
+  # - id: "cuisine"            # identifiant unique du satellite
+  #   piece: "cuisine"         # piece par defaut (contexte : "allume la lumiere" -> cuisine)
+  #   token: "un-secret-long-par-satellite"   # genere : python -c "import secrets;print(secrets.token_urlsafe(24))"
+  #   wake: "appareil"         # "appareil" (wake word sur le satellite) | "serveur" (flux continu, openWakeWord PC)
