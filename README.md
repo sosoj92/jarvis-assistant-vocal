@@ -123,7 +123,25 @@ une carte **6 Go** (RTX 2060/3060) fait tourner les deux confortablement. Le `qw
 (~6 Go) demande plus de marge. Piper est temps réel sur CPU. `python scripts/doctor.py`
 conseille le modèle selon ta VRAM.
 
-## 🚀 Démarrage rapide
+## 🚀 Installation Windows en un clic (débutant complet)
+
+Sur **Windows 11**, télécharge le dépôt puis double-clique sur
+**`INSTALLER_JARVIS.bat`**. L'installateur :
+
+1. vérifie Python et Git, et tente de les installer automatiquement avec `winget` ;
+2. crée un environnement Python isolé et installe toutes les dépendances ;
+3. crée `config.yaml` depuis `config.example.yaml` uniquement s'il n'existe pas ;
+4. installe Chromium pour les fonctions navigateur, puis propose de lancer Jarvis.
+
+Laisse la fenêtre ouverte jusqu'à la fin. Si une étape échoue, l'erreur reste affichée
+et le script indique quoi corriger. Aucune clé secrète n'est ajoutée automatiquement :
+les clés API, si tu en as besoin, se mettent ensuite dans ton `config.yaml` local.
+
+Pour relancer Jarvis plus tard, double-clique sur **`lancer_jarvis.bat`**. Pour un
+diagnostic, ouvre PowerShell dans le dossier du projet et lance
+`.\.venv\Scripts\python.exe scripts\doctor.py`.
+
+## 🚀 Démarrage rapide (installation manuelle)
 
 Prérequis : **Python 3.13**, [uv](https://docs.astral.sh/uv/), Windows 11, un micro.
 
