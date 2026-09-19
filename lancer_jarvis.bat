@@ -1,11 +1,16 @@
 @echo off
 title Jarvis
-rem Lanceur de l'assistant vocal. Se place dans le dossier du projet puis
-rem demarre jarvis14.py via uv. Chemin absolu vers uv pour fonctionner
-rem aussi au demarrage de Windows, ou le PATH peut differer.
+rem Lanceur de l'assistant vocal. Le venv local est prioritaire ; uv reste
+rem disponible comme solution de compatibilite pour les installations existantes.
 cd /d "%~dp0"
-git pull --ff-only 2>nul
-"%USERPROFILE%\.local\bin\uv.exe" run python jarvis14.py
+if exist "%~dp0.venv\Scripts\python.exe" (
+    "%~dp0.venv\Scripts\python.exe" "%~dp0jarvis14.py"
+) else if exist "%USERPROFILE%\.local\bin\uv.exe" (
+    "%USERPROFILE%\.local\bin\uv.exe" run python jarvis14.py
+) else (
+    echo [ERREUR] Jarvis n'est pas installe.
+    echo Lance d'abord INSTALLER_JARVIS.bat.
+)
 echo.
 echo Jarvis s'est arrete. Vous pouvez fermer cette fenetre.
 pause
