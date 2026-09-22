@@ -308,19 +308,19 @@ class MediaRoutingTests(unittest.TestCase):
                     "uri": "spotify:track:abc", "name": "Blinding Lights"}), \
                 patch("tools.spotify._demarrer_lecture",
                       return_value=SimpleNamespace(status_code=204)), \
-                patch.object(spotify.os, "startfile") as startfile:
+                patch("core.plateforme.ouvrir") as lancer:
             resultat = spotify.lire_spotify("Blinding Lights")
 
         self.assertEqual(resultat, "Je lance « Blinding Lights » sur Spotify.")
-        startfile.assert_not_called()
+        lancer.assert_not_called()
 
     def test_spotify_sans_oauth_ouvre_une_recherche_locale(self):
         with patch("tools.spotify._configure", return_value=False), \
-                patch.object(spotify.os, "startfile") as startfile:
+                patch("core.plateforme.ouvrir") as lancer:
             resultat = spotify.lire_spotify("Daft Punk")
 
         self.assertIn("recherche Spotify", resultat)
-        startfile.assert_called_once_with("spotify:search:Daft%20Punk")
+        lancer.assert_called_once_with("spotify:search:Daft%20Punk")
 
     @patch("tools.media.time.sleep")
     @patch("tools.navigateur.browser_interact", return_value="C'est clique.")

@@ -12,11 +12,10 @@ envois, suppressions et commandes systeme restent hors de ce mode.
 """
 from __future__ import annotations
 
-import ctypes
 import logging
 import time
 
-from core import cloud
+from core import cloud, plateforme
 from core.config import reglage
 from core.registre import outil
 from core.util import sans_accents
@@ -150,30 +149,25 @@ def _raison_blocage(tache: str):
 
 
 def _echap_presse():
-    try:
-        return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
-    except Exception:
-        return False
+    return plateforme.touche_pressee("escape")
 
 
 def _taper(texte: str):
-    import keyboard
-    keyboard.write(str(texte or "")[:500], delay=0.01)
+    plateforme.taper_texte(str(texte or "")[:500])
 
 
 def _touche(nom: str):
-    import keyboard
     touche = sans_accents(str(nom or "").strip().lower())
     if touche == "escape":
         touche = "esc"
     if touche not in _TOUCHES_AUTORISEES:
         raise ValueError(f"touche non autorisee : {touche or '?'}")
-    keyboard.send(touche)
+    plateforme.envoyer_touches(touche)
 
 
 def _defiler(direction: str):
     delta = 720 if str(direction).lower() == "haut" else -720
-    ctypes.windll.user32.mouse_event(0x0800, 0, 0, delta, 0)
+    plateforme.souris_defiler(vertical=delta)
 
 
 def _executer_action(action: dict) -> str:

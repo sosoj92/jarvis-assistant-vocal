@@ -35,7 +35,7 @@ def _eur(x):
 @outil(
     nom="mon_budget",
     description="Donne ma consommation et mon budget : coût du jour et du mois, "
-                "ventilé par fournisseur (OpenAI/Claude, voix ElevenLabs, Twilio) + la part "
+                "ventilé par fournisseur (LLM cloud, voix locale, Twilio) + la part "
                 "d'Hermes, et le pourcentage du plafond. Pour « mon budget ? », "
                 "« combien j'ai dépensé ? », « ma conso ? ».",
     lent=True,

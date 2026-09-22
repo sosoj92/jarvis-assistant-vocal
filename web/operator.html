@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis — Operator</title>
+<style>
+  :root{
+    --bg:#0F0D1B; --card:#1A172C; --card2:#1E1B32; --bord:#2B2647;
+    --txt:#FFFFFF; --dim:#9E9BAE;
+    --acc:#7C3AED; --acc2:#6D28D9;
+    --ok:#10B981; --warn:#F97316; --ko:#EF4444; --info:#06B6D4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.5 "Inter","Plus Jakarta Sans",-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex;min-height:100vh}
+  a{color:inherit;text-decoration:none}
+
+  /* ---------- sidebar ---------- */
+  aside{width:232px;flex-shrink:0;background:var(--card);border-right:1px solid var(--bord);
+    padding:18px 14px;display:flex;flex-direction:column;gap:4px}
+  aside .logo{display:flex;align-items:center;gap:10px;padding:0 10px 16px}
+  .logo .mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),var(--acc2));font-size:18px}
+  .logo b{font-size:15px}
+  .logo small{display:block;color:var(--dim);font-size:11px;font-weight:400}
+  aside .grp{color:var(--dim);font-size:10px;letter-spacing:.12em;margin:14px 10px 4px;text-transform:uppercase}
+  aside .it{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;
+    color:var(--dim);font-size:13.5px;cursor:pointer;border:1px solid transparent}
+  aside .it:hover{color:var(--txt);background:var(--card2)}
+  aside .it.on{color:var(--txt);background:var(--acc2);
+    border:1px solid var(--acc);box-shadow:0 0 12px rgba(124,58,237,.45)}
+  aside .it .n{margin-left:auto;background:var(--ko);color:#fff;font-size:10px;
+    border-radius:999px;padding:1px 6px;display:none}
+  aside .it .n.on{display:inline}
+
+  /* ---------- colonne principale ---------- */
+  main{flex:1;min-width:0;padding:18px 26px 60px}
+  .topbar{display:flex;align-items:center;gap:14px;margin-bottom:20px}
+  .topbar h1{font-size:19px;margin:0;font-weight:600}
+  .topbar input{flex:1;max-width:420px;background:var(--card);border:1px solid var(--bord);
+    color:var(--txt);border-radius:10px;padding:8px 13px;font-size:13px;outline:none}
+  .topbar input:focus{border-color:var(--acc)}
+  .chip{background:var(--card);border:1px solid var(--bord);border-radius:999px;
+    padding:5px 12px;font-size:12px;color:var(--dim);cursor:pointer}
+  .chip:hover{color:var(--txt)}
+  .profil{display:flex;align-items:center;gap:9px;margin-left:4px}
+  .profil .avatar{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),var(--acc2));font-weight:600;font-size:13px}
+  .profil .dim{color:var(--dim);font-size:12.5px}
+
+  /* ---------- KPIs ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:22px}
+  .kpi{background:var(--card);border:1px solid var(--bord);border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}
+  .kpi::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:var(--acc)}
+  .kpi.ok::before{background:var(--ok)} .kpi.warn::before{background:var(--warn)}
+  .kpi.info::before{background:var(--info)}
+  .kpi .v{font-size:23px;font-weight:700;letter-spacing:-.02em}
+  .kpi .l{color:var(--dim);font-size:12px;margin-top:2px}
+
+  /* ---------- sections ---------- */
+  h2.sec{font-size:12px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;
+    margin:26px 0 10px;display:flex;align-items:center;gap:8px}
+  h2.sec .live{width:7px;height:7px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 8px var(--ok)}
+
+  /* ---------- pendant que tu dormais ---------- */
+  .nuit{background:var(--card);border:1px solid var(--bord);border-radius:16px;padding:16px 18px}
+  .nuit li{list-style:none;display:flex;align-items:baseline;gap:10px;padding:9px 2px;
+    border-bottom:1px solid var(--bord);color:var(--txt);font-size:13.5px}
+  .nuit li:last-child{border-bottom:none}
+  .nuit li .st{color:var(--ok);white-space:nowrap;font-size:12px}
+  .nuit li .cat{color:var(--info);font-size:11px;border:1px solid var(--bord);border-radius:6px;
+    padding:0 6px;white-space:nowrap}
+  .nuit li .t{color:var(--dim);font-size:11px;margin-left:auto;white-space:nowrap}
+  .nuit .vide{color:var(--dim);padding:6px 2px}
+
+  /* ---------- cartes à valider ---------- */
+  .feed{display:flex;flex-direction:column;gap:14px}
+  .carte{background:var(--card);border:1px solid var(--bord);border-radius:18px;padding:16px 18px;position:relative;overflow:hidden}
+  .carte::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;
+    background:linear-gradient(90deg,var(--acc),transparent 70%)}
+  .carte .head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .carte .head b{font-size:12px;letter-spacing:.08em;color:var(--acc)}
+  .badge{margin-left:auto;font-size:11px;padding:2px 9px;border-radius:999px;white-space:nowrap;
+    background:var(--card2);border:1px solid var(--bord);color:var(--dim)}
+  .badge.urgent{color:#ffb28c;border-color:#5a3520;background:#3a2418}
+  .badge.n3{color:#ff9a9a;border-color:#5a2020;background:#3a1c1c}
+  .badge.n2{color:#a5b4ff;border-color:#2b3a6d;background:#1c2340}
+  .carte .apercu{background:#141221;border:1px solid var(--bord);border-radius:12px;
+    padding:12px 14px;color:var(--dim);font-size:13.5px;margin-bottom:12px}
+  .carte .actions{display:flex;gap:9px;flex-wrap:wrap}
+  .btn{border:none;border-radius:10px;padding:8px 15px;font-size:13px;cursor:pointer;font-family:inherit}
+  .btn.prime{background:var(--acc);color:#fff}
+  .btn.prime:hover{background:var(--acc2);box-shadow:0 0 14px rgba(124,58,237,.5)}
+  .btn.ghost{background:transparent;border:1px solid var(--bord);color:var(--dim)}
+  .btn.ghost:hover{color:var(--txt);border-color:var(--dim)}
+  .btn.ko{background:transparent;border:1px solid #5a2020;color:#ff9a9a}
+  .carte.vide{color:var(--dim);text-align:center;padding:22px}
+
+  /* ---------- pipeline ---------- */
+  .pipe{display:flex;flex-direction:column;gap:10px;background:var(--card);
+    border:1px solid var(--bord);border-radius:16px;padding:16px 18px}
+  .pipe .et{display:flex;align-items:center;gap:12px;font-size:13px}
+  .pipe .lbl{width:170px;color:var(--dim)}
+  .barre{flex:1;height:9px;border-radius:999px;background:var(--card2);overflow:hidden}
+  .barre i{display:block;height:100%;border-radius:999px;background:var(--info)}
+  .barre.violet i{background:var(--acc)} .barre.orange i{background:var(--warn)}
+  .pipe .pct{width:36px;text-align:right;color:var(--dim);font-size:12px}
+
+  /* ---------- 95/5 ---------- */
+  .regle{background:var(--card);border:1px solid var(--bord);border-radius:16px;padding:16px 18px}
+  .regle .barre{display:flex;height:14px;border-radius:999px;overflow:hidden;margin:10px 0 8px}
+  .regle .barre i{height:100%}
+  .regle .barre .a{background:var(--ok);width:95%}
+  .regle .barre .b{background:var(--warn);width:5%}
+  .regle .legende{display:flex;justify-content:space-between;color:var(--dim);font-size:12px}
+  .legende b{color:var(--txt)}
+
+  /* ---------- chat ---------- */
+  .chat{background:var(--card);border:1px solid var(--bord);border-radius:16px;padding:14px}
+  .chat .messages{display:flex;flex-direction:column;gap:9px;max-height:260px;overflow-y:auto;margin-bottom:10px}
+  .msg{max-width:78%;padding:9px 13px;border-radius:13px;font-size:13.5px;line-height:1.45;white-space:pre-wrap}
+  .msg.aide{align-self:center;background:var(--card2);color:var(--dim);font-size:12px;max-width:100%;border:1px dashed var(--bord)}
+  .msg.vous{align-self:flex-end;background:var(--acc2);border:1px solid var(--acc)}
+  .msg.jarvis{align-self:flex-start;background:var(--card2);border:1px solid var(--bord)}
+  .msg .quand{display:block;color:var(--dim);font-size:10.5px;margin-top:3px}
+  .saisie{display:flex;gap:9px}
+  .saisie input{flex:1;background:var(--card2);border:1px solid var(--bord);color:var(--txt);
+    border-radius:10px;padding:9px 13px;font-size:13.5px;outline:none;font-family:inherit}
+  .saisie input:focus{border-color:var(--acc)}
+
+  /* ---------- taches ---------- */
+  .taches{display:flex;flex-direction:column;gap:9px}
+  .tache{background:var(--card);border:1px solid var(--bord);border-radius:12px;
+    padding:11px 14px;display:flex;align-items:center;gap:12px;font-size:13.5px}
+  .tache .box{width:17px;height:17px;border-radius:5px;border:1.5px solid var(--dim);
+    flex-shrink:0;display:grid;place-items:center;color:transparent;cursor:pointer}
+  .tache.terminee .box{background:var(--ok);border-color:var(--ok);color:#fff}
+  .tache.terminee .txt{color:var(--dim);text-decoration:line-through}
+  .tache .txt b{color:var(--txt)}
+  .tache .meta{color:var(--dim);font-size:12px}
+  .tache .badge.urgent{margin-left:auto}
+
+  @media (max-width:860px){ aside{display:none} }
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="logo">
+    <div class="mark">⚡</div>
+    <div><b>Jarvis Operator</b><small>CRM · 95/5</small></div>
+  </div>
+  <div class="grp">Pilotage</div>
+  <div class="it on" data-vue="fil">🌙 Le Fil</div>
+  <div class="it" data-vue="contacts">👤 Contacts</div>
+  <div class="it" data-vue="mails">✉️ Messagerie</div>
+  <div class="it" data-vue="agenda">📅 Calendrier</div>
+  <div class="it" data-vue="taches">✅ Tâches</div>
+  <div class="grp">Business</div>
+  <div class="it" data-vue="finances">💰 Finances</div>
+  <div class="it" data-vue="cockpit">📊 Bilan</div>
+  <div class="it" onclick="location.href='/panneau'">🛠 Panneau Jarvis</div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <h1 id="bonjour">Ta journée</h1>
+    
+    <span class="chip" onclick="rafraichir()">↻ Actualiser</span>
+    <span class="chip" onclick="location.href='/panneau'">Réglages</span>
+    <div class="profil"><div class="avatar" id="avatar">F</div><span id="profil-nom" class="dim">Moi</span></div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <h2 class="sec"><span class="live"></span><span id="titre-nuit">Pendant que tu dormais</span></h2>
+  <div class="nuit"><ul id="journal"></ul></div>
+
+  <h2 class="sec">🔥 À valider <span class="badge" id="nb-valider">0</span></h2>
+  <div class="feed" id="feed"></div>
+
+  <h2 class="sec">💬 Parler à Jarvis — écris ta demande</h2>
+  <div class="chat">
+    <div class="messages" id="messages">
+      <div class="msg aide">Écris comme tu parles : « lis mes mails », « où j'en suis sur mes factures ? », « ajoute un client Acme contact John dans factures ». La réponse arrive ici ET à voix haute.</div>
+    </div>
+    <form class="saisie" onsubmit="return envoyerDemande(event)">
+      <input id="demande" placeholder="Écris à Jarvis… (Entrée pour envoyer)" autocomplete="off">
+      <button class="btn prime" type="submit">Envoyer</button>
+    </form>
+  </div>
+
+  <h2 class="sec">📈 Progression du jour</h2>
+  <div class="pipe">
+    <div class="et"><span class="lbl" id="l-lues">Lectures automatiques</span><div class="barre"><i></i></div><span class="pct" id="p-lues">0</span></div>
+    <div class="et"><span class="lbl" id="l-auto">Actions sans risque (N1)</span><div class="barre violet"><i></i></div><span class="pct" id="p-auto">0</span></div>
+    <div class="et"><span class="lbl" id="l-validees">Validées par toi</span><div class="barre orange"><i></i></div><span class="pct" id="p-validees">0</span></div>
+  </div>
+
+  <h2 class="sec">🤝 La règle 95/5</h2>
+  <div class="regle">
+    <div class="barre"><i class="a"></i><i class="b"></i></div>
+    <div class="legende"><span><b>95 %</b> automatisé — Jarvis lit, trie, rédige, prépare</span><span><b>5 %</b> à valider — envoyer, écrire, engager</span></div>
+  </div>
+
+  <h2 class="sec">✅ Tâches confiées à l'IA</h2>
+  <div class="taches" id="taches"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const CATS = {lecture:"Lecture", mail:"Mails", facture:"Factures", agenda:"Agenda",
+              crm:"CRM", validation:"Validation", systeme:"Système", autre:"Autre"};
+
+function heure(ts){
+  const d = new Date(ts*1000), h = d.getHours(), m = d.getMinutes();
+  return h + "h" + String(m).padStart(2,"0");
+}
+function bonjour(){
+  const h = new Date().getHours();
+  return h<6 ? "Bonne nuit 👋" : h<12 ? "Bonjour 👋" : h<18 ? "Bon après-midi 👋" : "Bonsoir 👋";
+}
+
+function kpis(k){
+  const cats = k.par_categorie || {};
+  const max = Math.max(1, ...Object.values(cats));
+  $("#kpis").innerHTML = `
+    <div class="kpi ok"><div class="v">${k.actions_24h}</div><div class="l">actions IA · 24 dernières heures</div></div>
+    <div class="kpi warn"><div class="v">${k.en_attente}</div><div class="l">en attente de ta validation</div></div>
+    <div class="kpi info"><div class="v">${cats.mail || 0}</div><div class="l">mails triés / répondus (24 h)</div></div>
+    <div class="kpi"><div class="v">${cats.crm || 0}</div><div class="l">écritures CRM & factures (24 h)</div></div>`;
+  // pipeline (24 h)
+  const lues = cats.lecture || 0, auto = k.actions_24h - (cats.validation||0), val = cats.validation || 0;
+  const tot = Math.max(1, k.actions_24h);
+  $("#l-lues").textContent = `Lectures automatiques (${lues})`;
+  $("#p-lues").textContent = lues;
+  document.querySelectorAll(".barre i")[0].style.width = Math.min(100, lues/tot*100) + "%";
+  $("#l-auto").textContent = `Actions sans risque N1 (${auto})`;
+  $("#p-auto").textContent = auto;
+  document.querySelectorAll(".barre violet i")[0].style.width = Math.min(100, auto/tot*100) + "%";
+  $("#l-validees").textContent = `Validées par toi (${val})`;
+  $("#p-validees").textContent = val;
+  document.querySelectorAll(".barre orange i")[0].style.width = Math.min(100, val/tot*100) + "%";
+}
+
+const VIDES = {
+  mails: "Aucun mail traité dans les 24 dernières heures — dis « Hey Jarvis, lis mes mails ».",
+  agenda: "Aucun événement d'agenda traité récemment — autorise-le : uv run python scripts/google_login.py agenda",
+  contacts: "Aucune écriture CRM récente — Jarvis écrira ici après confirmation d'un ajout client.",
+  finances: "Aucune action facturation récente — demande « où j'en suis sur mes factures ».",
+  fil: "Rien encore — les actions automatiques de Jarvis apparaîtront ici.",
+};
+function journal(entrees, nuit, filtre){
+  const ul = $("#journal");
+  if(!entrees.length){
+    ul.innerHTML = `<li class="vide">${VIDES[filtre] || VIDES.fil}</li>`;
+    return;
+  }
+  ul.innerHTML = entrees.map(e => `
+    <li><span class="st">● déjà fait</span>
+        <span class="cat">${CATS[e.categorie]||e.categorie}</span>
+        <span>${e.titre}</span>
+        <span class="t">${heure(e.ts)}</span></li>`).join("");
+}
+
+function feed(items){
+  $("#nb-valider").textContent = items.length;
+  if(!items.length){
+    $("#feed").innerHTML = `<div class="carte vide">Rien à valider — tout est traité. 🌿</div>`;
+    return;
+  }
+  $("#feed").innerHTML = items.map(it => `
+    <div class="carte">
+      <div class="head"><b>À VALIDER · ${it.outil.toUpperCase()}</b>
+        <span class="badge ${it.niveau==="N3"?"n3":"n2"}">${it.niveau} · ${it.niveau==="N3"?"critique":"sensible"}</span></div>
+      <div class="apercu">${it.annonce}</div>
+      <div class="actions">
+        <button class="btn prime" onclick="valider()">Valider</button>
+        <button class="btn ko" onclick="refuser()">Refuser</button>
+      </div>
+    </div>`).join("");
+}
+
+async function api(chemin, opts){
+  const r = await fetch(chemin, Object.assign({headers:{"Content-Type":"application/json"}}, opts));
+  return r.json();
+}
+async function profil(){
+  try{
+    const r = await api("/api/operator/profil");
+    if(r && r.nom){
+      $("#profil-nom").textContent = r.nom;
+      $("#avatar").textContent = r.nom.trim()[0].toUpperCase();
+    }
+  }catch(e){}
+}
+async function valider(){ alert((await api("/api/operator/valider",{method:"POST"})).resultat || "Ok."); rafraichir(); }
+async function refuser(){ await api("/api/operator/refuser",{method:"POST"}); rafraichir(); }
+
+function taches(items){
+  const c = $("#taches");
+  if(!items || !items.length){
+    c.innerHTML = `<div class="carte vide">Aucune tâche déléguée — dis « fais une recherche approfondie sur… » à Jarvis.</div>`;
+    return;
+  }
+  c.innerHTML = items.map(t => {
+    const finie = t.statut === "terminee" || t.statut === "ok";
+    const urgente = t.statut === "en_cours" && (Date.now()/1000 - t.debut) > 120;
+    const duree = t.duree ? Math.round(t.duree) + " s" : "";
+    return `<div class="tache ${finie?"terminee":""}">
+      <div class="box">✓</div>
+      <div class="txt"><b>${t.tache || "Tâche"}</b>
+        <div class="meta">${t.modele || "Hermes"}${duree ? " · " + duree : ""}${t.resume ? " · " + t.resume.slice(0,80) : ""}</div></div>
+      ${finie ? `<span class="badge">terminée</span>` : urgente ? `<span class="badge urgent">en cours · long</span>` : `<span class="badge n2">en cours</span>`}
+    </div>`;
+  }).join("");
+}
+
+// -------------------------------------------------------------- vues
+let vue = "fil";
+let dernierEtat = null;
+const FILTRES = {
+  fil: null, mails: ["mail"], agenda: ["agenda"], contacts: ["crm"],
+  finances: ["facture"], taches: null,
+};
+const TITRES = {
+  mails: "Messagerie — traitée par l'IA", agenda: "Agenda — surveillé par l'IA",
+  contacts: "Contacts & CRM — écrit par l'IA", finances: "Finances — facturation & budget",
+};
+function appliquerVue(){
+  document.querySelectorAll("aside .it[data-vue]").forEach(el =>
+    el.classList.toggle("on", el.dataset.vue === vue));
+  if (!dernierEtat) return;
+  if (vue === "taches"){
+    document.getElementById("taches").scrollIntoView({behavior:"smooth"});
+    return;
+  }
+  const c = FILTRES[vue];
+  journal(c ? dernierEtat.journal.filter(e => c.includes(e.categorie))
+            : dernierEtat.journal,
+          dernierEtat.kpis.periode_nuit, vue);
+  $("#titre-nuit").textContent = TITRES[vue]
+    || (dernierEtat.kpis.periode_nuit ? "Pendant que tu dormais" : "Traité par l'IA");
+}
+document.querySelectorAll("aside .it[data-vue]").forEach(el =>
+  el.addEventListener("click", () => { vue = el.dataset.vue; appliquerVue(); }));
+
+async function rafraichir(){
+  try{
+    const e = await api("/api/operator/etat");
+    dernierEtat = e;
+    kpis(e.kpis);
+    journal(e.journal, e.kpis.periode_nuit, vue);
+    $("#titre-nuit").textContent = TITRES[vue]
+      || (e.kpis.periode_nuit ? "Pendant que tu dormais" : "Traité par l'IA");
+    feed(e.a_valider);
+    taches(e.taches);
+    appliquerVue();
+  }catch(err){ console.error(err); }
+}
+// ---------------------------------------------------------------- chat
+function bulle(role, texte, ts){
+  const zone = $("#messages");
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  const quand = ts ? new Date(ts*1000).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"}) : "";
+  d.innerHTML = texte.replace(/</g,"&lt;").replace(/\n/g,"<br>")
+    + (quand ? `<span class="quand">${quand}</span>` : "");
+  zone.appendChild(d);
+  zone.scrollTop = zone.scrollHeight;
+}
+let enAttente = false;
+async function envoyerDemande(ev){
+  if(ev) ev.preventDefault();
+  const champ = $("#demande");
+  const texte = champ.value.trim();
+  if(!texte || enAttente) return false;
+  champ.value = "";
+  bulle("vous", texte);
+  enAttente = true;
+  const attendre = bulle("aide", "Jarvis traite ta demande… (0 s)");
+  const debut = Date.now();
+  const majAttente = () => {
+    const s = Math.round((Date.now() - debut) / 1000);
+    if(attendre.parentNode)
+      attendre.innerHTML = "Jarvis traite ta demande… (" + s + " s)<br>" +
+        "<span style='font-size:11px'>Mistral réfléchit, les outils tournent, puis la réponse est prononcée. Le journal ci-dessus montre l'activité en direct.</span>";
+  };
+  const tic = setInterval(majAttente, 1000);
+  try{
+    const r = await api("/api/operator/message", {method:"POST", body:JSON.stringify({texte})});
+    if(!r.ok){ clearInterval(tic); attendre.remove(); bulle("aide", r.message || "Envoi impossible."); enAttente = false; return false; }
+    // poll la reponse : l'assistant la traite entre deux ecoutes micro
+    for(let i=0;i<360;i++){
+      await new Promise(r2 => setTimeout(r2, 500));
+      const rep = await api("/api/operator/reponse/" + r.id);
+      if(rep.pret){
+        clearInterval(tic);
+        attendre.remove();
+        bulle("jarvis", rep.texte);
+        enAttente = false;
+        rafraichir();
+        return false;
+      }
+    }
+    clearInterval(tic);
+    attendre.remove();
+    bulle("aide", "Pas de réponse en 3 min — Jarvis est peut-être occupé à parler ou le modèle est indisponible.");
+  }catch(e){ console.error(e); }
+  enAttente = false;
+  return false;
+}
+async function chargerConversation(){
+  try{
+    const c = await api("/api/operator/conversation");
+    (c.messages||[]).forEach(m => bulle(m.role === "vous" ? "vous" : "jarvis", m.texte, m.ts));
+  }catch(e){}
+}
+
+$("#bonjour").textContent = bonjour();
+profil();
+chargerConversation();
+rafraichir();
+setInterval(rafraichir, 5000);
+</script>
+</body>
+</html>

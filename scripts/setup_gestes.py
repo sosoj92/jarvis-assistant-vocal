@@ -14,7 +14,8 @@ from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent.parent
 VENV = RACINE / "gestes" / ".venv-tracker"
-PY = VENV / "Scripts" / "python.exe"
+PY = VENV / ("Scripts" if sys.platform == "win32" else "bin") / \
+     ("python.exe" if sys.platform == "win32" else "python")
 MODELE = RACINE / "gestes" / "models" / "hand_landmarker.task"
 URL_MODELE = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
               "hand_landmarker/float16/1/hand_landmarker.task")

@@ -29,6 +29,12 @@ _PRIX_DEFAUT = {
     "haiku": (1.0, 5.0),
     "sonnet": (3.0, 15.0),
     "opus": (5.0, 25.0),
+    "mistral-large": (0.50, 1.50),
+    "mistral-medium": (0.40, 2.00),
+    "mistral-small": (0.10, 0.30),
+    "ministral": (0.10, 0.10),
+    "gemini-2.5-pro": (1.25, 10.00),
+    "gemini-2.5-flash": (0.30, 2.50),
 }
 
 
@@ -111,13 +117,12 @@ def resume():
 
 # ==================================================== N12 : voix, totaux, plafonds
 
-_PRIX_TTS_1K = 0.10          # $ / 1000 caracteres ElevenLabs (estimation ; config)
 
 
-def enregistrer_tts(caracteres, fournisseur="ElevenLabs"):
-    """Compte la synthese vocale (ElevenLabs, facturee au caractere)."""
+def enregistrer_tts(caracteres, fournisseur="voix locale"):
+    """Compte la synthese vocale (cout nul en local, trace conservee)."""
     try:
-        prix1k = float(reglage("budget.prix_elevenlabs", _PRIX_TTS_1K))
+        prix1k = float(reglage("budget.prix_tts", 0.0))
         cout = (int(caracteres or 0) / 1000.0) * prix1k
         jour = dt.date.today().isoformat()
         with _VERROU:

@@ -1,5 +1,13 @@
 """Messagerie Gmail (IMAP/SMTP) : lire, lire en detail, brouillon, envoi, corbeille.
 
+Deux authentifications possibles, choisies automatiquement :
+
+  - OAuth 2.0 (XOAUTH2) si mail.oauth vaut true. C'est LE chemin sur Google
+    Workspace, ou l'administrateur peut interdire les mots de passe
+    d'application. Consentement une fois par navigateur :
+    uv run python scripts/google_login.py mail
+  - mot de passe d'application, sinon (compte Google personnel avec 2FA).
+
 envoyer_mail et mettre_a_la_corbeille sont marques confirmation=True : le systeme
 demande l'accord vocal de l'utilisateur avant d'agir.
 """
@@ -26,13 +34,58 @@ _BROUILLON = {}
 _DERNIERS_MAILS = []
 
 
+def _oauth_actif():
+    """Vrai si on doit s'authentifier en OAuth plutot qu'en mot de passe."""
+    return bool(reglage("mail.oauth", False))
+
+
 def _mail_configure():
-    return bool(MAIL_ADRESSE and MAIL_MOT_DE_PASSE_APP)
+    if not MAIL_ADRESSE:
+        return False
+    return _oauth_actif() or bool(MAIL_MOT_DE_PASSE_APP)
 
 
 def _mail_mdp():
     """Mot de passe d'application sans espaces (Google l'affiche par groupes)."""
     return MAIL_MOT_DE_PASSE_APP.replace(" ", "")
+
+
+def _jeton_oauth():
+    """Jeton d'acces Google, rafraichi si besoin. Leve si pas encore autorise."""
+    from core import google_oauth
+    creds = google_oauth.identifiants(
+        google_oauth.SCOPES_MAIL,
+        google_oauth.chemin("mail.token", "google_token_mail.json"),
+        interactif=False)          # jamais de navigateur depuis l'assistant
+    return creds.token
+
+
+def _imap():
+    """Connexion IMAP authentifiee, quelle que soit la methode configuree."""
+    imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
+    if _oauth_actif():
+        from core.google_oauth import chaine_xoauth2
+        chaine = chaine_xoauth2(MAIL_ADRESSE, _jeton_oauth())
+        imap.authenticate("XOAUTH2", lambda _: chaine.encode())
+    else:
+        imap.login(MAIL_ADRESSE, _mail_mdp())
+    return imap
+
+
+def _smtp():
+    """Connexion SMTP authentifiee, quelle que soit la methode configuree."""
+    smtp = smtplib.SMTP_SSL(SMTP_SERVEUR, SMTP_PORT)
+    if _oauth_actif():
+        import base64
+        from core.google_oauth import chaine_xoauth2
+        chaine = chaine_xoauth2(MAIL_ADRESSE, _jeton_oauth())
+        code, reponse = smtp.docmd(
+            "AUTH", "XOAUTH2 " + base64.b64encode(chaine.encode()).decode())
+        if code != 235:
+            raise smtplib.SMTPAuthenticationError(code, reponse)
+    else:
+        smtp.login(MAIL_ADRESSE, _mail_mdp())
+    return smtp
 
 
 def _decoder_entete(valeur):
@@ -79,8 +132,7 @@ def lire_mails(nombre: int = 5) -> str:
         return "La messagerie n'est pas configuree."
     nombre = max(1, min(int(nombre), 10))
     try:
-        imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
-        imap.login(MAIL_ADRESSE, _mail_mdp())
+        imap = _imap()
         imap.select("INBOX")
         # On travaille en UID : stables meme apres une mise a la corbeille.
         _, donnees = imap.uid("search", None, "ALL")
@@ -136,8 +188,7 @@ def lire_mail(numero: int = 1) -> str:
     if numero < 1 or numero > len(_DERNIERS_MAILS):
         return f"Je n'ai pas de mail numero {numero}."
     try:
-        imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
-        imap.login(MAIL_ADRESSE, _mail_mdp())
+        imap = _imap()
         imap.select("INBOX")
         num = _DERNIERS_MAILS[numero - 1]
         _, d = imap.uid("fetch", num, "(BODY.PEEK[])")
@@ -208,8 +259,7 @@ def envoyer_mail() -> str:
         msg["To"] = _BROUILLON["destinataire"]
         msg["Subject"] = _BROUILLON["sujet"]
         msg.set_content(_BROUILLON["corps"])
-        with smtplib.SMTP_SSL(SMTP_SERVEUR, SMTP_PORT) as smtp:
-            smtp.login(MAIL_ADRESSE, _mail_mdp())
+        with _smtp() as smtp:
             smtp.send_message(msg)
         destinataire = _BROUILLON["destinataire"]
         _BROUILLON.clear()
@@ -248,8 +298,7 @@ def mettre_a_la_corbeille(numero: int = 1) -> str:
     if numero < 1 or numero > len(_DERNIERS_MAILS):
         return f"Je n'ai pas de mail numero {numero}."
     try:
-        imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
-        imap.login(MAIL_ADRESSE, _mail_mdp())
+        imap = _imap()
         imap.select("INBOX")
         uid = _DERNIERS_MAILS[numero - 1]
         # Gmail : ajouter le libelle \Trash deplace le message vers la corbeille.

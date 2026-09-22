@@ -4,8 +4,8 @@
 
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
-![Mode](https://img.shields.io/badge/modes-hybrid%20%7C%20quality%20%7C%20local-orange)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
+![Mode](https://img.shields.io/badge/mode-hybrid%20%7C%20quality%20%7C%20local-orange)
 
 Un assistant vocal en français qui tourne **sur ta machine**. Dis *« Hey Jarvis »*,
 parle naturellement : il raisonne avec un LLM, utilise une boîte à outils extensible
@@ -32,7 +32,10 @@ ESP32 avec audio ou Pi Zero ([options et fonctionnement](docs/satellite.md) ·
 [guide de choix et d'installation](docs/satellite_installation.md) ·
 [installation Raspberry/Linux détaillée](docs/satellite_pi.md)).
 
-> Projet perso partagé tel quel. Cible **Windows 11**, nécessite un micro et (en mode
+> Projet perso partagé tel quel. Tourne sur **Windows 11** et **macOS** (Intel et
+> Apple Silicon) — voir **[INSTALL_MAC.md](INSTALL_MAC.md)** pour le Mac, et les
+> [différences assumées](INSTALL_MAC.md#7-ce-qui-marche-et-ce-qui-ne-marche-pas)
+> (température GPU, overlay, raccourcis globaux). Nécessite un micro et (en mode
 > cloud) une clé API du fournisseur choisi. Les abonnements grand public et les API
 > sont généralement séparés. La plupart des intégrations sont **optionnelles** et se
 > désactivent proprement si non configurées.
@@ -61,6 +64,8 @@ ESP32 avec audio ou Pi Zero ([options et fonctionnement](docs/satellite.md) ·
 - 🎬 **Hub de contenu** — vault d'inspirations Insta/TikTok (télécharge, transcrit, indexe), idées & scripts générés, ingestion YouTube ([docs/hub_contenu.md](docs/hub_contenu.md))
 - 🗂️ **Suivi de contenus** — pipeline vidéo *idée → script → tournage → montage → publié*, croisé avec ton agenda ; « où j'en suis ? » ([docs/suivi_contenu.md](docs/suivi_contenu.md))
 - 🤝 **Délégation à Hermes** — confie la réflexion / recherche de fond à un agent délibératif **local** (doctrine : Jarvis tient les clés & le corps, Hermes pense) ([docs/hermes.md](docs/hermes.md))
+- 🧾 **Google Sheets (CRM & facturation)** — lit, cherche et écrit dans tes classeurs (clients, factures, plannings), confirmation vocale pour chaque écriture ([docs/classeurs.md](docs/classeurs.md))
+- 🤖 **AI Operator** — la pile employé IA 24/7 : Gmail + Agenda + Sheets + monday.com + facturation, sous doctrine 95/5 : Jarvis prépare, tu valides — avec tableau de bord web `/operator` (journal nocturne + file de validation) ([docs/ai_operator.md](docs/ai_operator.md))
 - 🧭 **HUD & panneau web local** (`/panneau`) — commandes rapides de modèle/voix, état de la chaîne, réglages et permissions — **accessibles en local uniquement** ([docs/panneau.md](docs/panneau.md))
 - 🔐 **Sécurité graduée** — niveaux **N1/N2/N3** par outil, « toujours autoriser » révocable, budget LLM par fournisseur
 - 💸 **Routage & budgets** — 3 modes (local / hybride / qualité), fournisseur cloud et voix configurables séparément, suivi des coûts et **bascule auto en local** au plafond ([docs/costs.md](docs/costs.md))
@@ -85,7 +90,7 @@ flowchart LR
     WW --> STT[faster-whisper<br/>STT — local]
     STT --> LLM{{LLM<br/>Cloud configurable ☁️<br/>OU Ollama 🏠}}
     LLM <-->|appels d'outils| TOOLS[🧰 Outils]
-    LLM --> TTS{{Voix configurable<br/>ElevenLabs · Piper · Kokoro · Windows}}
+    LLM --> TTS{{Voix locale<br/>Piper · Kokoro · voix OS}}
     TTS --> SPK([🔊 Haut-parleurs])
 
     SAT([📡 Satellite audio réseau<br/>Android · ESP32 · Linux]) -->|audio LAN authentifié| STT
@@ -130,26 +135,41 @@ les **features à vision comme le navigateur & les réservations restent cloud r
 **Matériel local (honnête) :** Whisper `medium` ≈ 2–3 Go VRAM, `qwen3.5:4b` (Q4) ≈ 3 Go —
 une carte **6 Go** (RTX 2060/3060) fait tourner les deux confortablement. Le `qwen3.5:9b`
 (~6 Go) demande plus de marge. Piper est temps réel sur CPU. `python scripts/doctor.py`
-conseille le modèle selon ta VRAM.
+conseille le modèle selon ta VRAM. Sur **Mac**, il n'y a pas de CUDA : Whisper tourne
+sur CPU (rapide en int8 sur Apple Silicon) et le modèle Ollama partage la mémoire
+unifiée — compte 16 Go pour `qwen3.5:9b`, 8 Go pour `qwen3.5:4b`.
 
 ## 🚀 Démarrage rapide
 
-Prérequis : **Python 3.13**, [uv](https://docs.astral.sh/uv/), Windows 11, un micro.
+Prérequis : **Python 3.13**, [uv](https://docs.astral.sh/uv/), Windows 11 ou macOS 12+,
+un micro.
 
 ```bash
 uv sync
 uv run playwright install chromium        # pour les réservations / le navigateur
-copy config.example.yaml config.yaml      # puis remplis ce dont tu as besoin
+copy config.example.yaml config.yaml      # Windows
 uv run python jarvis14.py
 ```
 
-Dis **« Hey Jarvis »**. Il faut soit la clé API du fournisseur cloud sélectionné
+Sur **macOS** (`brew install portaudio` d'abord — voir
+**[INSTALL_MAC.md](INSTALL_MAC.md)**) :
+
+```bash
+brew install portaudio                    # requis par le micro
+uv sync
+uv run playwright install chromium
+cp config.example.yaml config.yaml
+./launch_jarvis.sh
+```
+
+Dis « Hey Jarvis ». Il faut soit la clé API du fournisseur cloud sélectionné
 (`openai.cle` ou `anthropic.cle`), soit un modèle Ollama en mode local. Tout le reste
 est optionnel.
 
 Débutant complet ? Vois **[INSTALL_WITH_AI.md](INSTALL_WITH_AI.md)** — à coller dans
 n'importe quelle IA gratuite, elle t'installe tout pas à pas. Ou lance l'installateur
-interactif : `python scripts/setup.py`. Un souci ? `python scripts/doctor.py` diagnostique.
+interactif : `python scripts/setup.py`. Un souci ? `python scripts/doctor.py` diagnostique
+(sur Mac : **[TROUBLESHOOTING_MAC.md](TROUBLESHOOTING_MAC.md)**).
 
 ## 🤝 Se faire aider par une IA (gratuitement)
 
@@ -173,7 +193,7 @@ Aucun outil n'est imposé : prends celui qui te convient.
 
 Tout est dans un unique `config.yaml` **non versionné** (copié depuis
 `config.example.yaml`, qui documente chaque clé). Nouvelles sections côté config :
-`cloud`/`openai`/`anthropic` (LLM cloud), `tts`/`elevenlabs` (voix), `hermes` (délégation), `integrations`/`hub` (Vault + génération), `suivi` (pipeline
+`cloud`/`mistral`/`openai`/`anthropic` (LLM cloud), `tts` (voix locale), `hermes` (délégation), `integrations`/`hub` (Vault + génération), `suivi` (pipeline
 de contenus), `securite.toujours` (autorisations N2 mémorisées), `budget.prix`
 (coût LLM), `serveur`/`pont_iphone`. Guides par intégration :
 

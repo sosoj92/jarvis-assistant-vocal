@@ -37,25 +37,22 @@ class HudControlsTests(unittest.TestCase):
                    return_value={"ok": True, "message": "ok"}) as regler, \
                 patch.object(hud, "_synchroniser_controles"):
             resultat = hud._appliquer_controle({
-                "action": "moteur_voix", "valeur": "elevenlabs"})
+                "action": "moteur_voix", "valeur": "piper"})
 
         self.assertTrue(resultat["ok"])
-        regler.assert_called_once_with("tts.moteur", "elevenlabs")
+        regler.assert_called_once_with("tts.moteur", "piper")
 
     def test_etat_public_ne_renvoie_aucun_secret(self):
         valeurs = {
             "mode": "hybride",
             "openai.cle": "secret-openai-a-ne-jamais-renvoyer",
             "anthropic.cle": "secret-anthropic-a-ne-jamais-renvoyer",
-            "elevenlabs.cle": "secret-eleven-a-ne-jamais-renvoyer",
             "openai.modele": "gpt-test",
             "openai.modele_qualite": "gpt-test-pro",
             "anthropic.modele": "claude-test",
             "anthropic.modele_qualite": "claude-test-pro",
             "ollama.modele": "qwen-test",
-            "tts.moteur": "elevenlabs",
-            "elevenlabs.voix": "voice-id-public",
-            "elevenlabs.modele": "eleven_flash_v2_5",
+            "tts.moteur": "piper",
             "serveur.port": 8790,
         }
 
@@ -69,11 +66,6 @@ class HudControlsTests(unittest.TestCase):
                     "configure": True, "joignable": True,
                     "catalogue": [{"nom": "gpt-test", "role": "Test",
                                    "accessible": True}],
-                }), \
-                patch("core.panneau._elevenlabs_voix", return_value={
-                    "configure": True, "joignable": True,
-                    "voix": [{"id": "voice-id-public", "nom": "Jarvis"}],
-                    "erreur": "",
                 }), \
                 patch("core.panneau._ollama_installes",
                       return_value=[{"nom": "qwen-test", "taille_go": 1.0}]), \

@@ -10,7 +10,8 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import argparse
-import ctypes
+
+from core import plateforme
 import math
 from pathlib import Path
 import time
@@ -251,31 +252,20 @@ class DetecteurSourcils:
         return "clic_gauche"
 
 
-class SourisWindows:
-    GAUCHE_BAS = 0x0002
-    GAUCHE_HAUT = 0x0004
-    DROIT_BAS = 0x0008
-    DROIT_HAUT = 0x0010
+class SourisLocale:
+    """Controle souris via core/plateforme (Win32 sur Windows, Quartz sur macOS)."""
 
     def __init__(self):
-        self.user32 = ctypes.windll.user32
-        try:
-            self.user32.SetProcessDPIAware()
-        except Exception:
-            pass
-        self.largeur = int(self.user32.GetSystemMetrics(0))
-        self.hauteur = int(self.user32.GetSystemMetrics(1))
+        import mss
+        with mss.mss() as sct:
+            self.largeur = int(sct.monitors[1]["width"])
+            self.hauteur = int(sct.monitors[1]["height"])
 
     def deplacer(self, x, y):
-        self.user32.SetCursorPos(int(x), int(y))
+        plateforme.souris_deplacer(int(x), int(y))
 
     def cliquer(self, bouton):
-        if bouton == "clic_droit":
-            self.user32.mouse_event(self.DROIT_BAS, 0, 0, 0, 0)
-            self.user32.mouse_event(self.DROIT_HAUT, 0, 0, 0, 0)
-        else:
-            self.user32.mouse_event(self.GAUCHE_BAS, 0, 0, 0, 0)
-            self.user32.mouse_event(self.GAUCHE_HAUT, 0, 0, 0, 0)
+        plateforme.souris_cliquer("droite" if bouton == "clic_droit" else "gauche")
 
 
 def _landmarks_np(resultat):
@@ -576,7 +566,7 @@ def executer(device=0, modele=None, clics_actifs=False):
         landmarker.close()
         raise RuntimeError("Webcam indisponible (ferme d'abord la calibration des gestes)")
 
-    souris = SourisWindows()
+    souris = SourisLocale()
     try:
         calibration, profil_sourcils = _calibrer(
             cv2, cap, landmarker, mp, souris)

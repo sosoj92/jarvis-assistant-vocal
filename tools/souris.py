@@ -1,56 +1,38 @@
-"""Controle de la souris : Jarvis clique sur ce qu'il VOIT (Windows).
+"""Controle de la souris : Jarvis clique sur ce qu'il VOIT.
 
-Chaine : capture_screen envoie l'ecran au LLM, qui repere l'element voulu
+Chaine : capture_screen envoie l'ecran au modèle, qui repere l'element voulu
 DANS L'IMAGE, puis appelle cliquer_ecran avec les coordonnees telles qu'il les
 voit dans cette image. La conversion vers l'ecran reel se fait ici.
 
 Pourquoi ce detour plutot que des coordonnees ecran directes : entre l'image que
-voit Claude et l'ecran il y a un redimensionnement (l'image est ramenee a 1568 px
-de large). On convertit donc les coordonnees image en FRACTIONS du moniteur, ce
-qui annule le facteur d'echelle et reste juste sur n'importe quel ecran.
-
-Idee et approche reprises de la PR macOS de la communaute (arturod67), reecrites
-en natif Windows (ctypes) pour ce depot.
+voit le modèle et l'ecran il y a un redimensionnement (l'image est ramenee a
+1568 px de large). On convertit donc les coordonnees image en FRACTIONS du
+moniteur, ce qui annule le facteur d'echelle et reste juste sur n'importe quel
+ecran. Sur macOS, la delegation a core/plateforme gere aussi le facteur Retina
+et l'autorisation Accessibilite.
 
 SECURITE : cliquer est SENSIBLE (peut declencher n'importe quoi a l'ecran).
 - confirmation=True : Jarvis annonce et attend le « oui » avant chaque clic.
 - mcp_expose=False : LOCAL uniquement, jamais expose au pont iPhone / a Hermes.
   Un token vole ne peut pas piloter ta souris.
 """
-import ctypes
 import time
 
+from core import plateforme
 from core.registre import outil
 from tools.ecran import derniere_capture
 
-# Positionnement en pixels PHYSIQUES (juste meme si l'appli n'est pas DPI-aware,
-# pour coller a la capture mss qui est en pixels physiques).
-_user32 = ctypes.windll.user32
+_MSG_PERMISSION = (
+    "Je n'ai pas pu piloter la souris. Sur macOS, autorise l'Accessibilite pour "
+    "ton terminal dans Reglages Systeme > Confidentialite et securite, puis "
+    "relance-le."
+)
 
-# (down, up) pour mouse_event selon le bouton.
-_BOUTONS = {
-    "gauche": (0x0002, 0x0004),   # LEFTDOWN, LEFTUP
-    "droite": (0x0008, 0x0010),   # RIGHTDOWN, RIGHTUP
-    "milieu": (0x0020, 0x0040),   # MIDDLEDOWN, MIDDLEUP
-}
 _MONITEURS_GESTE = {}
 
 
-def _placer_curseur(x, y):
-    """Place le curseur en (x, y) pixels physiques. True si ok."""
-    try:
-        if _user32.SetPhysicalCursorPos(int(x), int(y)):   # respecte le DPI
-            return True
-    except Exception:
-        pass
-    try:
-        return bool(_user32.SetCursorPos(int(x), int(y)))
-    except Exception:
-        return False
-
-
 def _coordonnees_pointeur(x, y, moniteur):
-    """Coordonnées normalisées [0,1] -> pixels physiques d'un moniteur."""
+    """Coordonnées normalisées [0,1] -> pixels d'un moniteur."""
     x, y = float(x), float(y)
     if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
         raise ValueError("coordonnees-normalisees-invalides")
@@ -80,17 +62,15 @@ def controler_pointeur_geste(x, y, clic=False, moniteur=1):
         ex, ey = _coordonnees_pointeur(x, y, _moniteur_geste(moniteur))
     except Exception:
         return False
-    if not _placer_curseur(ex, ey):
+    if not plateforme.souris_deplacer(ex, ey):
         return False
     if clic:
-        down, up = _BOUTONS["gauche"]
-        _user32.mouse_event(down, 0, 0, 0, 0)
-        _user32.mouse_event(up, 0, 0, 0, 0)
+        return plateforme.souris_cliquer("gauche")
     return True
 
 
 def _vers_ecran(x, y):
-    """(x, y) de l'image vue par Claude -> coordonnees ecran en pixels physiques.
+    """(x, y) de l'image vue par le modèle -> coordonnees ecran.
 
     Leve ValueError si aucune capture recente, ou si le point est hors de
     l'image : mieux vaut refuser que cliquer au hasard.
@@ -110,11 +90,11 @@ def _vers_ecran(x, y):
 @outil(
     nom="cliquer_ecran",
     description="Clique a un endroit precis de l'ecran. A utiliser APRES "
-                "capture_screen : donne les coordonnees x,y telles que tu les VOIS "
-                "DANS L'IMAGE capturee (origine en haut a gauche), PAS des coordonnees "
-                "ecran. Pour « clique sur le bouton envoyer », « ouvre ce menu », "
-                "« ferme cette fenetre ». Prends une capture d'abord si tu n'en as "
-                "pas de recente.",
+                "capture_screen : donne les coordonnees x,y telles que tu les "
+                "vois DANS L'IMAGE capturee (origine en haut a gauche), pas des "
+                "coordonnees ecran. Pour 'clique sur le bouton envoyer', "
+                "'ouvre ce menu', 'ferme cette fenetre'. Prends une capture "
+                "d'abord si tu n'en as pas de recente.",
     parametres={
         "type": "object",
         "properties": {
@@ -132,9 +112,6 @@ def _vers_ecran(x, y):
     mcp_expose=False,
 )
 def cliquer_ecran(x: int, y: int, bouton: str = "gauche", double: bool = False) -> str:
-    bouton = (bouton or "gauche").lower()
-    if bouton not in _BOUTONS:
-        return f"Bouton inconnu : {bouton} (gauche, droite ou milieu)."
     try:
         ex, ey = _vers_ecran(x, y)
     except ValueError as e:
@@ -142,17 +119,98 @@ def cliquer_ecran(x: int, y: int, bouton: str = "gauche", double: bool = False) 
             return ("Je n'ai pas de capture d'ecran recente : prends-en une avec "
                     "capture_screen, puis redonne-moi les coordonnees.")
         return f"Ces coordonnees sont hors de l'image capturee {e}."
-
-    if not _placer_curseur(ex, ey):
-        return "Je n'ai pas pu deplacer la souris."
-    down, up = _BOUTONS[bouton]
+    if not plateforme.souris_deplacer(ex, ey):
+        return _MSG_PERMISSION
     try:
-        for i in range(2 if double else 1):
-            _user32.mouse_event(down, 0, 0, 0, 0)
-            _user32.mouse_event(up, 0, 0, 0, 0)
-            if double and i == 0:
-                time.sleep(0.06)
-    except Exception as e:
-        return f"Le clic a echoue ({e})."
+        if not plateforme.souris_cliquer(bouton, double):
+            return _MSG_PERMISSION
+    except ValueError:
+        return f"Bouton inconnu : {bouton}."
     quoi = "Double-clic" if double else "Clic"
     return f"{quoi} {bouton} effectue."
+
+
+@outil(
+    nom="deplacer_souris",
+    description="Deplace le curseur sans cliquer, pour survoler un element et "
+                "faire apparaitre une infobulle ou un menu. Coordonnees DANS "
+                "L'IMAGE de la derniere capture d'ecran.",
+    parametres={
+        "type": "object",
+        "properties": {
+            "x": {"type": "integer"},
+            "y": {"type": "integer"},
+        },
+        "required": ["x", "y"],
+    },
+    mcp_expose=False,
+)
+def deplacer_souris(x: int, y: int) -> str:
+    try:
+        ex, ey = _vers_ecran(x, y)
+    except ValueError as e:
+        if str(e) == "pas-de-capture":
+            return "Prends d'abord une capture d'ecran."
+        return f"Coordonnees hors de l'image {e}."
+    if not plateforme.souris_deplacer(ex, ey):
+        return _MSG_PERMISSION
+    return "Curseur deplace."
+
+
+@outil(
+    nom="defiler_ecran",
+    description="Fait defiler la page ou la fenetre sous le curseur. Pour "
+                "'descends', 'remonte', 'scroll vers le bas', 'page suivante'.",
+    parametres={
+        "type": "object",
+        "properties": {
+            "sens": {"type": "string", "enum": ["haut", "bas", "gauche", "droite"]},
+            "crans": {"type": "integer",
+                      "description": "Amplitude, 3 par defaut (1 = petit, 10 = grand)."},
+        },
+        "required": ["sens"],
+    },
+    mcp_expose=False,
+)
+def defiler_ecran(sens: str, crans: int = 3) -> str:
+    sens = (sens or "").lower().strip()
+    amplitude = max(1, min(int(crans or 3), 20)) * 60
+    vertical = horizontal = 0
+    if sens == "haut":
+        vertical = amplitude
+    elif sens == "bas":
+        vertical = -amplitude
+    elif sens == "gauche":
+        horizontal = amplitude
+    elif sens == "droite":
+        horizontal = -amplitude
+    else:
+        return f"Sens inconnu : {sens}."
+    if not plateforme.souris_defiler(vertical, horizontal):
+        return _MSG_PERMISSION
+    return f"Defilement vers le {sens}."
+
+
+@outil(
+    nom="taper_texte",
+    description="Tape du texte au clavier dans l'application active, comme si "
+                "l'utilisateur l'ecrivait. Pour remplir un champ ou une barre "
+                "de recherche APRES avoir clique dedans.",
+    parametres={
+        "type": "object",
+        "properties": {
+            "texte": {"type": "string", "description": "Le texte a taper."},
+        },
+        "required": ["texte"],
+    },
+    confirmation=True,
+    annonce=lambda args: "Je tape le texte.",
+    mcp_expose=False,
+)
+def taper_texte(texte: str) -> str:
+    texte = (texte or "").strip()
+    if not texte:
+        return "Il me faut un texte a taper."
+    if not plateforme.taper_texte(texte):
+        return _MSG_PERMISSION
+    return f"Texte saisi ({len(texte)} caracteres)."

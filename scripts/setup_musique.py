@@ -3,7 +3,8 @@
     python scripts/setup_musique.py
 
 shazamio-core (moteur d'empreinte en Rust) n'a pas de wheel Python 3.13 sous
-Windows → la reconnaissance tourne dans un venv 3.12 séparé (musique/.venv-shazam).
+shazamio n'a pas de roue Python 3.13 : la reconnaissance tourne donc dans un
+venv 3.12 séparé (musique/.venv-shazam), sur les trois systèmes.
 Ce script le crée et y installe shazamio. Le process principal (3.13) capture
 l'audio et appelle musique/reconnaisseur.py dedans. Voir docs/musique.md.
 """
@@ -19,7 +20,8 @@ for _f in (sys.stdout, sys.stderr):          # console Windows cp1252 -> UTF-8
 
 RACINE = Path(__file__).resolve().parent.parent
 VENV = RACINE / "musique" / ".venv-shazam"
-PY = VENV / "Scripts" / "python.exe"
+PY = VENV / ("Scripts" if sys.platform == "win32" else "bin") / \
+     ("python.exe" if sys.platform == "win32" else "python")
 
 
 def _run(cmd):
@@ -47,6 +49,10 @@ def main():
     print("\n✅ Environnement musique prêt.")
     print('   Dis : « Jarvis, c\'est quoi cette musique ? » (micro) ')
     print('   ou : « c\'est quoi la musique de cette vidéo ? » (audio système).')
+    if sys.platform == "darwin":
+        print("\n   Note macOS : la capture de l'audio SYSTÈME demande un pilote")
+        print("   virtuel (brew install blackhole-2ch) choisi comme sortie.")
+        print("   Sans lui, la reconnaissance par le micro marche très bien.")
     return 0
 
 

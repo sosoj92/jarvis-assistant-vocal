@@ -79,11 +79,14 @@
   <section id="modeles" class="tab on">
     <div class="card"><h2>Matériel</h2><div id="mat" class="row"></div></div>
     <div class="card"><h2>Modèle actif par backend</h2><div id="actifs"></div></div>
-    <div class="card"><h2>Modèles cloud OpenAI</h2>
-      <div id="openai-etat" class="muted" style="margin-bottom:8px"></div>
+    <div class="card"><h2>Modèles cloud</h2>
+      <div class="fld"><div class="lab"><b>Fournisseur</b>
+        <small>Mistral, OpenAI, Anthropic (Claude) ou Gemini. La clé reste uniquement dans <span class="mono">config.yaml</span>.</small></div>
+        <select class="txt" id="sel-fournisseur" onchange="setReglage('cloud.fournisseur',this.value,this)"></select></div>
+      <div id="cloud-etat" class="muted" style="margin:8px 0"></div>
       <table><thead><tr><th>Modèle</th><th>Capacités</th><th>Prix API / 1M tokens</th><th>Activer</th></tr></thead>
       <tbody id="openai-modeles"></tbody></table>
-      <small class="note">L'abonnement ChatGPT et la facturation API sont séparés. La clé reste uniquement dans <span class="mono">config.yaml</span>.</small>
+      <div id="cloud-grille" class="row" style="margin-top:8px"></div>
     </div>
     <div class="card"><h2>Modèles LLM locaux (Ollama)</h2>
       <div id="ollama-etat" class="muted" style="margin-bottom:8px"></div>
@@ -121,25 +124,13 @@
 
     <div class="card"><h2>Voix de Jarvis</h2>
       <div class="fld"><div class="lab"><b>Moteur vocal</b>
-        <small>Auto choisit ElevenLabs en cloud et Piper en local. Le mode local reste intégralement local.</small></div>
+        <small>Piper et Kokoro tournent en local. Le mode local reste intégralement local.</small></div>
         <div class="seg" id="seg-tts">
           <button data-v="auto">Auto</button>
-          <button data-v="elevenlabs">ElevenLabs</button>
           <button data-v="piper">Piper</button>
           <button data-v="kokoro">Kokoro</button>
           <button data-v="windows">Windows</button>
         </div>
-      </div>
-      <div class="fld"><div class="lab"><b>Voix ElevenLabs</b>
-        <small id="elevenlabs-etat">Vérification du compte…</small></div>
-        <select class="txt" id="sel-eleven-voix" onchange="setReglage('elevenlabs.voix',this.value,this)"></select>
-      </div>
-      <div class="fld"><div class="lab"><b>Modèle ElevenLabs</b><small>Flash = faible latence pour la conversation.</small></div>
-        <select class="txt" id="sel-eleven-modele" onchange="setReglage('elevenlabs.modele',this.value,this)">
-          <option value="eleven_flash_v2_5">Eleven Flash v2.5</option>
-          <option value="eleven_turbo_v2_5">Eleven Turbo v2.5</option>
-          <option value="eleven_multilingual_v2">Eleven Multilingual v2</option>
-        </select>
       </div>
       <div class="row"><button class="act" onclick="testerVoix()">Tester la voix</button></div>
       <div id="tts-msg" class="msg"></div>
@@ -225,6 +216,14 @@ const fmt=n=>(n||0).toLocaleString('fr-FR');
 const eur=n=>'$'+(n||0).toFixed(2);
 
 /* ---------- MODELES ---------- */
+const FOURNISSEURS=[
+  {cle:'mistral',nom:'Mistral AI',cle_cle:'mistral.cle'},
+  {cle:'openai',nom:'OpenAI',cle_cle:'openai.cle'},
+  {cle:'anthropic',nom:'Anthropic / Claude',cle_cle:'anthropic.cle'},
+  {cle:'gemini',nom:'Gemini',cle_cle:'gemini.cle'}];
+let ACTIF='mistral';
+const ACTIF_FOURNISSEUR=(cle)=>FOURNISSEURS.find(f=>f.cle===cle)||FOURNISSEURS[0];
+
 async function chargerModeles(){
   const d=await api('/api/panneau/modeles');
   // materiel
@@ -235,36 +234,43 @@ async function chargerModeles(){
       + `<div class="kpi"><div class="v">${m.vram_total_go} Go</div><div class="l">VRAM totale</div></div>`
       + `<div class="kpi"><div class="v">${m.vram_exploitable_go} Go</div><div class="l">exploitable (LLM)</div></div>`;
   // actifs par backend
-  const A=d.actifs, be=d.backend_actif;
+  const A=d.actifs, be=d.backend_actif; ACTIF=A.cloud_fournisseur;
   const ligneActif=(cle,label,val,editable)=>{
     const on = (cle==='local'&&be==='local')||(cle==='cloud'&&(be==='hybride'||be==='qualite'));
     let ed = editable? `<input class="txt" id="in-${cle}" value="${val}" style="width:230px">
-       <button class="act ghost" onclick="${cle==='cloud'?`activerCloud($('#in-cloud').value,'${be==='qualite'?'qualite':'hybride'}')`:`activer('${cle}',$('#in-${cle}').value)`}">Activer</button>`:'';
+       <button class="act ghost" onclick="${cle==='cloud'?`activerCloud($('#in-cloud').value,'${be==='qualite'?'qualite':'hybride'}',ACTIF)`:`activer('${cle}',$('#in-${cle}').value)`}">Activer</button>`:'';
     return `<tr><td>${label} ${on?'<span class="badge on">actif</span>':''}</td>
       <td class="mono">${val}</td><td>${ed}</td></tr>`;
   };
   $('#actifs').innerHTML=`<table><tbody>
     ${ligneActif('local','LLM local (Ollama)',A.local,false)}
-    ${ligneActif('cloud',`LLM cloud (${A.cloud_fournisseur==='openai'?'OpenAI':'Anthropic'})`,A.cloud,true)}
+    ${ligneActif('cloud',`LLM cloud (${ACTIF_FOURNISSEUR(A.cloud_fournisseur).nom})`,A.cloud,true)}
     ${ligneActif('whisper','Whisper (voix→texte)',A.whisper,false)}
     ${ligneActif('hermes','Hermes (orchestrateur)',A.hermes,true)}
   </tbody></table><small class="note">Les changements LLM et de mode prennent effet au prochain tour, sans redémarrage.</small>`;
-  // cloud OpenAI
-  const oa=d.openai||{};
-  $('#openai-etat').innerHTML = !oa.configure
-    ? '<span style="color:var(--ko)">Clé API absente : ajoute <span class="mono">openai.cle</span> dans config.yaml.</span>'
-    : oa.joignable ? '<span style="color:var(--ok)">API OpenAI connectée.</span>'
-    : `<span style="color:var(--ko)">API non vérifiée : ${(oa.erreur||'accès refusé').replace(/</g,'&lt;')}</span>`;
-  $('#openai-modeles').innerHTML=(oa.catalogue||[]).map(c=>{
+  // cloud
+  const F=ACTIF_FOURNISSEUR(A.cloud_fournisseur);
+  $('#sel-fournisseur').innerHTML=FOURNISSEURS.map(f=>opt(f.cle,f.nom,f.cle===F)).join('');
+  $('#cloud-etat').innerHTML = !F.configure
+    ? `<span style="color:var(--ko)">Clé ${F.cle_cle} absente dans config.yaml.</span>`
+    : F.nom+' configuré.';
+  const cat=(d.catalogue_cloud&&d.catalogue_cloud[F.cle])||[];
+  $('#openai-modeles').innerHTML=cat.map(c=>{
     const acces=c.accessible===true?bYes('autorisé'):(c.accessible===false?bNo('non autorisé'):'<span class="badge">à vérifier</span>');
     const badges=acces+bYes('outils')+bYes('vision')+bYes('français');
-    const actifH=A.cloud_fournisseur==='openai'&&A.cloud_hybride===c.nom&&be==='hybride';
-    const actifQ=A.cloud_fournisseur==='openai'&&A.cloud_qualite===c.nom&&be==='qualite';
-    return `<tr class="${actifH||actifQ?'actif':''}"><td><b class="mono">${c.nom}</b><br><small class="note">${c.role}</small></td>
-      <td>${badges}</td><td class="mono">$${c.prix_entree} entrée · $${c.prix_sortie} sortie</td>
-      <td><div class="row"><button class="act ghost" onclick="activerCloud('${c.nom}','hybride')">Hybride</button>
-      <button class="act" onclick="activerCloud('${c.nom}','qualite')">Qualité</button></div></td></tr>`;
+    const actifH=A.cloud_fournisseur===F.cle&&A.cloud_hybride===c.nom&&be==='hybride';
+    const actifQ=A.cloud_fournisseur===F.cle&&A.cloud_qualite===c.nom&&be==='qualite';
+    return `<tr class="${actifH||actifQ?'actif':''}"><td><b class="mono">${c.nom}</b><br><small class="note">${c.role||''}</small></td>
+      <td>${badges}</td><td class="mono">${c.prix_entree!=null?`$${c.prix_entree} entrée · $${c.prix_sortie} sortie`:'—'}</td>
+      <td><div class="row"><button class="act ghost" onclick="activerCloud('${c.nom}','hybride','${F.cle}')">Hybride</button>
+      <button class="act" onclick="activerCloud('${c.nom}','qualite','${F.cle}')">Qualité</button></div></td></tr>`;
   }).join('');
+  // modeles du fournisseur courant (hors catalogue OpenAI)
+  const grille=[{nom:A.cloud_hybride,profil:'hybride'},{nom:A.cloud_qualite,profil:'qualite'}]
+    .filter(m=>m.nom&&!(cat.some(c=>c.nom===m.nom)));
+  $('#cloud-grille').innerHTML=grille.map(m=>
+    `<span class="badge on">${m.nom} · ${m.profil} · <a href="#" onclick="activerCloud('${m.nom}','${m.profil}','${F.cle}');return false" style="color:var(--acc)">activer</a></span>`).join('')
+    || '<span class="muted">Les modèles actifs sont dans le tableau ci-dessus.</span>';
   // ollama
   $('#ollama-etat').textContent = d.ollama.joignable
     ? `Ollama joignable (${d.ollama.hote}).` : `Ollama injoignable — lance « ollama serve ».`;
@@ -303,9 +309,9 @@ async function activer(backend,modele){
   const r=await post('/api/panneau/modele-actif',{backend,modele});
   flash(r); if(r.ok) setTimeout(chargerModeles,400);
 }
-async function activerCloud(modele,profil){
+async function activerCloud(modele,profil,fournisseur){
   const r=await post('/api/panneau/modele-actif',{
-    backend:'cloud',fournisseur:'openai',modele,profil});
+    backend:'cloud',fournisseur:fournisseur||ACTIF,modele,profil});
   flash(r); if(r.ok){setTimeout(chargerModeles,300);setTimeout(chargerReglages,300);}
 }
 async function tester(nom,btn){
@@ -422,20 +428,11 @@ async function chargerReglages(){
   const hpNul = d.haut_parleur===null||d.haut_parleur===undefined;
   $('#sel-hp').innerHTML=opt('defaut','Sortie par défaut de Windows',hpNul)
     +(d.sorties||[]).map(s=>opt(s.index,`#${s.index} · ${s.nom}`,!hpNul&&s.index===d.haut_parleur)).join('');
-  // moteur vocal + voix ElevenLabs
+  // moteur vocal
   $$('#seg-tts button').forEach(x=>{
     x.classList.toggle('on',x.dataset.v===(d.tts_moteur||'auto'));
     x.onclick=()=>setReglage('tts.moteur',x.dataset.v,x);
   });
-  const el=d.elevenlabs||{};
-  $('#elevenlabs-etat').innerHTML=!el.configure
-    ? '<span style="color:var(--ko)">Clé absente dans config.yaml.</span>'
-    : el.joignable?`<span style="color:var(--ok)">Connecté · ${(el.voix||[]).length} voix.</span>`
-    : `<span style="color:var(--ko)">Connexion refusée : ${(el.erreur||'vérifie la clé').replace(/</g,'&lt;')}</span>`;
-  let voix=(el.voix||[]).map(v=>opt(v.id,`${v.nom}${v.categorie?' · '+v.categorie:''}`,v.id===d.elevenlabs_voix)).join('');
-  if(!voix&&d.elevenlabs_voix) voix=opt(d.elevenlabs_voix,'Voix actuellement configurée',true);
-  $('#sel-eleven-voix').innerHTML=voix||opt('','Aucune voix disponible',true);
-  $('#sel-eleven-modele').value=d.elevenlabs_modele||'eleven_flash_v2_5';
   // personnalite
   $('#sel-perso').innerHTML=(d.personnalites||[]).map(p=>opt(p,PERSO_LABEL[p]||p,p===d.personnalite)).join('');
   // sliders
@@ -450,10 +447,10 @@ async function setReglage(cle,valeur,cibleOuBtn){
   const zone={'mode':'#audio-msg','audio.micro':'#audio-msg','audio.haut_parleur':'#audio-msg',
     'assistant.personnalite':'#voix-msg','assistant.duree_suite':'#voix-msg',
     'assistant.seuil_reveil':'#wake-msg','tts.moteur':'#tts-msg',
-    'elevenlabs.voix':'#tts-msg','elevenlabs.modele':'#tts-msg'}[cle];
+    'cloud.fournisseur':'#cloud-etat'}[cle];
   const el=zone?$(zone):null;
   if(el) el.innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${r.message||''}</span>`;
-  if(r.ok&&cle==='mode') setTimeout(chargerModeles,250);
+  if(r.ok&&(cle==='mode'||cle==='cloud.fournisseur')) setTimeout(chargerModeles,250);
 }
 async function testerVoix(){
   const r=await post('/api/panneau/tester-voix',{});

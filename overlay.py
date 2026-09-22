@@ -2,8 +2,10 @@
 dit, en complément (ou à la place) de la voix. JARVIS PUR : affichage local, temps
 réel, zéro réseau.
 
-Techno : fenêtre **native tkinter** (stdlib, aucun paquet) + appels **Win32 (ctypes)**.
-C'est la seule voie fiable sur Windows pour la RÈGLE D'OR — jamais de vol de focus :
+Techno : fenêtre **native tkinter** (stdlib, aucun paquet) + appels **Win32 (ctypes)**
+sur Windows, **Cocoa via tkinter** sur macOS.
+
+Sur Windows (RÈGLE D'OR — jamais de vol de focus) :
   - WS_EX_NOACTIVATE  : la fenêtre n'attrape jamais le focus clavier (pas d'alt-tab
                         de ton jeu/appli).
   - WS_EX_TRANSPARENT : clic-transparent par défaut (les clics passent au travers) ;
@@ -13,6 +15,15 @@ C'est la seule voie fiable sur Windows pour la RÈGLE D'OR — jamais de vol de 
   - -topmost          : toujours au-dessus.
   - SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) : visible pour toi, INVISIBLE
                         pour OBS/game-capture (tes réponses n'apparaissent pas en live).
+**L'overlay ne tourne PAS sur macOS**, et c'est structurel, pas un réglage manquant :
+Cocoa impose que toute NSWindow soit créée sur le thread principal. Ici le thread
+principal fait tourner l'assistant et l'overlay vit dans un thread daemon — Tk lève
+alors une exception Objective-C qui AVORTE le processus (code 134), sans que Python
+puisse l'intercepter. Le faire marcher demanderait de donner le thread principal à
+la boucle Tk et de déplacer tout l'assistant dans un worker : une refonte, pas un
+correctif. `demarrer()` refuse donc de démarrer sur Mac. Le panneau web (core/panneau)
+rend le même service, dans le navigateur.
+
 Limite honnête : un jeu en plein écran EXCLUSIF (pas borderless) peut masquer tout
 overlay — la plupart des jeux tournent en borderless, donc OK.
 
@@ -28,6 +39,7 @@ import threading
 import time
 
 _WIN = sys.platform == "win32"
+_MAC = sys.platform == "darwin"
 
 # Réglages par défaut (surchargés par config.yaml -> overlay.*).
 _CFG = {
@@ -50,11 +62,38 @@ _ETAT = {"root": None, "hwnd": None, "labels": {}, "cache_hide": None,
 
 # ============================================================ API publique
 
+def disponible():
+    """Vrai si l'overlay peut tourner sur ce système.
+
+    Faux sur macOS : voir _boucle(). On l'expose pour que l'assistant puisse
+    le dire à l'utilisateur au lieu de le laisser deviner.
+    """
+    return not _MAC
+
+
 def demarrer(cfg=None):
     """Démarre l'overlay dans un thread daemon. Sans effet s'il tourne déjà."""
     global _THREAD
     if cfg:
         _CFG.update({k: v for k, v in cfg.items() if v is not None})
+
+    if _MAC:
+        # Cocoa exige que toute NSWindow naisse sur le thread principal. Or le
+        # thread principal fait tourner l'assistant, et l'overlay vit dans un
+        # thread daemon : sur macOS, Tk lève alors une exception OBJECTIVE-C
+        # ("NSWindow should only be instantiated on the main thread!") qui
+        # AVORTE le processus — impossible à rattraper depuis Python, tout
+        # Jarvis meurt avec le code 134. On refuse donc de démarrer, plutôt que
+        # de faire tomber l'assistant pour une fenêtre d'agrément.
+        _CFG["actif"] = False
+        print("Overlay desactive sur macOS : tkinter ne peut pas creer de fenetre "
+              "hors du thread principal.\n"
+              "  Pour une interface, active le panneau web dans config.yaml :\n"
+              "      serveur:\n        actif: true\n"
+              "  puis ouvre http://localhost:8790/panneau\n"
+              "  Details : TROUBLESHOOTING_MAC.md")
+        return
+
     if _THREAD is not None:
         return
     _THREAD = threading.Thread(target=_boucle, daemon=True, name="overlay")
@@ -115,9 +154,20 @@ def configurer(**kw):
     _Q.put(("config", None))
 
 
+def _polices():
+    """(police semi-grasse, police normale) disponibles sur ce système."""
+    if _MAC:
+        return "SF Pro Display Semibold", "SF Pro Display"
+    if _WIN:
+        return "Segoe UI Semibold", "Segoe UI"
+    return "DejaVu Sans Bold", "DejaVu Sans"
+
+
 # ============================================================ thread tkinter
 
 def _boucle():
+    if _MAC:
+        return          # cf. demarrer() : Tk hors thread principal avorte le process
     try:
         import tkinter as tk
     except Exception:
@@ -145,17 +195,20 @@ def _boucle():
     corps = tk.Frame(cadre, bg=fond)
     corps.pack(side="left", fill="both", expand=True, padx=14, pady=12)
 
+    # Segoe UI n'existe que sur Windows : chaque OS a sa police système.
+    demi, normale = _polices()
+
     lbl_tag = tk.Label(corps, text="JARVIS", bg=fond, fg=accent,
-                       font=("Segoe UI Semibold", 9), anchor="w")
+                       font=(demi, 9), anchor="w")
     lbl_tag.pack(fill="x")
     lbl_titre = tk.Label(corps, text="", bg=fond, fg=txtcol, justify="left",
-                         anchor="w", font=("Segoe UI Semibold", 15),
+                         anchor="w", font=(demi, 15),
                          wraplength=_CFG["largeur"] - 40)
     lbl_corps = tk.Label(corps, text="", bg=fond, fg=txtcol, justify="left",
-                         anchor="w", font=("Segoe UI", 12),
+                         anchor="w", font=(normale, 12),
                          wraplength=_CFG["largeur"] - 40)
     lbl_pied = tk.Label(corps, text="", bg=fond, fg=dim, anchor="w",
-                        font=("Segoe UI", 9))
+                        font=(normale, 9))
 
     _ETAT.update({"root": root, "labels": {
         "tag": lbl_tag, "titre": lbl_titre, "corps": lbl_corps, "pied": lbl_pied,
@@ -175,7 +228,10 @@ def _boucle():
 
 
 def _init_styles(root):
-    """Applique les styles Win32 (une fois la fenêtre créée)."""
+    """Applique les styles natifs (une fois la fenêtre créée)."""
+    if _MAC:
+        _init_styles_mac(root)
+        return
     if not _WIN:
         return
     try:
@@ -185,6 +241,20 @@ def _init_styles(root):
                          | _WS_EX_TOPMOST)
         _set_transparent(h, True)
         _exclure_capture(h, bool(_CFG.get("exclure_obs", True)))
+    except Exception:
+        pass
+
+
+def _init_styles_mac(root):
+    """macOS : fenêtre flottante utilitaire, au-dessus, sans entrée dans le Dock."""
+    for attribut, valeur in (("-topmost", True), ("-type", "utility")):
+        try:
+            root.wm_attributes(attribut, valeur)
+        except Exception:
+            pass          # -type n'existe pas sur toutes les versions de Tk
+    try:
+        # Empêche l'overlay de devenir la fenêtre active au moment de l'affichage.
+        root.wm_attributes("-alpha", float(_CFG["opacite"]))
     except Exception:
         pass
 
@@ -343,6 +413,13 @@ def _rect_moniteur(index):
 
 
 def _enum_moniteurs():
+    """Rectangles des écrans, principal en premier. Liste vide si indisponible."""
+    if _MAC:
+        try:
+            from core import plateforme
+            return plateforme.moniteurs()
+        except Exception:
+            return []
     if not _WIN:
         return []
     try:
@@ -372,7 +449,11 @@ def _enum_moniteurs():
 
 def _surveiller_survol(root):
     """Rend l'overlay interactif UNIQUEMENT quand la souris est dessus (sinon
-    clic-transparent), pour pouvoir épingler/copier sans jamais gêner."""
+    clic-transparent), pour pouvoir épingler/copier sans jamais gêner.
+
+    macOS n'offre pas de clic-transparent via tkinter : l'overlay y reste
+    cliquable en permanence (le pied de carte le signale une fois affiché).
+    """
     if _WIN and _ETAT.get("hwnd"):
         try:
             dedans = _souris_dans(root)

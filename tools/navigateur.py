@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse, quote_plus
 
+from core import plateforme
 from core.config import reglage
 from core.registre import outil
 from core.util import sans_accents
@@ -33,7 +34,8 @@ _BROWSER = None   # navigateur Chrome connecte via CDP
 
 _MSG_ABSENT = ("Je n'ai pas reussi a lancer Chrome connecte. Verifie que Google "
                "Chrome est installe (ou renseigne navigateur.chrome_exe dans "
-               "config.yaml), ou lance le raccourci \"Chrome + Jarvis\".")
+               "config.yaml), ou lance le raccourci \"Chrome + Jarvis\" "
+               "(chrome_jarvis.sh sur macOS/Linux).")
 
 # Les noms usuels sont normalises ici, pas laisses au jugement du LLM. Cela rend
 # « ouvre Netflix » aussi fiable avec un petit modele local qu'avec le cloud.
@@ -93,19 +95,16 @@ def _resoudre_cible(url="", recherche=""):
 
 
 def _chrome_exe():
-    """Chemin de chrome.exe (config, sinon emplacements standards Windows)."""
+    """Chemin de l'executable Chrome (config, sinon emplacements standards de l'OS).
+
+    Sur macOS, c'est le binaire DANS le bundle : « /Applications/Google Chrome.app
+    /Contents/MacOS/Google Chrome » (on ne peut pas passer d'options a un .app
+    via `open` sans -n --args, et le binaire direct est plus previsible).
+    """
     p = reglage("navigateur.chrome_exe", "")
     if p and Path(p).exists():
         return p
-    for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
-                 os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                 os.environ.get("LOCALAPPDATA", "")):
-        if not base:
-            continue
-        c = Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe"
-        if c.exists():
-            return str(c)
-    return None
+    return plateforme.chrome_exe()
 
 
 def _port_ouvert(port):
@@ -128,14 +127,14 @@ def _lancer_chrome(port):
         return True
     exe = _chrome_exe()
     if not exe:
-        LOG.warning("navigateur: chrome.exe introuvable")
+        LOG.warning("navigateur: executable Chrome introuvable")
         return False
     profil = reglage("navigateur.profil_dir", "") or \
-        str(Path(os.environ.get("LOCALAPPDATA", "")) / "ChromeJarvis")
+        str(plateforme.dossier_donnees("ChromeJarvis"))
     try:
         subprocess.Popen([exe, f"--remote-debugging-port={port}",
                           f"--user-data-dir={profil}"],
-                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+                         **plateforme.detache())
         LOG.info("navigateur: Chrome dedie lance (port %s, profil %s)", port, profil)
         return True
     except Exception:

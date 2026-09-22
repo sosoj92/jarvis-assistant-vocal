@@ -19,30 +19,50 @@ LOG = logging.getLogger("jarvis")
 
 
 def fournisseur() -> str:
-    """Fournisseur cloud actif : openai ou anthropic."""
+    """Fournisseur cloud actif : openai, anthropic (Claude), gemini ou mistral."""
     choix = str(reglage("cloud.fournisseur", "") or "").strip().lower()
-    if choix in {"openai", "anthropic"}:
+    if choix in {"openai", "anthropic", "gemini", "mistral"}:
         return choix
     # Une ancienne config sans bloc cloud continue de fonctionner. Des qu'une
     # cle OpenAI est ajoutee, OpenAI devient naturellement le choix par defaut.
     return "openai" if reglage("openai.cle", "") else "anthropic"
 
 
-def modele(qualite: bool = False, surcharge: str = "") -> str:
-    if surcharge:
-        candidat = str(surcharge)
-        # Une ancienne config peut encore contenir reservation.modele=claude-...
-        # lors du passage a OpenAI (ou l'inverse). On ignore alors seulement cette
-        # surcharge obsolete plutot que de casser le sous-pipeline.
-        if fournisseur() == "openai" and not candidat.lower().startswith("claude"):
-            return candidat
-        if fournisseur() == "anthropic" and not candidat.lower().startswith(("gpt-", "o1", "o3", "o4")):
-            return candidat
+def _modeles_fournisseur() -> dict:
+    """Defauts par fournisseur : (economique, qualite)."""
+    if fournisseur() == "mistral":
+        return {"cle": "mistral.modele", "cle_qualite": "mistral.modele_qualite",
+                "eco": "mistral-small-latest", "fort": "mistral-large-latest"}
     if fournisseur() == "openai":
-        cle = "openai.modele_qualite" if qualite else "openai.modele"
-        return str(reglage(cle, "gpt-6-astra" if qualite else "gpt-5.6-terra"))
-    cle = "anthropic.modele_qualite" if qualite else "anthropic.modele"
-    return str(reglage(cle, "claude-sonnet-4-5" if qualite else "claude-haiku-4-5"))
+        return {"cle": "openai.modele", "cle_qualite": "openai.modele_qualite",
+                "eco": "gpt-5.6-terra", "fort": "gpt-6-astra"}
+    return {"cle": "anthropic.modele", "cle_qualite": "anthropic.modele_qualite",
+            "eco": "claude-haiku-4-5", "fort": "claude-sonnet-4-5"}
+
+
+def _surcharge_compatible(candidat: str) -> bool:
+    """Une surcharge de modele est-elle utilisable par le fournisseur actif ?
+
+    Une ancienne config peut encore contenir reservation.modele=claude-... ou
+    gpt-... lors d'un changement de fournisseur. On ignore alors seulement
+    cette surcharge obsolete plutot que de casser le sous-pipeline.
+    """
+    f = fournisseur()
+    p = candidat.lower()
+    if f == "openai":
+        return not p.startswith("claude")
+    if f == "anthropic":
+        return not p.startswith(("gpt-", "o1", "o3", "o4"))
+    if f == "mistral":
+        return p.startswith(("mistral", "ministral", "pixtral", "open-mistral"))
+    return True
+
+
+def modele(qualite: bool = False, surcharge: str = "") -> str:
+    if surcharge and _surcharge_compatible(str(surcharge)):
+        return str(surcharge)
+    m = _modeles_fournisseur()
+    return str(reglage(m["cle_qualite"] if qualite else m["cle"], m["fort"] if qualite else m["eco"]))
 
 
 def client_openai():
@@ -62,8 +82,25 @@ def client_anthropic():
     return anthropic.Anthropic(api_key=cle)
 
 
+def client_mistral():
+    """Client Mistral AI (API compatible OpenAI, chat completions)."""
+    cle = str(reglage("mistral.cle", "") or "").strip()
+    if not cle:
+        return None
+    from openai import OpenAI
+    return OpenAI(
+        api_key=cle,
+        base_url=str(reglage("mistral.url", "https://api.mistral.ai/v1") or "").rstrip("/"),
+        timeout=float(reglage("mistral.timeout", 90)),
+        max_retries=int(reglage("mistral.max_retries", 1)),
+    )
+
+
 def disponible() -> bool:
-    return bool(client_openai() if fournisseur() == "openai" else client_anthropic())
+    f = fournisseur()
+    if f == "mistral":
+        return bool(client_mistral())
+    return bool(client_openai() if f == "openai" else client_anthropic())
 
 
 def enregistrer_usage(rep, nom_fournisseur: str, nom_modele: str) -> None:
@@ -132,6 +169,9 @@ def repondre_texte(systeme: str, historique: list, max_tokens: int = 500,
         enregistrer_usage(rep, "OpenAI (Jarvis)", cible)
         return (rep.output_text or "").strip()
 
+    if provider == "mistral":
+        return _mistral_repondre_texte(cible, systeme, historique, max_tokens)
+
     client = client_anthropic()
     if client is None:
         raise RuntimeError("cle Anthropic absente (anthropic.cle)")
@@ -140,6 +180,67 @@ def repondre_texte(systeme: str, historique: list, max_tokens: int = 500,
     enregistrer_usage(rep, "Claude (Jarvis)", cible)
     return "".join(b.text for b in rep.content
                    if getattr(b, "type", None) == "text").strip()
+
+
+def _mistral_messages(systeme: str, historique: list) -> list:
+    """Historique Anthropic interne -> messages chat completions.
+
+    L'historique de Jarvis est soit du texte brut (content str), soit des
+    blocs Anthropic (tool_use / tool_result). Mistral suit le format OpenAI :
+    appels d'outils cote assistant, resultats cote user.
+    """
+    messages = [{"role": "system", "content": systeme}]
+    for message in historique:
+        role = message.get("role", "user")
+        contenu = message.get("content", "")
+        if isinstance(contenu, str):
+            messages.append({"role": role, "content": contenu})
+            continue
+        if role == "assistant":
+            textes = [b.text for b in (contenu or [])
+                      if getattr(b, "type", None) == "text" and b.text]
+            appels = []
+            for bloc in contenu or []:
+                if getattr(bloc, "type", None) != "tool_use":
+                    continue
+                appels.append({
+                    "id": bloc.id or f"appel_{len(appels)}",
+                    "type": "function", "function": {
+                        "name": bloc.name,
+                        "arguments": json.dumps(bloc.input or {}, ensure_ascii=False)},
+                })
+            if textes or appels:
+                messages.append({"role": "assistant",
+                                 "content": " ".join(textes) or None,
+                                 "tool_calls": appels or None})
+            continue
+        for resultat in contenu or []:
+            if not isinstance(resultat, dict) or resultat.get("type") != "tool_result":
+                continue
+            sortie = resultat.get("content", "")
+            texte_sortie = "".join(
+                b.get("text", "") if isinstance(b, dict) else ""
+                for b in (sortie if isinstance(sortie, list) else []))
+            messages.append({
+                "role": "tool",
+                "tool_call_id": resultat.get("tool_use_id", ""),
+                "content": str(sortie) if isinstance(sortie, str) else (texte_sortie or ""),
+            })
+    return messages
+
+
+def _mistral_repondre_texte(cible: str, systeme: str, historique: list,
+                            max_tokens: int) -> str:
+    client = client_mistral()
+    if client is None:
+        raise RuntimeError("cle Mistral absente (mistral.cle)")
+    rep = client.chat.completions.create(
+        model=cible,
+        messages=_mistral_messages(systeme, historique),
+        max_tokens=max(max_tokens, 1024),
+    )
+    enregistrer_usage(rep, "Mistral (Jarvis)", cible)
+    return (rep.choices[0].message.content or "").strip()
 
 
 def repondre_vision(systeme: str, texte: str, image_b64: str,
@@ -170,6 +271,25 @@ def repondre_vision(systeme: str, texte: str, image_b64: str,
         enregistrer_usage(rep, "OpenAI (Jarvis)", cible)
         return (rep.output_text or "").strip()
 
+    if provider == "mistral":
+        client = client_mistral()
+        if client is None:
+            raise RuntimeError("cle Mistral absente (mistral.cle)")
+        rep = client.chat.completions.create(
+            model=cible,
+            messages=[
+                {"role": "system", "content": systeme},
+                {"role": "user", "content": [
+                    {"type": "text", "text": texte},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_b64}"}},
+                ]},
+            ],
+            max_tokens=max_tokens,
+        )
+        enregistrer_usage(rep, "Mistral (Jarvis)", cible)
+        return (rep.choices[0].message.content or "").strip()
+
     client = client_anthropic()
     if client is None:
         raise RuntimeError("cle Anthropic absente (anthropic.cle)")
@@ -199,6 +319,32 @@ def decider_action_vision(systeme: str, texte: str, image_b64: str,
                         and cible.lower().startswith(("gpt-", "o1", "o3", "o4"))))
     if not cible or incompatible:
         cible = modele(qualite=qualite)
+    if provider == "mistral":
+        client = client_mistral()
+        if client is None:
+            raise RuntimeError("cle Mistral absente (mistral.cle)")
+        rep = client.chat.completions.create(
+            model=cible,
+            messages=[
+                {"role": "system", "content": systeme},
+                {"role": "user", "content": [
+                    {"type": "text", "text": texte},
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_b64}"}},
+                ]},
+            ],
+            tools=[{"type": "function", "function": {
+                "name": nom_outil, "description": description,
+                "parameters": schema}}],
+            tool_choice={"type": "function", "function": {"name": nom_outil}},
+            max_tokens=1200,
+        )
+        enregistrer_usage(rep, "Mistral (Jarvis)", cible)
+        appel = getattr(rep.choices[0].message, "tool_calls", None) or []
+        if appel:
+            brut = appel[0].function.arguments or "{}"
+            return json.loads(brut) if isinstance(brut, str) else dict(brut)
+        return {"action": "bloque", "raison": "pas de reponse exploitable"}
     if provider == "openai":
         client = client_openai()
         if client is None:

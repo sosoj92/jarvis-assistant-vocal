@@ -18,7 +18,9 @@ sys.path.insert(0, str(RACINE))
 from core.config import reglage  # noqa: E402
 from core.gestes import _seuils  # noqa: E402
 
-PY = RACINE / "gestes" / ".venv-tracker" / "Scripts" / "python.exe"
+from core import plateforme  # noqa: E402
+
+PY = plateforme.python_venv(RACINE / "gestes" / ".venv-tracker")
 
 
 def main():

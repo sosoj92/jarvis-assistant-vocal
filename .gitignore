@@ -24,6 +24,7 @@ memoire.json
 memory.json
 google_credentials.json
 google_token.json*
+google_token_mail.json*
 notes/
 reminders.json
 
@@ -52,3 +53,5 @@ musique/captures/
 # Cockpit : donnees financieres PERSO (tout le dossier sauf l'exemple versionne).
 finances/*
 !finances/abonnements.example.yaml
+# Journal Operator : donnees locales (ce que Jarvis a fait chez toi)
+data/operator_journal.json

@@ -8,7 +8,6 @@ N1/N2 (écriture dans TA playlist). Non exposé au MCP par défaut. Voir docs/sp
 """
 import base64
 import json
-import os
 import threading
 import time
 from pathlib import Path
@@ -21,6 +20,7 @@ except Exception:
     pass
 import requests
 
+from core import plateforme
 from core.config import reglage
 from core.registre import outil
 from core.util import sans_accents
@@ -236,7 +236,7 @@ def _ouvrir_application_spotify():
         if sans_accents(str(nom).strip()) == "spotify":
             cible = chemin
             break
-    os.startfile(cible)
+    plateforme.ouvrir(cible)
 
 
 def _deja_present(pid, uri):
@@ -529,7 +529,7 @@ def lire_spotify(recherche: str, type_media: str = "titre", piece: str = "") -> 
         if piece:
             return _msg_config()
         try:
-            os.startfile("spotify:search:" + quote(recherche, safe=""))
+            plateforme.ouvrir("spotify:search:" + quote(recherche, safe=""))
             return f"J'ai ouvert la recherche Spotify pour « {recherche} »."
         except Exception:
             return _msg_config()
@@ -565,7 +565,7 @@ def lire_spotify(recherche: str, type_media: str = "titre", piece: str = "") -> 
 
         # Sans appareil Spotify Connect actif, sans Premium ou avec un ancien
         # jeton OAuth, le lien profond reste une action sûre et sans Astra.
-        os.startfile(item["uri"])
+        plateforme.ouvrir(item["uri"])
         if reponse.status_code == 403:
             return (f"J'ai ouvert « {nom} » dans Spotify. Pour la lecture automatique, "
                     "reconnecte Spotify une fois afin d'autoriser le contrôle de lecture.")

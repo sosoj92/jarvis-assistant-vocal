@@ -5,7 +5,12 @@ from pathlib import Path
 
 
 RACINE = Path(__file__).resolve().parent.parent
-PY = RACINE / "gestes" / ".venv-tracker" / "Scripts" / "python.exe"
+_VENV = RACINE / "gestes" / ".venv-tracker"
+# win32 : Scripts/python.exe ; sinon bin/python (comme core/plateforme).
+if sys.platform == "win32":
+    PY = _VENV / "Scripts" / "python.exe"      # win32
+else:
+    PY = _VENV / "bin" / "python"
 SCRIPT = RACINE / "gestes" / "regard.py"
 
 

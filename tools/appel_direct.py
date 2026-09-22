@@ -2,11 +2,11 @@
 
 call_and_book(numero, objectif, contraintes) : Jarvis appelle, se presente
 honnetement, expose la demande, comprend les reponses (Whisper), repond (LLM cloud,
-phrases courtes), negocie dans les limites donnees, et conclut (ElevenLabs en
+phrases courtes), negocie dans les limites donnees, et conclut (voix locale en
 sortie ulaw 8 kHz, le format de Twilio).
 
 Chaine audio :
-  Twilio (mu-law 8kHz) --ws--> VAD/segmentation --> Whisper --> LLM --> ElevenLabs
+  Twilio (mu-law 8kHz) --ws--> VAD/segmentation --> Whisper --> LLM --> voix locale
   (ulaw_8000) --ws--> Twilio.
 
 Twilio se connecte a un serveur websocket PUBLIC : soit twilio.public_url (que tu
@@ -80,21 +80,26 @@ def _transcrire(pcm8_bytes):
 
 
 def _tts_ulaw(texte):
-    """ElevenLabs -> bytes mu-law 8kHz (format natif Twilio). '' si indispo."""
-    import requests
-    cle = reglage("elevenlabs.cle", "")
-    if not cle or not texte:
+    """Voix locale (Piper/Kokoro) -> bytes mu-law 8kHz (format natif Twilio).
+
+    b'' si aucune voix locale n'est installee : l'appel reste alors muet
+    (Twilio rejoue le silence) — mais ne plante jamais.
+    """
+    if not texte:
         return b""
-    voix = reglage("elevenlabs.voix", "") or "21m00Tcm4TlvDq8ikWAM"
-    url = (f"https://api.elevenlabs.io/v1/text-to-speech/{voix}"
-           f"?output_format=ulaw_8000")
     try:
-        r = requests.post(url, headers={"xi-api-key": cle,
-            "content-type": "application/json"}, json={
-                "text": texte,
-                "model_id": reglage("elevenlabs.modele", "eleven_flash_v2_5")},
-            timeout=30)
-        return r.content if r.status_code == 200 else b""
+        import audioop
+        import numpy as np
+        from core import tts as module_tts
+        rendu = module_tts.tts().synthetiser(texte)
+        if rendu is None:
+            return b""
+        audio_int16, taux = rendu
+        pcm16 = np.asarray(audio_int16, dtype=np.int16).tobytes()
+        # Twilio exige du 8 kHz mono : on resample puis on encode en mu-law.
+        if taux != 8000:
+            pcm16, _ = audioop.ratecv(pcm16, 2, 1, int(taux), 8000, None)
+        return audioop.lin2ulaw(pcm16, 2)
     except Exception:
         LOG.exception("tts ulaw")
         return b""
@@ -361,8 +366,13 @@ def call_and_book(numero: str, objectif: str, contraintes: str = "") -> str:
                 f"regle : {objectif}. La reservation est confirmee.")
     if not _config_ok():
         return "Twilio n'est pas configure (voir docs/appels.md)."
-    if not reglage("elevenlabs.cle", ""):
-        return ("La V2 a besoin d'une voix ElevenLabs (elevenlabs.cle) pour parler "
+    try:
+        from core import tts as module_tts
+        if not module_tts.tts().disponible():
+            return ("La V2 a besoin d'une voix locale installee (Piper) pour parler "
+                    "pendant l'appel. Sans elle, utilise call_with_message (V1).")
+    except Exception:
+        return ("La V2 a besoin d'une voix locale installee (Piper) pour parler "
                 "pendant l'appel. Sans elle, utilise call_with_message (V1).")
     e164 = _normaliser(numero)
     if _surtaxe(numero):

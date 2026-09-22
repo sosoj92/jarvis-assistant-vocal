@@ -60,6 +60,11 @@ def app():
         except Exception:
             LOG.exception("montage du cockpit")
         try:
+            from core.operator import monter_routes as monter_operator
+            monter_operator(_APP)                # /operator + /api/operator/* (LOCAL uniquement)
+        except Exception:
+            LOG.exception("montage de la page Operator (CRM)")
+        try:
             from tools.appel_direct import monter_ws
             monter_ws(_APP)                        # /stream (Twilio Media Streams)
         except Exception:
