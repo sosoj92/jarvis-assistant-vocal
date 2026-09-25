@@ -149,6 +149,16 @@ def _raison_blocage(tache: str):
     return None
 
 
+def _ecran_cible(tache: str) -> int:
+    """0 = principal ; 2 = deuxième écran selon la convention de capture_screen."""
+    texte = " " + sans_accents(str(tache or "").lower()) + " "
+    secondaire = (
+        "deuxieme ecran", "2e ecran", "second ecran", "ecran secondaire",
+        "moniteur secondaire", "deuxieme moniteur", "2e moniteur",
+    )
+    return 2 if any(expression in texte for expression in secondaire) else 0
+
+
 def _echap_presse():
     from core.poste_distant import executer_resultat
     distant = executer_resultat("astra_escape_state", {}, timeout=3.0)
@@ -227,6 +237,7 @@ def executer_controle(tache: str) -> str:
     modele = str(reglage("astra_pc.modele", "gpt-6-astra") or "gpt-6-astra")
     max_actions = max(1, min(int(reglage("astra_pc.max_actions", 12) or 12), 25))
     delai = max(15.0, min(float(reglage("astra_pc.timeout", 90) or 90), 180.0))
+    ecran = _ecran_cible(tache)
     debut = time.monotonic()
     historique = []
 
@@ -236,7 +247,7 @@ def executer_controle(tache: str) -> str:
         if time.monotonic() - debut > delai:
             return "J'ai arrete Astra : la limite de temps est atteinte."
 
-        capture = capture_screen()
+        capture = capture_screen(ecran=ecran)
         if not isinstance(capture, dict) or not capture.get("image"):
             return f"Je ne peux pas voir l'ecran : {capture}"
         image_b64 = capture["image"]["data"]

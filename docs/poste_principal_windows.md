@@ -82,6 +82,8 @@ L'écran déplacé de l'ancien PC est préconfiguré comme **deuxième écran** 
 nouveau PC (`overlay.ecran: 1`). L'overlay Jarvis y apparaît, tandis que les
 gestes et Astra travaillent sur l'écran principal par défaut. Ces deux choix
 restent modifiables séparément dans la configuration privée de l'agent.
+Une demande Astra qui précise « sur le deuxième écran » ou « sur l'écran
+secondaire » capture et pilote toutefois ce deuxième moniteur.
 
 Attention aux index : l'overlay numérote `0 = principal, 1 = deuxième écran`,
 alors que la capture et la souris numérotent `1 = principal, 2 = deuxième écran`.

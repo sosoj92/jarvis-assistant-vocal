@@ -44,6 +44,11 @@ class AstraPcTests(unittest.TestCase):
                 self.assertIsNotNone(astra_pc._raison_blocage(tache))
         self.assertIsNone(astra_pc._raison_blocage("ouvre les paramètres audio"))
 
+    def test_ecran_secondaire_est_selectionne_explicitement(self):
+        self.assertEqual(astra_pc._ecran_cible("ouvre OBS sur le deuxième écran"), 2)
+        self.assertEqual(astra_pc._ecran_cible("regarde l'écran secondaire"), 2)
+        self.assertEqual(astra_pc._ecran_cible("ouvre Spotify"), 0)
+
     @patch("tools.astra_pc.time.sleep")
     @patch("tools.astra_pc._echap_presse", return_value=False)
     @patch("core.poste_distant.executer_principal", return_value=None)
@@ -63,6 +68,7 @@ class AstraPcTests(unittest.TestCase):
         self.assertEqual(resultat, "Réglage ouvert.")
         self.assertEqual(decider.call_count, 2)
         cliquer.assert_called_once_with(20, 30, double=False)
+        _capture.assert_called_with(ecran=0)
         self.assertEqual(decider.call_args.kwargs["nom_modele"], "gpt-6-astra")
         self.assertTrue(decider.call_args.kwargs["qualite"])
         self.assertEqual(decider.call_args.kwargs["fournisseur_force"], "openai")
