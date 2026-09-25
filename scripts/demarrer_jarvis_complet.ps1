@@ -42,11 +42,21 @@ Log "Jarvis MCP 8765: $(if($mcpUp){'UP'}else{'DOWN'})"
 #    loopback permettant a Hermes de joindre le MCP et Ollama sur Windows.
 $tunnel = Join-Path $PSScriptRoot "start_hermes_server_tunnel.ps1"
 if ($mcpUp -and (Test-Path $tunnel)) {
-  try {
-    $message = (& $tunnel | Out-String).Trim()
-    Log $(if($message){$message}else{"tunnel Hermes lance"})
-  } catch {
-    Log "tunnel Hermes ECHEC: $($_.Exception.Message)"
+  $tunnelUp = $false
+  # Hyper-V peut demarrer la VM en meme temps que cette session Windows. Laisse
+  # jusqu'a deux minutes a Ubuntu/SSH au lieu d'abandonner au premier essai.
+  for ($attempt = 1; $attempt -le 12 -and -not $tunnelUp; $attempt++) {
+    try {
+      $message = (& $tunnel | Out-String).Trim()
+      Log $(if($message){$message}else{"tunnel Hermes lance"})
+      $tunnelUp = $true
+    } catch {
+      Log "tunnel Hermes essai $attempt/12: $($_.Exception.Message)"
+      if ($attempt -lt 12) { Start-Sleep -Seconds 10 }
+    }
+  }
+  if (-not $tunnelUp) {
+    Log "tunnel Hermes indisponible apres 12 essais"
   }
 } elseif (-not $mcpUp) {
   Log "tunnel Hermes non lance : MCP indisponible"
