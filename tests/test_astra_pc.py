@@ -46,13 +46,14 @@ class AstraPcTests(unittest.TestCase):
 
     @patch("tools.astra_pc.time.sleep")
     @patch("tools.astra_pc._echap_presse", return_value=False)
+    @patch("core.poste_distant.executer_principal", return_value=None)
     @patch("tools.astra_pc.cliquer_ecran", return_value="clic effectué")
     @patch("tools.astra_pc.capture_screen", return_value={
         "image": {"media_type": "image/jpeg", "data": "YWJj"}})
     @patch("tools.astra_pc.cloud.client_openai", return_value=object())
     @patch("tools.astra_pc.cloud.decider_action_vision")
     def test_boucle_utilise_astra_et_verifie_apres_action(
-            self, decider, _client, _capture, cliquer, _echap, _sleep):
+            self, decider, _client, _capture, cliquer, _distant, _echap, _sleep):
         decider.side_effect = [
             {"action": "cliquer", "x": 20, "y": 30},
             {"action": "termine", "message": "Réglage ouvert."},

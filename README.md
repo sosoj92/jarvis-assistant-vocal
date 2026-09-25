@@ -32,6 +32,11 @@ ESP32 avec audio ou Pi Zero ([options et fonctionnement](docs/satellite.md) ·
 [guide de choix et d'installation](docs/satellite_installation.md) ·
 [installation Raspberry/Linux détaillée](docs/satellite_pi.md)).
 
+**🖥️ Serveur sans écran + poste principal.** Jarvis peut tourner 24 h/24 sur un
+ancien PC sans écran, tandis qu'un agent Windows authentifié déporte le micro, le
+son, les applications, Chrome, OBS, la webcam, les gestes et le contrôle Astra vers
+le PC utilisé au quotidien ([guide complet](docs/poste_principal_windows.md)).
+
 > Projet perso partagé tel quel. Cible **Windows 11**, nécessite un micro et (en mode
 > cloud) une clé API du fournisseur choisi. Les abonnements grand public et les API
 > sont généralement séparés. La plupart des intégrations sont **optionnelles** et se
@@ -44,6 +49,7 @@ ESP32 avec audio ou Pi Zero ([options et fonctionnement](docs/satellite.md) ·
 - 💡 **Domotique** — Philips Hue (allumer, luminosité, couleur), ambiances/scènes
 - 🎬 **Streaming** — contrôle d'OBS (direct, enregistrement, scènes, replay)
 - 🖥️ **Contrôle PC** — lancer des apps, média/volume, stats GPU/CPU/RAM en direct
+- 🧩 **Corps Windows déporté** — ancien PC serveur sans écran, nouveau PC principal pour l'audio, l'écran, Astra, Chrome, OBS et les gestes ([installation](docs/poste_principal_windows.md))
 - 📅 **Agenda** — Google Agenda sur **tous** tes agendas (y compris abonnés iCal), création/suppression avec confirmation
 - 📧 **Mail** — résumés Gmail et rédaction
 - 💬 **Discord** — mentions + récap des messages du jour
@@ -200,6 +206,7 @@ de contenus), `securite.toujours` (autorisations N2 mémorisées), `budget.prix`
 | **Extinction / Wake-on-LAN** | [docs/wol.md](docs/wol.md) |
 | **Gestes de la main (webcam)** | [docs/gestes.md](docs/gestes.md) |
 | **Satellites audio multi-pièces** | [installation et matériel](docs/satellite_installation.md) · [protocole](docs/satellite.md) · [Raspberry/Linux détaillé](docs/satellite_pi.md) |
+| **Ancien PC serveur + nouveau PC principal** | [docs/poste_principal_windows.md](docs/poste_principal_windows.md) |
 | **Reconnaissance musicale (Shazam-like)** | [docs/musique.md](docs/musique.md) |
 | **Spotify (playlist des musiques reconnues)** | [docs/spotify.md](docs/spotify.md) |
 | **Cockpit (tableau de bord perso, local)** | [docs/cockpit.md](docs/cockpit.md) |

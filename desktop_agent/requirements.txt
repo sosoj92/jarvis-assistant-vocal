@@ -1,0 +1,15 @@
+numpy>=2.0
+keyboard>=0.13
+mss>=10.0
+onnxruntime>=1.20
+openwakeword>=0.4
+pillow>=11.0
+playwright>=1.50
+psutil>=6.0
+pyyaml>=6.0
+scipy>=1.14
+sounddevice>=0.5
+soundcard>=0.4
+obsws-python>=1.7
+uv>=0.8
+websockets>=15

@@ -240,13 +240,19 @@ def _protege(url):
     },
 )
 def browser_open(url: str = "", recherche: str = "") -> str:
+    cible = _resoudre_cible(url, recherche)
+    if not cible:
+        return "Dis-moi quoi ouvrir (une adresse ou une recherche)."
+
+    from core.poste_distant import executer_principal
+    distant = executer_principal("browser_open", {"url": cible})
+    if distant is not None:
+        return distant
+
     browser = _connexion()
     if browser is None:
         return _MSG_ABSENT
     try:
-        cible = _resoudre_cible(url, recherche)
-        if not cible:
-            return "Dis-moi quoi ouvrir (une adresse ou une recherche)."
         page = _contexte(browser).new_page()
         page.goto(cible, wait_until="domcontentloaded", timeout=15000)
         try:

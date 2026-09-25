@@ -30,7 +30,8 @@ class WebRoutingTests(unittest.TestCase):
         startfile.assert_not_called()
 
     def test_utilitaire_windows_reste_une_application(self):
-        with patch.object(systeme.os, "startfile") as startfile:
+        with patch("core.poste_distant.executer_principal", return_value=None), \
+                patch.object(systeme.os, "startfile") as startfile:
             resultat = systeme.ouvrir_application("calculatrice")
 
         self.assertEqual(resultat, "calculatrice lance.")

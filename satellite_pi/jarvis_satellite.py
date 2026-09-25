@@ -305,6 +305,9 @@ def _jouer(pcm, freq):
     refuse alors d'ouvrir la sortie avec ``paInvalidSampleRate``. Le satellite
     rééchantillonne donc la réponse avant de la lire.
     """
+    muet = CONF.get("_muet_callback")
+    if callable(muet) and muet():
+        return
     if _jouer_alsa_partage(pcm, freq):
         return
     try:
@@ -385,8 +388,14 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                     print(f"  [entendu] {d.get('texte')}")
                 elif t == "progression":
                     print(f"  [progression] {d.get('texte')}")
+                    notifier = CONF.get("_texte_callback")
+                    if callable(notifier):
+                        notifier(d.get("texte"), "progression")
                 elif t == "texte":
                     print(f"  [réponse] {d.get('texte')}")
+                    notifier = CONF.get("_texte_callback")
+                    if callable(notifier):
+                        notifier(d.get("texte"), "reponse")
                 elif t == "audio_debut":
                     audio, freq = bytearray(), int(d.get("freq", TAUX))
                 elif t == "audio_fin":

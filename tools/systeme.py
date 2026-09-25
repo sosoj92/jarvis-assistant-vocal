@@ -56,6 +56,11 @@ def ouvrir_application(nom: str) -> str:
         from tools.navigateur import browser_open
         return browser_open(url=nom)
 
+    from core.poste_distant import executer_principal
+    distant = executer_principal("ouvrir_application", {"nom": nom})
+    if distant is not None:
+        return distant
+
     raccourcis = {
         "spotify": "spotify:",
         "discord": None,  # traite plus bas
@@ -111,6 +116,11 @@ def controler_media(action: str) -> str:
     if action not in _TOUCHES:
         return f"Action inconnue : {action}"
 
+    from core.poste_distant import executer_principal
+    distant = executer_principal("controler_media", {"action": action})
+    if distant is not None:
+        return distant
+
     fois = 5 if action in ("monter", "baisser") else 1
     _presser(_TOUCHES[action], fois)
     return f"Fait : {action}."
@@ -136,6 +146,11 @@ def regler_volume(sens: str, crans: int = 10) -> str:
     sens = sens.lower().strip()
     if sens not in ("monter", "baisser"):
         return "Sens invalide."
+    from core.poste_distant import executer_principal
+    distant = executer_principal(
+        "regler_volume", {"sens": sens, "crans": max(1, min(crans, 50))})
+    if distant is not None:
+        return distant
     _presser(_TOUCHES[sens], max(1, min(crans, 50)))
     return f"Volume {sens}."
 

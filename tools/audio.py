@@ -60,6 +60,11 @@ def _resoudre(cible):
     mcp_expose=False,
 )
 def sortie_audio(cible: str) -> str:
+    from core.poste_distant import executer_principal
+    distant = executer_principal("sortie_audio", {"cible": cible})
+    if distant is not None:
+        return distant
+
     try:
         device, label = _resoudre(cible)
     except Exception:

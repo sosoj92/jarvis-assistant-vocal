@@ -109,7 +109,7 @@ def traiter_commande(phrase):
                 res = "Action critique : a faire a la voix a la maison (refusee a distance)."
             elif b.name in domo_distante:
                 try:
-                    res = str(outil.fonction(**(b.input or {})))
+                    res = str(registre.executer(outil, b.input or {}))
                     faits.append(b.name)
                 except Exception:
                     LOG.exception("pont: outil %s", b.name)
@@ -118,7 +118,7 @@ def traiter_commande(phrase):
                 res = "Action sensible : a faire a la voix a la maison (refusee a distance)."
             else:
                 try:
-                    res = str(outil.fonction(**(b.input or {})))
+                    res = str(registre.executer(outil, b.input or {}))
                     faits.append(b.name)
                 except Exception:
                     LOG.exception("pont: outil %s", b.name)

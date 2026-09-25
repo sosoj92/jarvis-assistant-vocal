@@ -83,6 +83,21 @@ def get(nom):
     return _REGISTRE.get(nom)
 
 
+def executer(outil_obj, args=None):
+    """Exécute un outil sur le bon corps, sans contourner ses confirmations.
+
+    La confirmation est volontairement gérée par les appelants AVANT cette
+    fonction. Le poste distant ne reçoit donc une action N2/N3 qu'une fois
+    l'accord obtenu côté cerveau Jarvis.
+    """
+    arguments = args or {}
+    from core.poste_distant import executer_outil_principal
+    distant = executer_outil_principal(outil_obj.nom, arguments)
+    if distant is not None:
+        return distant
+    return outil_obj.fonction(**arguments)
+
+
 def tous():
     return list(_REGISTRE.values())
 
@@ -250,7 +265,7 @@ def executer_confirme(memoriser=False):
         else:
             suffixe = " Mais c'est une action critique : je te demanderai toujours confirmation."
     try:
-        res = outil_obj.fonction(**args)
+        res = executer(outil_obj, args)
     except Exception:
         LOG.exception("outil confirmé « %s » a échoué", outil_obj.nom)
         return "Desole, je n'ai pas reussi a faire ca."

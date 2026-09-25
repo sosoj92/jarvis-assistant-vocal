@@ -132,6 +132,13 @@ def _vers_ecran(x, y):
     mcp_expose=False,
 )
 def cliquer_ecran(x: int, y: int, bouton: str = "gauche", double: bool = False) -> str:
+    from core.poste_distant import executer_outil_principal
+    distant = executer_outil_principal("cliquer_ecran", {
+        "x": x, "y": y, "bouton": bouton, "double": double,
+    })
+    if distant is not None:
+        return str(distant)
+
     bouton = (bouton or "gauche").lower()
     if bouton not in _BOUTONS:
         return f"Bouton inconnu : {bouton} (gauche, droite ou milieu)."

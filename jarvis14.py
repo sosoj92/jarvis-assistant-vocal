@@ -551,7 +551,7 @@ def _executer_outils(blocs):
             resultat = registre.mettre_en_attente(outil, arguments)
         else:
             try:
-                resultat = outil.fonction(**arguments)
+                resultat = registre.executer(outil, arguments)
             except Exception:
                 LOG.exception("outil %s a plante", nom)
                 resultat = "Desole, je n'ai pas reussi a faire ca."
@@ -1243,6 +1243,10 @@ def _installer_raccourci_micro():
 def main():
     print("Chargement des modeles...")
 
+    serveur_sans_peripheriques = bool(
+        config.reglage("poste_principal.actif", False)
+        and config.reglage("poste_principal.serveur_sans_peripheriques", False))
+
     registre.charger_outils()
     voix.definir_parleur(dire)
     try:
@@ -1251,9 +1255,11 @@ def main():
     except Exception:
         LOG.exception("Alexa: préchargement des routines")
 
-    reveil = WakeModel(wakeword_model_paths=[str(
-        Path(openwakeword.__file__).parent / "resources" / "models" / "hey_jarvis_v0.1.onnx"
-    )])
+    reveil = None
+    if not serveur_sans_peripheriques:
+        reveil = WakeModel(wakeword_model_paths=[str(
+            Path(openwakeword.__file__).parent / "resources" / "models" / "hey_jarvis_v0.1.onnx"
+        )])
 
     whisper = charger_whisper()
 
@@ -1281,11 +1287,12 @@ def main():
     # Serveur web unifie (pont iPhone + webhook Twilio + panneau + gestes en loopback).
     if (config.reglage("serveur.actif", False) or config.reglage("pont_iphone.actif", False)
             or config.reglage("gestes.actif", False) or config.reglage("cockpit.actif", False)
-            or (config.reglage("satellites", []) or [])):     # satellites -> serveur requis
+            or (config.reglage("satellites", []) or [])
+            or (config.reglage("desktop_agents", []) or [])):  # corps distants -> serveur requis
         from core.serveur import demarrer as demarrer_serveur_web
         demarrer_serveur_web()
         # Cockpit : ouvre l'app web en fenetre dediee (--app) sur l'ecran choisi.
-        if config.reglage("cockpit.actif", False):
+        if config.reglage("cockpit.actif", False) and not serveur_sans_peripheriques:
             try:
                 from core import cockpit
                 threading.Thread(target=cockpit.ouvrir_fenetre, daemon=True).start()
@@ -1299,10 +1306,11 @@ def main():
         gestes.definir_hooks(couper_tts=couper_parole, feedback=_feedback_geste)
         atexit.register(gestes.arreter_regard)      # libère le regard à la sortie
         atexit.register(gestes.arreter)          # libère le tracker invisible
-        if config.reglage("gestes.actif", False):
+        if config.reglage("gestes.actif", False) and not serveur_sans_peripheriques:
             print(gestes.demarrer())
-        _installer_raccourci_gestes()
-        _installer_raccourci_micro()
+        if not serveur_sans_peripheriques:
+            _installer_raccourci_gestes()
+            _installer_raccourci_micro()
     except Exception:
         LOG.exception("gestes: initialisation")
 
@@ -1320,22 +1328,34 @@ def main():
             print(f"ATTENTION : aucune cle cloud dans config.yaml ({nom_cle}). "
                   "L'assistant ne pourra pas repondre.")
 
-    _hud("demarrer")
-    _modele_hud = getattr(_fournisseur, "modele", "")
-    _hud("config", f"{_fournisseur.nom} · {_modele_hud}" if _modele_hud
-         else _fournisseur.nom, f"whisper {MODELE_WHISPER}")
-    _hud_status()
-    try:                                   # part Hermes (tokens) au HUD, en fond
-        from tools import deleguer_a_hermes as _dh
-        threading.Thread(target=_dh.rafraichir_hud, daemon=True).start()
-    except Exception:
-        pass
+    if not serveur_sans_peripheriques:
+        _hud("demarrer")
+        _modele_hud = getattr(_fournisseur, "modele", "")
+        _hud("config", f"{_fournisseur.nom} · {_modele_hud}" if _modele_hud
+             else _fournisseur.nom, f"whisper {MODELE_WHISPER}")
+        _hud_status()
+        try:                               # part Hermes (tokens) au HUD, en fond
+            from tools import deleguer_a_hermes as _dh
+            threading.Thread(target=_dh.rafraichir_hud, daemon=True).start()
+        except Exception:
+            pass
 
     faits = memoire.charger()
     if faits:
         print(f"Memoire : {len(faits)} information(s).")
     _refaire_systeme(faits)
     historique = []
+
+    if serveur_sans_peripheriques:
+        print("Mode serveur sans périphériques : le poste principal porte le micro, "
+              "le son, l'écran, la webcam et les commandes Windows.")
+        print("Jarvis serveur est prêt. Ctrl+C pour quitter.\n")
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            print("\nAu revoir.")
+        return
 
     global CAPTURE_TAUX, BLOC_CAPTURE
     CAPTURE_TAUX = _choisir_taux_capture(MICRO)

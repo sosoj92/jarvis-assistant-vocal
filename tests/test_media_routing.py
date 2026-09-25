@@ -316,6 +316,7 @@ class MediaRoutingTests(unittest.TestCase):
 
     def test_spotify_sans_oauth_ouvre_une_recherche_locale(self):
         with patch("tools.spotify._configure", return_value=False), \
+                patch("core.poste_distant.executer_principal", return_value=None), \
                 patch.object(spotify.os, "startfile") as startfile:
             resultat = spotify.lire_spotify("Daft Punk")
 

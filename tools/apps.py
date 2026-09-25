@@ -187,6 +187,11 @@ def _trouver(nom, apps):
     },
 )
 def launch_app(nom: str) -> str:
+    from core.poste_distant import executer_principal
+    distant = executer_principal("launch_app", {"nom": nom})
+    if distant is not None:
+        return distant
+
     apps = _apps()
     clef = _trouver(nom, apps)
     if clef is None:

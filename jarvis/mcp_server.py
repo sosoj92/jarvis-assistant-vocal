@@ -64,7 +64,7 @@ server = MCPServer("jarvis")
 
 def _executer(outil, kwargs):
     try:
-        resultat = outil.fonction(**kwargs)
+        resultat = registre.executer(outil, kwargs)
     except Exception as e:
         LOG.exception("erreur outil %s", outil.nom)
         resultat = f"Erreur : {e}"

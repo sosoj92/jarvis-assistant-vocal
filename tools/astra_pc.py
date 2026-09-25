@@ -150,6 +150,14 @@ def _raison_blocage(tache: str):
 
 
 def _echap_presse():
+    from core.poste_distant import executer_resultat
+    distant = executer_resultat("astra_escape_state", {}, timeout=3.0)
+    if distant is not None:
+        if isinstance(distant, bool):
+            return distant
+        # Un agent indisponible ne doit pas être interprété comme la touche Echap.
+        if isinstance(distant, str) and distant.startswith("Le poste"):
+            return False
     try:
         return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
     except Exception:
@@ -177,6 +185,11 @@ def _defiler(direction: str):
 
 
 def _executer_action(action: dict) -> str:
+    from core.poste_distant import executer_principal
+    distant = executer_principal("astra_action", action, timeout=10.0)
+    if distant is not None:
+        return distant
+
     nom = str(action.get("action", "")).lower()
     if nom in {"cliquer", "double_cliquer"}:
         return cliquer_ecran(

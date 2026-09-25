@@ -71,6 +71,12 @@ def capture_screen(ecran: int = 0, cible: str = "ecran"):
     Renvoie un dict {"image": {...}, "apercu": ...} en cas de succes, sinon une
     chaine d'erreur. Le dispatch transforme l'image en bloc image.
     """
+    from core.poste_distant import executer_outil_principal
+    distant = executer_outil_principal(
+        "capture_screen", {"ecran": ecran, "cible": cible})
+    if distant is not None:
+        return distant
+
     try:
         import base64
         import io

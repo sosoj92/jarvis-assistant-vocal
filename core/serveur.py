@@ -107,7 +107,7 @@ def demarrer():
         if _port_ouvert(port):
             break
         time.sleep(0.15)
-    # Listener LAN séparé : il ne contient QUE /satellite. Le serveur unifié
+    # Listener LAN séparé : il ne contient QUE /satellite et /desktop-agent. Le serveur unifié
     # reste en loopback, donc panneau/cockpit/inbox/Twilio ne gagnent aucun accès
     # réseau lorsqu'un Raspberry Pi est configuré.
     try:

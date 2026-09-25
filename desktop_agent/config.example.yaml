@@ -1,0 +1,47 @@
+# Copier ce fichier en config.yaml SUR LE POSTE PRINCIPAL.
+serveur_url: "ws://ADRESSE_DU_SERVEUR:8791/desktop-agent"
+agent_id: "bureau"
+token: "MEME_SECRET_QUE_DESKTOP_AGENTS_COTE_SERVEUR"
+
+# Les chemins restent exclusivement sur ce PC et ne sont jamais envoyes au serveur.
+apps:
+  spotify: "spotify:"
+  # obs: "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe"
+
+# L'écran déplacé de l'ancien PC est physiquement branché au nouveau PC.
+# Windows doit être réglé sur « Étendre ces affichages » : il devient le 2e écran.
+overlay:
+  actif: true
+  ecran: 1                     # 0 = principal, 1 = deuxième écran
+  coin: "bas-droite"
+  opacite: 0.92
+  largeur: 420
+  duree_min: 4.0
+  duree_max: 14.0
+  marge: 24
+  exclure_obs: true
+  muet_visuel: false
+
+gestes:
+  souris_moniteur: 1           # les gestes pilotent l'écran principal par défaut
+
+# Facultatif : ce PC devient aussi un micro/haut-parleur Jarvis.
+# null suit automatiquement la sortie Windows active, y compris Bluetooth.
+audio:
+  actif: true
+  pc_url: "ws://ADRESSE_DU_SERVEUR:8791/satellite"
+  satellite_id: "bureau"
+  token: "MEME_SECRET_QUE_SATELLITES_COTE_SERVEUR"
+  micro: null
+  haut_parleur: null
+  sorties: {}
+  seuil_reveil: 0.5
+  gain_reveil: 1.0
+  gain_audio: 1.0
+  seuil_silence: 0.010
+  silence_fin: 1.0
+  attente_parole: 3.0
+  attente_arbitrage_reveil: 4.0
+  fenetre_relance: 8.0
+  blocs_purge_bip: 2
+  duree_max: 20

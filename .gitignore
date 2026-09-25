@@ -11,6 +11,9 @@ wheels/
 
 # Secrets et donnees personnelles (ne JAMAIS versionner)
 config.yaml
+desktop_agent/config.yaml
+desktop_agent/.venv/
+desktop_agent/logs/
 .env
 .env.*
 !.env.example

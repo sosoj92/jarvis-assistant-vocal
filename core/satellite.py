@@ -331,7 +331,7 @@ def _executer_outil(nom, args):
     if outil is None:
         return f"Outil inconnu : {nom}"
     try:
-        return str(outil.fonction(**(args or {})))
+        return str(registre.executer(outil, args or {}))
     except Exception:
         LOG.exception("satellite: outil %s", nom)
         return "Erreur pendant l'action."
@@ -712,7 +712,7 @@ def monter_routes(app):
 
 
 def _app_lan():
-    """Application FastAPI minimale exposée au LAN : `/satellite` seulement."""
+    """Application FastAPI minimale exposée au LAN : audio + agent Windows."""
     global _APP_LAN
     if _APP_LAN is None:
         from fastapi import FastAPI
@@ -723,18 +723,22 @@ def _app_lan():
             openapi_url=None,
         )
         monter_routes(_APP_LAN)
+        from core.poste_distant import monter_routes as monter_poste_distant
+        monter_poste_distant(_APP_LAN)
     return _APP_LAN
 
 
 def demarrer_lan():
     """Démarre le listener satellite dédié sans exposer le serveur unifié.
 
-    Le port n'est ouvert que lorsqu'au moins un satellite est configuré. Le
-    panneau, le cockpit, l'inbox iPhone et Twilio restent sur le listener
+    Le port n'est ouvert que lorsqu'un satellite ou agent Windows est configuré.
+    Le panneau, le cockpit, l'inbox iPhone et Twilio restent sur le listener
     loopback principal.
     """
     global _SERVEUR_LAN
-    if not _satellites() or not bool(reglage("satellite_lan.actif", True)):
+    from core.poste_distant import agents_configures
+    if (not _satellites() and not agents_configures()) or not bool(
+            reglage("satellite_lan.actif", True)):
         return
     if _SERVEUR_LAN and _SERVEUR_LAN.is_alive():
         return

@@ -231,12 +231,17 @@ def _requete_reussie(reponse):
 
 def _ouvrir_application_spotify():
     """Ouvre Spotify avec le chemin configuré, sinon via son protocole Windows."""
+    from core.poste_distant import executer_principal
+    distant = executer_principal("spotify_open", {"uri": "spotify:"})
+    if distant is not None:
+        return distant
     cible = "spotify:"
     for nom, chemin in (reglage("apps", {}) or {}).items():
         if sans_accents(str(nom).strip()) == "spotify":
             cible = chemin
             break
     os.startfile(cible)
+    return None
 
 
 def _deja_present(pid, uri):
@@ -333,7 +338,9 @@ def lancer_spotify(piece: str = "") -> str:
             etat_avant = {}
 
     try:
-        _ouvrir_application_spotify()
+        ouverture = _ouvrir_application_spotify()
+        if ouverture and ("n'est pas connecté" in ouverture or "ne répond pas" in ouverture):
+            return ouverture
     except Exception as e:
         return f"Impossible de lancer Spotify : {str(e)[:120]}."
 
@@ -529,6 +536,10 @@ def lire_spotify(recherche: str, type_media: str = "titre", piece: str = "") -> 
         if piece:
             return _msg_config()
         try:
+            from core.poste_distant import executer_principal
+            distant = executer_principal("spotify_search", {"recherche": recherche})
+            if distant is not None:
+                return distant
             os.startfile("spotify:search:" + quote(recherche, safe=""))
             return f"J'ai ouvert la recherche Spotify pour « {recherche} »."
         except Exception:
@@ -565,7 +576,12 @@ def lire_spotify(recherche: str, type_media: str = "titre", piece: str = "") -> 
 
         # Sans appareil Spotify Connect actif, sans Premium ou avec un ancien
         # jeton OAuth, le lien profond reste une action sûre et sans Astra.
-        os.startfile(item["uri"])
+        from core.poste_distant import executer_principal
+        distant = executer_principal("spotify_open", {"uri": item["uri"]})
+        if distant is None:
+            os.startfile(item["uri"])
+        elif "n'est pas connecté" in distant or "ne répond pas" in distant:
+            return distant
         if reponse.status_code == 403:
             return (f"J'ai ouvert « {nom} » dans Spotify. Pour la lecture automatique, "
                     "reconnecte Spotify une fois afin d'autoriser le contrôle de lecture.")

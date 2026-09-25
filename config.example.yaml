@@ -420,9 +420,21 @@ satellites:                    # Jarvis dans d'autres pieces (Raspberry Pi, futu
   #   wake: "appareil"         # pris en charge ; "serveur" est reserve a un futur client a flux continu
   #   priorite_micro: 1.0      # ajustement optionnel du score si ce micro gagne trop/pas assez souvent
 
+# Poste Windows qui porte les applis, le navigateur, les touches media et le son.
+# L'agent initie une connexion sortante et n'accepte jamais de commande shell.
+# Guide : docs/poste_principal_windows.md
+poste_principal:
+  actif: false
+  agent: "bureau"
+  serveur_sans_peripheriques: true  # ancien PC sans écran, micro, webcam, clavier ni souris
+
+desktop_agents:
+  # - id: "bureau"
+  #   token: "un-autre-secret-long"  # distinct du token satellite audio
+
 satellite_lan:
   actif: true
-  host: "0.0.0.0"             # listener dédié : SEULE la route /satellite y existe
+  host: "0.0.0.0"             # listener dédié : /satellite et /desktop-agent uniquement
   port: 8791
   whisper_modele: "small"      # modèle dédié au satellite, plus léger que le principal
   whisper_device: "cpu"        # évite de charger un second Whisper sur le GPU
