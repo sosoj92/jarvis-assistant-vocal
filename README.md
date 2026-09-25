@@ -37,6 +37,11 @@ ancien PC sans écran, tandis qu'un agent Windows authentifié déporte le micro
 son, les applications, Chrome, OBS, la webcam, les gestes et le contrôle Astra vers
 le PC utilisé au quotidien ([guide complet](docs/poste_principal_windows.md)).
 
+> **Pas de deuxième ordinateur ?** Un seul PC reste la solution la plus simple.
+> Pour du H24, le cerveau peut aussi être placé sur un NAS, un mini-PC ou un VPS,
+> avec les limites de chaque option dans le
+> [comparatif des hébergements H24](docs/hebergement_h24.md).
+
 > Projet perso partagé tel quel. Cible **Windows 11**, nécessite un micro et (en mode
 > cloud) une clé API du fournisseur choisi. Les abonnements grand public et les API
 > sont généralement séparés. La plupart des intégrations sont **optionnelles** et se
@@ -207,6 +212,7 @@ de contenus), `securite.toujours` (autorisations N2 mémorisées), `budget.prix`
 | **Gestes de la main (webcam)** | [docs/gestes.md](docs/gestes.md) |
 | **Satellites audio multi-pièces** | [installation et matériel](docs/satellite_installation.md) · [protocole](docs/satellite.md) · [Raspberry/Linux détaillé](docs/satellite_pi.md) |
 | **Ancien PC serveur + nouveau PC principal** | [docs/poste_principal_windows.md](docs/poste_principal_windows.md) |
+| **H24 sans deuxième PC : PC unique, NAS, mini-PC ou VPS** | [docs/hebergement_h24.md](docs/hebergement_h24.md) |
 | **Reconnaissance musicale (Shazam-like)** | [docs/musique.md](docs/musique.md) |
 | **Spotify (playlist des musiques reconnues)** | [docs/spotify.md](docs/spotify.md) |
 | **Cockpit (tableau de bord perso, local)** | [docs/cockpit.md](docs/cockpit.md) |

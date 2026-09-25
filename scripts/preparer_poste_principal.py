@@ -68,6 +68,7 @@ def main():
     satellite.setdefault("token", secrets.token_urlsafe(32))
     satellite.setdefault("wake", "appareil")
     satellite.setdefault("priorite_micro", 1.0)
+    satellite["brief_au_demarrage"] = True
     CONFIG_SERVEUR.write_text(
         yaml.safe_dump(serveur, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
@@ -91,6 +92,7 @@ def main():
         "gestes": {"souris_moniteur": 1},
         "audio": {
             "actif": True,
+            "brief_au_demarrage": True,
             "pc_url": f"ws://{hote}:8791/satellite",
             "satellite_id": identifiant,
             "token": satellite["token"],

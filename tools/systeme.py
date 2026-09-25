@@ -16,6 +16,7 @@ _TOUCHES = {
     "monter": 0xAF,
     "suivant": 0xB0,
     "precedent": 0xB1,
+    "stop": 0xB2,
     "pause": 0xB3,
 }
 
@@ -100,7 +101,7 @@ def ouvrir_application(nom: str) -> str:
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["pause", "suivant", "precedent", "muet"],
+                "enum": ["pause", "stop", "suivant", "precedent", "muet"],
                 "description": "Action a effectuer",
             }
         },
@@ -110,7 +111,7 @@ def ouvrir_application(nom: str) -> str:
 def controler_media(action: str) -> str:
     """Controle la lecture et le volume.
 
-    action : pause, suivant, precedent, monter, baisser, muet
+    action : pause, stop, suivant, precedent, monter, baisser, muet
     """
     action = action.lower().strip()
     if action not in _TOUCHES:

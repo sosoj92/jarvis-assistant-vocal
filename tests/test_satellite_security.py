@@ -1,8 +1,9 @@
 """Tests de la frontière réseau du WebSocket satellite."""
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from core.satellite import (_Session, _adresse_a_alexa, _demande_veille,
+from core.satellite import (_Session, _adresse_a_alexa, _demande_veille, _satellites,
                             _origine_locale_ou_lan, _phrase_progression,
                             _progression_initiale)
 from core.util import nettoyer_reponse_vocale
@@ -17,6 +18,7 @@ class SatelliteSecurityTests(unittest.TestCase):
         self.assertTrue(_origine_locale_ou_lan(_ws("127.0.0.1")))
         self.assertTrue(_origine_locale_ou_lan(_ws("192.168.1.42")))
         self.assertTrue(_origine_locale_ou_lan(_ws("10.0.0.8")))
+        self.assertTrue(_origine_locale_ou_lan(_ws("100.90.80.70")))
 
     def test_adresse_publique_est_refusee(self):
         self.assertFalse(_origine_locale_ou_lan(_ws("8.8.8.8")))
@@ -100,6 +102,15 @@ class SatelliteSecurityTests(unittest.TestCase):
         session.nouveau_reveil(4)
         session.mettre_en_veille()
         self.assertFalse(session.autoriser_relance())
+
+    def test_brief_demarrage_est_une_permission_par_satellite(self):
+        with patch("core.satellite.reglage", return_value=[{
+                "id": "bureau", "piece": "bureau", "token": "secret",
+                "brief_au_demarrage": True,
+        }]):
+            config = _satellites()
+
+        self.assertTrue(config["bureau"]["brief_au_demarrage"])
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ gestes:
 # null suit automatiquement la sortie Windows active, y compris Bluetooth.
 audio:
   actif: true
+  brief_au_demarrage: true     # une seule fois par jour, même après plusieurs redémarrages
   pc_url: "ws://ADRESSE_DU_SERVEUR:8791/satellite"
   satellite_id: "bureau"
   token: "MEME_SECRET_QUE_SATELLITES_COTE_SERVEUR"

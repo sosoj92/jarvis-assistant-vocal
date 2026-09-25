@@ -52,6 +52,7 @@ l'identique**. Deux types de trames :
 | `{"type":"reveil","id":1,"score":0.84}` | Propose la détection locale du wake word à l'arbitrage multi-micros. |
 | *(trames binaires)* | Audio PCM capté, envoyé au fil de la parole. |
 | `{"type":"fin_parole"}` | Fin de l'énoncé → le serveur transcrit et traite. |
+| `{"type":"scene_demarrage"}` | Demande le brief quotidien ; accepté uniquement pour un satellite autorisé avec `brief_au_demarrage: true`. |
 | `{"type":"ping"}` | Keep-alive (réponse `pong`). |
 
 ### Serveur → client
@@ -110,8 +111,10 @@ si deux matériels ont des gains très différents.
 
 ## Sécurité
 
-- **LAN uniquement** : jamais exposé via ngrok (la garde X-Forwarded rejette le
-  trafic tunnelisé). Le serveur principal reste sur `127.0.0.1:8790`. Lorsqu'un
+- **LAN ou tailnet privé uniquement** : jamais exposé via ngrok (la garde
+  X-Forwarded rejette le trafic tunnelisé). Les adresses Tailscale
+  `100.64.0.0/10` sont acceptées, mais le port doit rester filtré par le pare-feu
+  et les règles du tailnet. Le serveur principal reste sur `127.0.0.1:8790`. Lorsqu'un
   satellite est configuré, un listener dédié `0.0.0.0:8791` est lancé avec
   **uniquement** `/satellite` ; panneau, cockpit, inbox et Twilio n'y existent pas.
 - **Token par satellite** (`satellites[].token`), comparé en **timing-safe**.

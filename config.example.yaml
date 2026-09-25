@@ -419,6 +419,7 @@ satellites:                    # Jarvis dans d'autres pieces (Raspberry Pi, futu
   #   token: "un-secret-long-par-satellite"   # genere : python -c "import secrets;print(secrets.token_urlsafe(24))"
   #   wake: "appareil"         # pris en charge ; "serveur" est reserve a un futur client a flux continu
   #   priorite_micro: 1.0      # ajustement optionnel du score si ce micro gagne trop/pas assez souvent
+  #   brief_au_demarrage: false # true seulement pour le poste principal ; une fois par jour côté serveur
 
 # Poste Windows qui porte les applis, le navigateur, les touches media et le son.
 # L'agent initie une connexion sortante et n'accepte jamais de commande shell.

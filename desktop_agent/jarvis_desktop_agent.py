@@ -38,7 +38,7 @@ OUTILS_LOCAUX = frozenset({
 })
 TOUCHES = {
     "muet": 0xAD, "baisser": 0xAE, "monter": 0xAF,
-    "suivant": 0xB0, "precedent": 0xB1, "pause": 0xB3,
+    "suivant": 0xB0, "precedent": 0xB1, "stop": 0xB2, "pause": 0xB3,
 }
 UTILITAIRES = {
     "calculatrice": "calc", "bloc-notes": "notepad",
@@ -66,6 +66,7 @@ class ActionsLocales:
         self.conf = conf
         self.satellite = None
         self.micro = None
+        self.agent_pret = threading.Event()
 
     def lier_audio(self, satellite, micro):
         self.satellite, self.micro = satellite, micro
@@ -282,6 +283,7 @@ def demarrer_audio(conf, actions):
     except Exception as exc:
         print("[overlay] indisponible:", exc)
     satellite.CONF = audio
+    audio["_poste_pret_event"] = actions.agent_pret
     file_audio = queue.Queue()
     occupe = threading.Event()
     micro = satellite.Micro(audio, file_audio, occupe)
@@ -309,27 +311,31 @@ async def session(conf, actions):
         if reponse.get("type") != "pret":
             raise RuntimeError(reponse.get("message", "connexion refusée"))
         print("[agent] connecté au serveur Jarvis")
-        async for brut in ws:
-            if not isinstance(brut, str):
-                continue
-            commande = json.loads(brut)
-            if commande.get("type") != "commande":
-                continue
-            ok, resultat = await asyncio.to_thread(
-                actions.executer, str(commande.get("action", "")),
-                commande.get("args", {}))
-            if isinstance(resultat, str):
-                message = resultat
-            else:
-                message = "C'est fait." if ok else "La commande a échoué."
-            try:
-                json.dumps(resultat)
-            except (TypeError, ValueError):
-                resultat = str(resultat)
-            await ws.send(json.dumps({
-                "type": "resultat", "id": commande.get("id"),
-                "ok": ok, "message": message, "resultat": resultat,
-            }, ensure_ascii=False))
+        actions.agent_pret.set()
+        try:
+            async for brut in ws:
+                if not isinstance(brut, str):
+                    continue
+                commande = json.loads(brut)
+                if commande.get("type") != "commande":
+                    continue
+                ok, resultat = await asyncio.to_thread(
+                    actions.executer, str(commande.get("action", "")),
+                    commande.get("args", {}))
+                if isinstance(resultat, str):
+                    message = resultat
+                else:
+                    message = "C'est fait." if ok else "La commande a échoué."
+                try:
+                    json.dumps(resultat)
+                except (TypeError, ValueError):
+                    resultat = str(resultat)
+                await ws.send(json.dumps({
+                    "type": "resultat", "id": commande.get("id"),
+                    "ok": ok, "message": message, "resultat": resultat,
+                }, ensure_ascii=False))
+        finally:
+            actions.agent_pret.clear()
 
 
 async def boucle(conf, actions):

@@ -89,6 +89,18 @@ Attention aux index : l'overlay numérote `0 = principal, 1 = deuxième écran`,
 alors que la capture et la souris numérotent `1 = principal, 2 = deuxième écran`.
 Les valeurs livrées sont donc intentionnellement différentes.
 
+## Brief au premier démarrage de la journée
+
+Le serveur H24 ne joue pas le brief au milieu de la nuit lorsqu'il redémarre.
+C'est la première connexion audio du nouveau PC qui demande la scène de démarrage.
+La date est enregistrée sur le serveur dans `notes/.scene_demarrage` : éteindre et
+rallumer le nouveau PC le même jour ne rejoue donc ni le brief, ni Spotify, ni la
+scène lumineuse. Le lendemain, le premier démarrage l'autorise de nouveau.
+
+Ce comportement nécessite `audio.brief_au_demarrage: true` sur le nouveau PC et
+`brief_au_demarrage: true` sur son entrée `satellites` côté serveur. Le script de
+préparation configure automatiquement les deux valeurs.
+
 ## 4. Fonctionnement sans écran de l'ancien PC
 
 L'ancien PC peut fonctionner capot fermé ou écran éteint à condition que :

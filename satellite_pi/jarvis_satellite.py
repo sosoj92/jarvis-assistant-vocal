@@ -344,6 +344,12 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
             if isinstance(m, str) and json.loads(m).get("type") == "erreur":
                 print("  [pc] refusé:", json.loads(m).get("message")); return
 
+        if bool(CONF.get("brief_au_demarrage", False)):
+            pret = CONF.get("_poste_pret_event")
+            if pret is not None:
+                await asyncio.to_thread(pret.wait, 10.0)
+            await ws.send(json.dumps({"type": "scene_demarrage"}))
+
         async def emetteur():
             while True:
                 try:

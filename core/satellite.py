@@ -59,6 +59,7 @@ TAUX = 16000                      # PCM entrant : 16 kHz mono 16-bit LE (comme l
 _MAX_UTTERANCE = TAUX * 2 * 30    # garde-fou : 30 s d'audio max par énoncé (octets)
 _APP_LAN = None
 _SERVEUR_LAN = None
+_RESEAU_TAILSCALE_V4 = ipaddress.ip_network("100.64.0.0/10")
 
 
 def _origine_locale_ou_lan(ws) -> bool:
@@ -80,7 +81,8 @@ def _origine_locale_ou_lan(ws) -> bool:
         adresse = ipaddress.ip_address(hote)
     except ValueError:
         return False
-    return adresse.is_loopback or adresse.is_private or adresse.is_link_local
+    return (adresse.is_loopback or adresse.is_private or adresse.is_link_local
+            or adresse in _RESEAU_TAILSCALE_V4)
 
 
 def _satellites():
@@ -93,6 +95,7 @@ def _satellites():
                 "token": str(s.get("token", "") or ""),
                 "wake": str(s.get("wake", "appareil") or "appareil"),  # "appareil" | "serveur"
                 "priorite_micro": float(s.get("priorite_micro", 1.0) or 1.0),
+                "brief_au_demarrage": bool(s.get("brief_au_demarrage", False)),
             }
     return out
 
@@ -628,6 +631,17 @@ def monter_routes(app):
                         "id": data.get("id"),
                         "accuse_vocal": accuse_vocal,
                     })
+
+                elif typ == "scene_demarrage" and sess.satellite:
+                    # Seul le poste principal explicitement configuré peut demander
+                    # le brief. Le marqueur quotidien est conservé côté serveur.
+                    if not cfg[sess.satellite].get("brief_au_demarrage", False):
+                        continue
+                    from tools.scenes import texte_scene_au_demarrage
+                    texte = await asyncio.to_thread(texte_scene_au_demarrage)
+                    if texte:
+                        await parler(texte)
+                    await etat("veille")
 
                 elif typ == "fin_parole" and sess.satellite:
                     audio = bytes(sess.audio)

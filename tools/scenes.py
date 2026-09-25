@@ -22,10 +22,24 @@ from core.registre import outil
 
 _RACINE = Path(__file__).resolve().parent.parent
 _ETAT = _RACINE / "notes" / ".scene_demarrage"        # notes/ est gitignoré
+_VERROU_DEMARRAGE = threading.Lock()
 
 
 def _touche_media(nom):
     """Envoie une touche multimédia (play/pause, stop…). Best effort."""
+    commande_distante = {
+        "play/pause media": "pause",
+        "stop media": "stop",
+    }.get(str(nom).lower())
+    if commande_distante:
+        try:
+            from core.poste_distant import executer_principal
+            resultat = executer_principal(
+                "controler_media", {"action": commande_distante})
+            if resultat is not None:
+                return not str(resultat).startswith("Le poste ")
+        except Exception:
+            pass
     try:
         import keyboard
         keyboard.send(nom)
@@ -132,14 +146,18 @@ def _accueil_court():
     return " ".join(morceaux)
 
 
-def scene_au_demarrage(forcer=False):
-    """Joue la scène du matin (une fois par jour sauf forcer=True). Non bloquant
-    conseillé (voir jouer_au_demarrage_async)."""
-    if not forcer and _deja_fait_aujourdhui():
-        return "Scène de démarrage déjà jouée aujourd'hui."
-    if not reglage("scenes.au_demarrage_actif", True):
-        return "Scène de démarrage désactivée."
-    _marquer_fait()
+def _preparer_scene_au_demarrage(forcer=False):
+    """Exécute la scène physique et renvoie ``(statut, texte_a_vocaliser)``.
+
+    Le verrou et le marqueur sont côté cerveau : plusieurs reconnexions du poste
+    principal le même jour ne peuvent donc jamais rejouer le brief.
+    """
+    with _VERROU_DEMARRAGE:
+        if not forcer and _deja_fait_aujourdhui():
+            return "Scène de démarrage déjà jouée aujourd'hui.", None
+        if not reglage("scenes.au_demarrage_actif", True):
+            return "Scène de démarrage désactivée.", None
+        _marquer_fait()
 
     # 1) Musique (Spotify) — best effort : lancer l'appli puis play.
     if reglage("scenes.spotify", True):
@@ -155,14 +173,26 @@ def scene_au_demarrage(forcer=False):
     _lumieres_du_moment()
 
     # 3) Accueil vocal : brief Hermes si dispo, sinon accueil court local.
+    texte = _brief_hermes() or _accueil()
+    return "Scène de démarrage jouée.", texte
+
+
+def scene_au_demarrage(forcer=False):
+    """Joue et vocalise localement la scène, une fois par jour."""
+    statut, texte = _preparer_scene_au_demarrage(forcer=forcer)
     try:
         from core import voix
-        texte = _brief_hermes() or _accueil()
         if texte:
             voix.parler(texte)
     except Exception:
         pass
-    return "Scène de démarrage jouée."
+    return statut
+
+
+def texte_scene_au_demarrage(forcer=False):
+    """Version satellite : renvoie le brief au client qui doit le vocaliser."""
+    _statut, texte = _preparer_scene_au_demarrage(forcer=forcer)
+    return texte
 
 
 def jouer_au_demarrage_async():
