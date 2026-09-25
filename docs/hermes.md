@@ -2,7 +2,9 @@
 
 Jarvis peut confier une **tâche de réflexion / recherche de fond** à
 [Hermes Agent](https://github.com/NousResearch/hermes-agent), qui tourne **en local**
-sur ta machine, puis t'annoncer le résultat **à voix haute** quand c'est prêt.
+soit sur le PC, soit dans une VM Ubuntu privée, puis t'annoncer le résultat **à
+voix haute** quand c'est prêt. L'installation recommandée et isolée est décrite
+dans [le guide du serveur Ubuntu/Hyper-V](hermes_server_vm.md).
 
 - Outil : `deleguer_a_hermes(tache, session)` — **non exposé via MCP**. Chaque
   délégation utilise une session nommée et plusieurs tâches peuvent tourner en parallèle.
@@ -22,10 +24,11 @@ sur ta machine, puis t'annoncer le résultat **à voix haute** quand c'est prêt
 
 1. Jarvis **répond tout de suite** (« je délègue, je te préviens ») et lance la tâche **en
    fond** — il ne te fait pas attendre.
-2. En tâche de fond, Jarvis appelle l'**API locale d'Hermes** :
+2. En tâche de fond, Jarvis appelle l'**API locale d'Hermes**. Avec la VM, un
+   tunnel SSH la rend disponible uniquement sur le loopback Windows :
    `POST http://127.0.0.1:8642/v1/responses`, en-tête `Authorization: Bearer <clé>`, corps
    `{"model":"hermes-agent","input":"…","conversation":"jarvis-delegation"}`. Hermes réfléchit
-   (et peut utiliser ses propres outils : web, code en conteneur Docker, etc.). Avec
+   et ne reçoit que les outils MCP explicitement autorisés. Avec
    les versions récentes où `hermes gateway` ne fournit plus cette API, Jarvis se
    replie automatiquement sur le mode officiel `hermes -z`.
 3. Le résultat passe par le **filtre de confidentialité** (`core/confidentialite.py` :
@@ -53,18 +56,18 @@ Les chemins sont ceux du conteneur, jamais les chemins Windows personnels.
 | **Ingest YouTube** (`ingerer-chaine-youtube`) | lecture seule `/scripts`; les sorties passent par Jarvis | `lancer_ingestion_youtube` |
 | **Veilleur** (`creer-une-veille`) | aucun dossier personnel requis | recherche web et crons internes Hermes, livraison Telegram |
 
-Les barrières imposées sont les montages `/vault:ro`, `/scripts:ro`,
-`/scripts/drafts:rw`, ainsi que `mcp_expose` côté Jarvis. Les périmètres par rôle
-sont des consignes comportementales : Hermes partage techniquement un catalogue
-MCP commun, il n'existe pas encore d'ACL distincte pour chaque skill. Aucun
-credential et aucun outil physique/sensible n'est ajouté à Hermes.
+Le profil serveur initial est volontairement plus strict : seulement cinq outils
+N1 sont visibles (`heure_et_date`, `meteo`, `get_system_stats`,
+`chercher_inspiration`, `etat_contenus`). Les autres capacités doivent être
+ajoutées une par une après validation. Aucun credential ni outil physique/sensible
+n'est ajouté à Hermes.
 
 ## Configuration (`config.yaml`)
 
 ```yaml
 hermes:
   transport: "auto"                   # auto | cli | http
-  api_url: "http://127.0.0.1:8642"   # gateway Hermes, loopback
+  api_url: "http://127.0.0.1:8642"   # API locale ou tunnel SSH loopback
   api_key: "…"                       # = API_SERVER_KEY du .env d'Hermes
   # api_key_file: "…"                # alternative : un fichier contenant la clé
   session: "jarvis-delegation"       # repli ; Jarvis crée normalement une session par tâche
@@ -75,10 +78,10 @@ hermes:
   retention_jours: 30                # purge automatique des anciens comptes rendus
 ```
 
-La clé provient du `.env` d'Hermes (`API_SERVER_KEY`). En transport `auto`, l'API
-historique sur le port 8642 est utilisée si elle répond ; sinon le CLI Hermes local
-prend automatiquement le relais. `cli` force le nouveau chemin et `http` conserve
-strictement l'ancienne passerelle.
+La clé doit correspondre à `API_SERVER_KEY` côté Hermes et rester uniquement dans
+les fichiers locaux gitignorés. En transport `auto`, l'API sur le port 8642 est
+utilisée si elle répond ; sinon le CLI Hermes local prend le relais lorsqu'il est
+installé. `cli` force le chemin CLI et `http` exige l'API.
 
 ## Sécurité
 

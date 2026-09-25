@@ -18,7 +18,7 @@ par connecteur sans changer ces trois modes.
 
 **🧠 Jarvis + Hermes.** Pour la réflexion de fond et la recherche, Jarvis **délègue à
 [Hermes](docs/hermes.md)**, un agent délibératif qui tourne **en local** (conteneur
-Docker). La doctrine est nette : **Hermes orchestre et pense ; Jarvis détient les clés
+Docker, recommandé dans une VM Ubuntu isolée). La doctrine est nette : **Hermes orchestre et pense ; Jarvis détient les clés
 et le corps** — c'est toujours Jarvis qui exécute les actions, jamais Hermes, et
 **aucun identifiant ne vit dans l'environnement d'Hermes** (il lit le Vault et les
 outils sûrs, écrit seulement des brouillons).
@@ -60,7 +60,7 @@ ESP32 avec audio ou Pi Zero ([options et fonctionnement](docs/satellite.md) ·
 - 🔌 **Serveur MCP** — expose les outils domotique/PC à tout client MCP (Claude Desktop, Hermes…)
 - 🎬 **Hub de contenu** — vault d'inspirations Insta/TikTok (télécharge, transcrit, indexe), idées & scripts générés, ingestion YouTube ([docs/hub_contenu.md](docs/hub_contenu.md))
 - 🗂️ **Suivi de contenus** — pipeline vidéo *idée → script → tournage → montage → publié*, croisé avec ton agenda ; « où j'en suis ? » ([docs/suivi_contenu.md](docs/suivi_contenu.md))
-- 🤝 **Délégation à Hermes** — confie la réflexion / recherche de fond à un agent délibératif **local** (doctrine : Jarvis tient les clés & le corps, Hermes pense) ([docs/hermes.md](docs/hermes.md))
+- 🤝 **Délégation à Hermes** — confie la réflexion / recherche de fond à un agent délibératif **local** (doctrine : Jarvis tient les clés & le corps, Hermes pense) ([fonctionnement](docs/hermes.md) · [serveur Ubuntu/Hyper-V](docs/hermes_server_vm.md))
 - 🧭 **HUD & panneau web local** (`/panneau`) — commandes rapides de modèle/voix, état de la chaîne, réglages et permissions — **accessibles en local uniquement** ([docs/panneau.md](docs/panneau.md))
 - 🔐 **Sécurité graduée** — niveaux **N1/N2/N3** par outil, « toujours autoriser » révocable, budget LLM par fournisseur
 - 💸 **Routage & budgets** — 3 modes (local / hybride / qualité), fournisseur cloud et voix configurables séparément, suivi des coûts et **bascule auto en local** au plafond ([docs/costs.md](docs/costs.md))

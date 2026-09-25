@@ -1,0 +1,65 @@
+# Configuration sans secret du Hermes heberge dans la VM Ubuntu.
+# Ollama reste sur Windows et est joint uniquement via le tunnel SSH loopback.
+
+model:
+  default: qwen3.5:4b
+  provider: ollama_local
+  base_url: http://127.0.0.1:11434/v1
+  context_length: 65536
+
+providers:
+  ollama_local:
+    api: http://127.0.0.1:11434/v1
+    transport: chat_completions
+    default_model: qwen3.5:4b
+    context_length: 65536
+    extra_body:
+      options:
+        num_ctx: 65536
+
+# Dans l'image officielle, "local" signifie l'interieur du conteneur Hermes,
+# pas l'hote Ubuntu ni Windows.
+terminal:
+  backend: local
+  cwd: /opt/data/workspace
+  timeout: 180
+
+tool_loop_guardrails:
+  non_interactive_hard_stop_enabled: true
+
+# Le catalogue est volontairement court sur ce serveur. Le garder directement
+# visible evite qu'un petit modele local nie l'existence d'un outil MCP reporte
+# derriere tool_search.
+tools:
+  tool_search:
+    enabled: off
+    defer: []
+
+# Profil initial volontairement minimal : l'API serveur ne recoit que le serveur
+# MCP Jarvis filtre ci-dessous. Les capacites d'ecriture ou d'execution seront
+# ajoutees separement apres validation explicite de leur perimetre.
+platform_toolsets:
+  api_server:
+    - jarvis
+
+# Hermes ne voit qu'un sous-ensemble N1 explicitement autorise. Les outils qui
+# pilotent le corps de Jarvis (lumieres, OBS, minuteur/voix, camera, micro, etc.)
+# restent exclus meme s'ils existent sur le serveur MCP local.
+mcp_servers:
+  jarvis:
+    url: http://127.0.0.1:8765/mcp
+    enabled: true
+    connect_timeout: 25
+    timeout: 120
+    supports_parallel_tool_calls: false
+    sampling:
+      enabled: false
+    tools:
+      include:
+        - heure_et_date
+        - meteo
+        - get_system_stats
+        - chercher_inspiration
+        - etat_contenus
+      resources: false
+      prompts: false

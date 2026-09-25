@@ -1,0 +1,33 @@
+name: jarvis-server
+
+services:
+  hermes:
+    # Empreinte linux/amd64 du canal officiel `latest`, verrouillee pour eviter
+    # qu'une future publication modifie le serveur sans validation.
+    image: nousresearch/hermes-agent@sha256:d566d4a435767265c2a0172030b778fbdaa1a9ab19442c75ec5aad1df32dec54
+    container_name: jarvis-hermes
+    restart: unless-stopped
+
+    # Le reseau hote permet a Hermes d'atteindre uniquement les ports loopback
+    # fournis par le tunnel SSH depuis Windows (Ollama et MCP Jarvis).
+    network_mode: host
+
+    env_file:
+      - /opt/jarvis/config/hermes-api.env
+    environment:
+      HERMES_UID: "1000"
+      HERMES_GID: "1000"
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "127.0.0.1"
+      API_SERVER_PORT: "8642"
+
+    volumes:
+      - /opt/jarvis/data/hermes:/opt/data
+
+    command: ["gateway", "run"]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 512
+    stop_grace_period: 30s
