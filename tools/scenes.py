@@ -159,6 +159,15 @@ def _preparer_scene_au_demarrage(forcer=False):
             return "Scène de démarrage désactivée.", None
         _marquer_fait()
 
+    # Option sans machine 24 h/24 : le journal est genere et imprime en fond au
+    # premier brief du jour. Son propre marqueur empeche un doublon si Jarvis
+    # est relance ou si cette scene est forcee plus tard dans la journee.
+    try:
+        from core.signal_matin.automation import lancer_impression_premier_brief_async
+        lancer_impression_premier_brief_async()
+    except Exception:
+        pass
+
     # 1) Musique (Spotify) — best effort : lancer l'appli puis play.
     if reglage("scenes.spotify", True):
         try:

@@ -276,6 +276,42 @@ hub:                           # indexeur/pipeline du hub de contenu
 suivi:                         # suivi de contenus (pipeline video) ; voir docs/suivi_contenu.md
   fichier: "contenus.yaml"     # liste des contenus (non versionnee) ; chemin relatif = racine du projet
 
+signal_matin:                   # quotidien personnel A4 ; voir docs/signal_matin.md
+  actif: false                  # activer seulement apres validation de la preview et de l'impression
+  declenchement: "desactive"    # desactive | horaire | premier_demarrage
+  heure: "08:00"                # mode horaire : utilisee par le script Windows
+  imprimer: false               # opt-in obligatoire pour l'impression automatique au premier brief
+  recto_verso: false            # bord long ; verifier la compatibilite de l'imprimante
+  densite: "auto"               # auto | compact | standard | extended
+  imprimante: ""                # nom exact ; vide accepte uniquement s'il n'y en a qu'une
+  agenda: true                  # reutilise Google Agenda s'il est deja connecte
+  nombre_actualites: 12
+  nombre_actualites_repli: 18   # repli public plus fourni pour remplir l'edition etendue
+  actualites_age_max_heures: 48 # exclut les sujets trop anciens au moment de la generation
+  actualites_publiques_par_defaut: true # repli Le Monde si flux est vide ; false = rubrique vide
+  actualites_detaillees: true   # syntheses longues des sujets de une via le modele cloud actif
+  nombre_actualites_detaillees: 6 # deux pages de 3 articles en STANDARD/EXTENDED
+  nombre_actualites_tech: 6     # cahier tech separe, alimente par des flux publics recents
+  nombre_actualites_tech_detaillees: 5
+  nombre_curiosites_detaillees: 4
+  tech_age_max_heures: 72
+  modele_actualites: ""         # vide = modele cloud economique actif
+  extracteur_public: false      # proxy de lecture interdit pour les flux personnels sauf opt-in
+  flux: []                      # ex. [{nom: "Media", categorie: "Monde", url: "https://.../rss.xml"}]
+  flux_tech: []                 # vide = flux officiels Le Monde Pixels/IA/Culture web
+  suivi: true                   # inclut le pipeline contenus.yaml (local, jamais versionne)
+  loopstr: true                 # inclut les echeances du flux iCal s'il est configure
+  mails: false                  # opt-in : sujets/expediteurs recents, jamais active par defaut
+  reseaux_sociaux: true         # stats Instagram configurees, comparees a la veille
+  discord: true                 # volumes/mentions/salons actifs, jamais les messages bruts
+  discord_heures: 24
+  priorites: []                 # valeurs personnelles uniquement dans config.yaml (gitignore)
+  rappels: []
+  hermes_fichier: ""            # brief/veille prepare localement par Hermes, si utilise
+  salutation: "Bonjour."
+  note: ""
+  dossier_sortie: "output"
+
 securite:                      # niveaux de permission (N8) ; voir docs/panneau.md
   toujours: []                 # outils N2 memorises "toujours autoriser" (revocables au panneau)
                                # rempli a la voix ("oui, toujours") ; un N3 n'y entre JAMAIS

@@ -13,6 +13,7 @@ config.yaml (section discord).
 import asyncio
 import datetime
 import threading
+import time
 
 from core.config import reglage
 from core.journal import obtenir
@@ -140,6 +141,45 @@ def _debut_periode(heures):
     minuit = datetime.datetime.now().astimezone().replace(
         hour=0, minute=0, second=0, microsecond=0)
     return minuit.astimezone(datetime.timezone.utc)
+
+
+def digest_journal(heures: int = 24, attente_s: float = 18.0):
+    """Statistiques Discord sobres pour Signal Matin, sans contenu de message.
+
+    Le journal ne conserve ni citation, ni auteur, ni message brut. Il imprime
+    seulement les volumes, le nombre de mentions et les salons les plus actifs.
+    """
+    if not _configure():
+        return None, "Discord n'est pas configure."
+    demarrer_discord()
+    deadline = time.monotonic() + max(1.0, attente_s)
+    while time.monotonic() < deadline:
+        client, loop = _BOT["client"], _BOT["loop"]
+        if loop and client and client.is_ready():
+            break
+        time.sleep(.25)
+    apres = _debut_periode(heures)
+    messages, erreur = _lancer_scan(lambda c: _collecter(c, apres))
+    if erreur:
+        return None, erreur
+    user_id = int(reglage("discord.user_id"))
+    utiles = [m for m in messages if not m["bot"] and m["texte"]]
+    mentions = sum(user_id in m["mentions"] for m in utiles)
+    par_salon = {}
+    for message in utiles:
+        key = (message["serveur"], message["salon"])
+        par_salon[key] = par_salon.get(key, 0) + 1
+    actifs = [
+        {"serveur": serveur, "salon": salon, "messages": total}
+        for (serveur, salon), total in sorted(
+            par_salon.items(), key=lambda row: (-row[1], row[0]))[:4]
+    ]
+    return {
+        "messages": len(utiles),
+        "salons": len(par_salon),
+        "mentions": mentions,
+        "actifs": actifs,
+    }, None
 
 
 @outil(

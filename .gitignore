@@ -1,5 +1,6 @@
 # Python-generated files
 __pycache__/
+.pytest_cache/
 *.py[oc]
 build/
 dist/
@@ -8,6 +9,7 @@ wheels/
 
 # Virtual environments
 .venv
+.venv.stale-*/
 
 # Secrets et donnees personnelles (ne JAMAIS versionner)
 config.yaml
@@ -32,6 +34,11 @@ reminders.json
 
 # Journaux
 logs/
+
+# Editions personnelles generees (JSON, HTML, PDF et rendus QA)
+output/
+tmp/pdfs/
+.uv-cache/
 
 # Profil navigateur persistant des reservations (cookies, sessions connectees)
 .profil_reservation/
