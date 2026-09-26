@@ -136,6 +136,8 @@ _DOMAINES = (
     (("lumiere", "lampe", "hue", "amaran", "clim", "climatisation",
       "ventilateur", "prise", "alexa", "echo", "domotique"),
      {"lumieres", "amaran", "alexa", "google_home", "modes", "scenes"}),
+    (("mode visio", "mode vision", "controle gestuel", "controle par gestes",
+      "gestes visibles", "regarde mes mains", "webcam"), {"gestes"}),
     (("ecran", "fenetre", "souris", "clique", "clic", "ordinateur", " pc ",
       "application", "logiciel", "dossier", "telechargements", "parametre"),
      {"ecran", "souris", "apps", "systeme", "astra_pc", "gestes", "stats"}),

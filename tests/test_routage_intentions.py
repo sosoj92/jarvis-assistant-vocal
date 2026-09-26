@@ -29,6 +29,12 @@ class SelectionDomainesTests(unittest.TestCase):
             "Regarde mon agenda puis lis mes mails et donne-moi la météo")
         self.assertTrue({"agenda", "mail", "meteo"}.issubset(modules))
 
+    def test_lumiere_et_mode_visio_exposent_les_deux_outils(self):
+        modules = modules_pour_phrase(
+            "Allume la lumière du bureau et lance le mode visio")
+        self.assertIn("amaran", modules)
+        self.assertIn("gestes", modules)
+
     def test_action_inconnue_conserve_le_catalogue_complet(self):
         self.assertIsNone(modules_pour_phrase("Modifie ce réglage mystérieux"))
         self.assertIsNone(modules_pour_phrase("Affiche quelque chose de spécial"))

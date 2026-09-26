@@ -103,6 +103,8 @@ SYSTEME_BASE = (
     "lui-meme une progression uniquement lorsqu'un outil lent est vraiment lance. "
     "Tu disposes d'outils pour agir sur l'ordinateur : utilise-les quand "
     "l'utilisateur demande une action, et confirme brievement ce que tu as fait. "
+    "Si sa demande contient plusieurs actions, execute chacune avec les outils "
+    "disponibles avant de formuler ta reponse finale. "
     "Quand l'utilisateur exprime une preference, mentionne un proche ou parle d'un "
     "projet en cours, appelle remember pour t'en souvenir, sans le commenter. "
     "Pour les mails : prepare un brouillon avec preparer_mail et lis-le ; appelle "
