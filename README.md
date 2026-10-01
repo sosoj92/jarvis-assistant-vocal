@@ -123,7 +123,7 @@ flowchart LR
 
 | Mode | LLM | Voix | Usage |
 |---|---|---|---|
-| **hybride** *(défaut)* | profil quotidien OpenAI ou Claude/Anthropic | moteur choisi séparément | demandes courtes en cloud, tâches de fond confiées à Hermes |
+| **hybride** *(défaut)* | modèle quotidien économique du fournisseur choisi — Luna pour OpenAI, Haiku pour Claude par défaut | moteur choisi séparément | demandes courtes en cloud, tâches de fond confiées à Hermes |
 | **qualité** | profil le plus puissant du même fournisseur | moteur choisi séparément | demandes exigeantes et raisonnement renforcé |
 | **local** | Ollama (`qwen3.5:4b`…) | Piper, Kokoro ou Windows | **100 % hors ligne**, aucune API et aucun coût d'usage |
 

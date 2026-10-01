@@ -50,7 +50,7 @@ Des gestes **tenus** (pas d'instantané) pour éviter les faux positifs :
 |---|---|
 | **Main ouverte immobile, 5 doigts** tenue | Pause (touche média lecture/pause) |
 | **Pouce levé** tenu | Lecture/reprise (touche média lecture/pause) |
-| **Poing** tenu | Coupe immédiatement le TTS et annule le mode courant |
+| **Poing** tenu | Coupe le TTS hors mode ; dans Onglets/Audio, repositionne la main sans action |
 | **2 doigts** tenus | Arme le mode **Onglets** |
 | **3 doigts** tenus | Arme le mode **Audio** |
 | **Index seul** tenu | Arme le mode **Souris** et pilote le pointeur |
@@ -65,11 +65,15 @@ c'est pris. Le mapping est **entièrement éditable** dans `config.yaml → gest
 - passe à la main entière ouverte et garde-la brièvement immobile ; une perte
   momentanée du pouce par la caméra n'active jamais la souris dans ce mode ;
 - clique d'abord dans le navigateur ou l'application à piloter ;
-- swipe gauche/droite → onglet ou vue précédente/suivante de cette application
+- déplace légèrement la paume à gauche/droite → onglet ou vue précédente/suivante de cette application
   (`Ctrl+Shift+Tab` / `Ctrl+Tab`) ;
-- swipe haut/bas → défilement de la fenêtre active (`Page Up` / `Page Down`) ;
-- le point d'arrivée devient immédiatement le départ suivant : enchaîne dans
-  n'importe quelle direction sans restabiliser ni refaire les 2 doigts.
+- monte/descends progressivement la paume → défilement continu de la fenêtre
+  active (`Page Up` / `Page Down`) ;
+- arrête simplement la main pour mettre le mouvement en pause : le mode reste actif ;
+- ferme le poing pour ramener la main au centre sans aucune action, puis rouvre-la
+  et continue depuis cette nouvelle position ;
+- chaque petit déplacement validé devient immédiatement le départ du suivant :
+  enchaîne dans n'importe quelle direction sans restabiliser ni refaire les 2 doigts.
 
 Le nom interne `mode_fenetres` est conservé pour la compatibilité des anciennes
 calibrations. Les applications sans onglets peuvent ignorer `Ctrl+Tab`, mais Jarvis
@@ -81,8 +85,9 @@ applications, règle `gestes.navigation_horizontale: applications`.
 - tiens index + majeur + annulaire environ 1 seconde → overlay `🔊 Mode audio` ;
 - passe à la main entière ouverte et garde-la brièvement immobile ; une perte
   momentanée du pouce par la caméra n'active jamais la souris dans ce mode ;
-- swipe haut/bas → volume +/− ;
-- swipe gauche/droite → piste précédente/suivante.
+- petits déplacements haut/bas → volume +/− ;
+- petits déplacements gauche/droite → piste précédente/suivante ;
+- le poing permet là aussi de recentrer la main sans couper le mode ni agir.
 
 Le pouce levé ne confirme **jamais** une action N3 : il sert uniquement à la
 lecture média. Une extinction, un appel ou une réservation reste soumis à la
@@ -118,14 +123,15 @@ calibration locale permet de l'activer avec `p`, puis de sauvegarder avec `s`.
 - **Modes explicites** : aucun swipe n'agit sans 2 ou 3 doigts tenus au préalable.
 - **Transition stabilisée** après la sélection : passer directement à la paume
   ouverte suffit ; sortir la main du cadre reste accepté.
-- **Enchaînement continu** : la fin d'un swipe est ignorée pour éviter les
-  doublons ; une courte pause ou un virage franc sur l'autre axe réarme aussitôt
-  le geste suivant, sans sortir la main ni refaire le geste de sélection.
-- **Retour neutre** : après un swipe horizontal, le retour immédiat de la main
-  vers le centre reste ignoré, même si la caméra perd brièvement des doigts.
+- **Enchaînement continu** : chaque petit pas horizontal ou vertical produit une
+  action et devient la nouvelle origine. Une main immobile ne produit rien.
+- **Repositionnement au poing** : fermer la main désaccouple temporairement le
+  mouvement ; on peut revenir au centre, rouvrir la paume et reprendre sans
+  déclencher l'action opposée ni quitter le mode.
 - **Sortie explicite** : le mode reste actif tant que la main demeure visible ;
   les pertes momentanées de suivi sont ignorées. Il se ferme après trois secondes
-  réellement hors du cadre ou immédiatement avec un poing tenu.
+  réellement hors du cadre. Dans un mode continu, le poing sert uniquement au
+  repositionnement neutre et ne ferme plus le mode.
 - **Stabilisation contextuelle** : après l'armement Onglets/Audio, trois doigts
   longs visibles suffisent et ne peuvent plus lancer la souris. La main doit rester presque immobile pendant
   `swipe_pret_s` (0,35 s par défaut). Le changement de pose ou le trajet d'entrée
@@ -140,8 +146,8 @@ python scripts/gestes_calibrer.py
 ```
 
 Affiche la caméra + les landmarks, la pose et le mode en direct. Réglages :
-`t/T` maintien −/+, `c/C` cooldown −/+, `w/W` swipe horizontal −/+,
-`v/V` swipe vertical −/+, `z/Z` seuil du zoom avant −/+, `r/R` seuil du zoom
+`t/T` maintien −/+, `c/C` cooldown −/+, `w/W` pas horizontal −/+,
+`v/V` pas vertical −/+, `z/Z` seuil du zoom avant −/+, `r/R` seuil du zoom
 arrière −/+, `x/X` temps de stabilisation du zoom −/+, `i` inverse haut/bas,
 `p` active/coupe le clic par pincement, `k/K` règle son seuil, `s` sauvegarde vers
 `gestes/calibration.json`, `q`
@@ -155,6 +161,12 @@ visibles pour ma vidéo », ou utilise `Ctrl+Alt+D`. La fenêtre montre les poin
 la pose et l'historique, et les gestes reconnus agissent réellement sur Windows. Le bandeau
 `MODE DEMO : ACTIONS PC ACTIVES` évite toute ambiguïté. `Q` ferme la démo et
 « quitte le mode visio », `Ctrl+Alt+G` ou « coupe les gestes » coupe le tracker.
+
+Si le périphérique choisi est une caméra virtuelle fournie par Logitech Capture,
+active `gestes.camera_app.actif`. Jarvis ouvre alors Logitech Capture, attend que
+sa caméra virtuelle soit disponible, puis lance la démo. À la fermeture du mode,
+il ne ferme Logitech Capture que s'il l'avait lui-même démarré. Le chemin peut
+rester vide sous Windows pour profiter de la détection automatique.
 
 ### Mode regard : contrôle avec les yeux
 

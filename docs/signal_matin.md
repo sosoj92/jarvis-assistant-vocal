@@ -82,6 +82,9 @@ backend d'impression explicite
 - `renderer.py` compose uniquement un `MorningEdition` deja valide.
 - `pdf.py` verifie les debordements avant de produire un A4 sans en-tetes de
   navigateur.
+- `web/signal_matin_pagination.js` mesure la composition rendue dans Chromium,
+  cree autant de feuilles de continuation que necessaire et reequilibre leur
+  contenu avant l'export.
 - `printer.py` ne peut imprimer que lors d'un appel explicite avec confirmation.
 
 Les anciens `core/journal_matin.py`, `core/journal_pdf.py` et
@@ -104,6 +107,19 @@ uv run generate-morning-paper generate --demo --mode extended
 | STANDARD | 7 a 8 | Deux cahiers d'actualites, Tech, journee, curiosites et pause. |
 | EXTENDED | 7 a 8 | Edition riche avec journee et cahiers Tech/Veille entierement separes. |
 
+Ces nombres sont indicatifs, jamais une limite. Chaque matin, le moteur tient
+compte de la longueur reelle des titres et des textes. Une rubrique trop longue
+passe sur une nouvelle A4 au lieu d'etre tronquee ou reduite illisiblement. Les
+sujets courts sont regroupes en 2 x 2 et le decoupage evite les fins de cahier
+`3 + 1` qui laisseraient une page presque vide. Les pages peu chargees agrandissent
+leur composition et peuvent recevoir une illustration editoriale ; les pages
+denses gagnent automatiquement une ou plusieurs continuations. Aucun article
+n'est omis pour respecter un nombre de pages predefini.
+
+Une legere reduction, limitee a 95 %, reste autorisee uniquement pour absorber
+les minuscules ecarts de rendu des polices ou du pilote PDF. Un vrai surplus de
+contenu declenche toujours une page supplementaire.
+
 Lorsqu'une rubrique **En bref** apparait en une, le journal ajoute automatiquement
 un cahier juste apres la couverture. En STANDARD et EXTENDED, il occupe deux pages
 de trois articles ; en COMPACT, une page. Les textes publics sont enrichis par le
@@ -118,9 +134,22 @@ utilise pour un flux personnel sans `extracteur_public: true`.
 Le cahier **Technologie & IA** possede sa propre collecte et ses syntheses
 developpees. Le cahier **Veille & curiosites** donne davantage de place aux
 sujets sciences/culture, au brief Hermes, aux lettres suivies et aux signaux
-sociaux. La derniere page est produite localement : mots croises variables selon
-la date, vocabulaire tech, mot francais et calcul mental. Elle ne consomme aucune
-API.
+sociaux. La derniere page contient mots croises, vocabulaire tech, mot francais
+et calcul mental. En production, Jarvis conserve sans expiration toutes les
+pages deja produites dans `notes/signal_matin_learning_history.json` (fichier
+local ignore par Git) et refuse un mot francais, un calcul, une grille ou meme
+une reponse de mots croises deja utilises.
+Les anciens JSON d'edition sont importes automatiquement lors de la premiere
+migration. Regenerer une meme date restitue la meme page.
+
+La reserve integree fonctionne sans API. Lorsqu'elle est epuisee, Jarvis demande
+de nouveaux mots et termes de grille au modele Ollama local ; si Ollama est
+indisponible, il utilise le modele cloud economique deja configure. Les reponses
+sont toujours comparees a tout l'historique local avant d'etre acceptees. Sans
+aucun modele disponible, la rubrique concernee est omise plutot que de recycler
+silencieusement un ancien contenu. Pour
+conserver la garantie anti-doublon apres une reinstallation, sauvegarder le
+fichier d'historique avec les autres donnees locales.
 
 Le moteur limite le nombre et la longueur des articles par composition. Il ne
 retrecit pas arbitrairement le corps de texte pour faire rentrer trop de contenu.
@@ -172,6 +201,41 @@ signal_matin:
 
 Ne place jamais de notes, priorites, noms d'imprimante ou flux prives dans
 `config.example.yaml`.
+
+## Brief Tech & IA (facultatif)
+
+> ⚠️ Experimental : valide sur des generations de test, pas encore sur une
+> automatisation quotidienne de longue duree.
+
+Avec `brief_tech: true`, le cahier « Technologie & IA » est remplace par un brief
+analytique : l'essentiel en 5 lignes, 5 a 8 informations du jour avec une
+citation courte, 2 ou 3 analyses (contexte, enjeux geopolitiques et economiques,
+gagnants et perdants, lectures divergentes, incertitudes, niveau de confiance),
+un fil rouge, des questions pour exercer l'esprit critique et ce qui n'a pas pu
+etre etabli.
+
+Chaine de production (`core/signal_matin/tech_brief.py`) :
+
+1. Les flux tech publics (`flux_tech`, sinon la veille par defaut) fournissent
+   les titres candidats des dernieres `brief_fenetre_heures`.
+2. Le modele economique trie les titres ; les articles retenus sont lus en
+   entier par Jarvis.
+3. Si `brief_hermes` est actif et qu'Hermes dispose d'une recherche web, il
+   propose des pages de contexte. Hermes ne recoit que des sujets publics ; Jarvis
+   lit lui-meme chaque page proposee.
+4. Le modele `modele_brief` redige a partir de ces seuls textes, puis une
+   relecture retire toute affirmation non soutenue par sa source.
+5. Chaque citation est recherchee mot pour mot dans le texte de sa source ; une
+   information dont la citation est introuvable est supprimee. Une page de
+   contexte non datee ne peut pas devenir une « information du jour ».
+
+Le papier affiche le nom du media et la date, jamais les adresses web. Un
+historique local dans `notes/` evite de repeter un sujet deja traite, sauf fait
+nouveau. Si une etape echoue, si moins de deux informations sont verifiees ou si
+`brief_budget_secondes` est depasse, le cahier tech classique est imprime a la
+place. Le brief allonge la generation de plusieurs minutes : prevoir une heure
+de lancement plus precoce et une duree d'execution suffisante pour la tache
+planifiee.
 
 ## JSON externe
 
@@ -231,6 +295,25 @@ Pour envoyer reellement le PDF a la file configuree :
 ```powershell
 uv run generate-morning-paper print --confirm
 ```
+
+### Programmer une impression ponctuelle
+
+Pour imprimer dans quelques minutes sans imbriquer deux taches Windows :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/programmer_impression_signal_matin.ps1 -DansMinutes 10
+```
+
+Ou a une heure precise (le lendemain si l'heure est deja passee) :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/programmer_impression_signal_matin.ps1 -Heure "18:30"
+```
+
+Le planificateur copie directement l'action d'impression validee de la tache
+quotidienne. Il ne tente pas de lancer cette tache depuis une autre tache : ce
+schema peut etre bloque par le jeton Windows limite tout en retournant un faux
+code de succes. La programmation ponctuelle expire et se supprime ensuite.
 
 Pour une edition en recto verso, bord long :
 
@@ -313,7 +396,8 @@ uv run python -m unittest tests.test_signal_matin tests.test_journal_matin -v
 ```
 
 Les tests verifient le schema, les sections vides, les trois densites, les
-debordements Chromium, le nombre de pages et les dimensions A4 du PDF.
+debordements Chromium, la pagination dynamique sans omission, l'equilibrage des
+pages de continuation, le nombre de pages et les dimensions A4 du PDF.
 
 ## Limites actuelles
 

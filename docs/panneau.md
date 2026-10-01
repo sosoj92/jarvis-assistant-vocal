@@ -50,6 +50,8 @@ danger (choix de modèle, modèle d'Hermes) — **jamais une règle de sécurit�
 - **Modèles cloud OpenAI** : catalogue `gpt-5.6-luna/terra/sol` et
   `gpt-6-astra`, tarifs, vision, appels d'outils et vérification de l'accès réel
   via la clé API locale.
+- Le profil **hybride** mémorise son propre modèle quotidien (`luna` par défaut
+  chez OpenAI, `haiku` chez Claude), séparément du modèle du profil qualité.
 - **Modèle actif par backend** : local (Ollama), cloud (OpenAI ou Anthropic),
   Whisper et **Hermes**. Le LLM cloud/local change au tour suivant ;
   Whisper demande encore un redémarrage.

@@ -10,11 +10,13 @@ cloud:
 
 | Mode | LLM | Voix | Usage |
 |---|---|---|---|
-| **hybride** | profil quotidien OpenAI ou Claude/Anthropic | moteur configuré | chemin cloud rapide + tâches de fond Hermes |
+| **hybride** | modèle quotidien économique : Luna pour OpenAI, Haiku pour Claude par défaut | moteur configuré | chemin cloud rapide + tâches de fond Hermes |
 | **qualité** | profil le plus puissant du même fournisseur | moteur configuré | demandes exigeantes |
 | **local** | Ollama (`qwen3.5:4b`...) | Piper/Kokoro/Windows | **100 % hors ligne**, gratuit |
 
 Le **STT reste local dans les trois modes** (faster-whisper, GPU si dispo).
+Le fournisseur et le modèle quotidien sont mémorisés ensemble ; le modèle du
+profil qualité reste un réglage séparé. Tout choix manuel reste prioritaire.
 
 ## Passer en mode local
 

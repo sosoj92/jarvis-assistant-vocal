@@ -8,7 +8,7 @@ n'est pas ajouté.
 ## OpenAI
 
 Jarvis utilise l'API **Responses** d'OpenAI pour la conversation, la vision et les
-appels d'outils. Le modèle recommandé au quotidien est `gpt-5.6-terra` ;
+appels d'outils. Le modèle recommandé au quotidien est `gpt-5.6-luna` ;
 `gpt-6-astra` est disponible pour le mode qualité.
 
 ## Quel cerveau reçoit quelle tâche ?
@@ -80,7 +80,7 @@ cloud:
 
 openai:
   cle: "sk-proj-..."
-  modele: "gpt-5.6-terra"
+  modele: "gpt-5.6-luna"
   modele_qualite: "gpt-6-astra"
   raisonnement: low
   raisonnement_qualite: high
@@ -105,8 +105,8 @@ Modèles proposés :
 
 | Modèle | Usage conseillé | Outils | Vision |
 |---|---|---|---|
-| `gpt-5.6-luna` | très économique / rapide | oui | oui |
-| `gpt-5.6-terra` | quotidien, meilleur équilibre | oui | oui |
+| `gpt-5.6-luna` | quotidien recommandé, très économique et rapide | oui | oui |
+| `gpt-5.6-terra` | équilibre renforcé si Luna ne suffit pas | oui | oui |
 | `gpt-5.6-sol` | qualité professionnelle | oui | oui |
 | `gpt-6-astra` | raisonnement et tâches complexes | oui | oui |
 

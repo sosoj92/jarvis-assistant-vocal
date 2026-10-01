@@ -9,7 +9,7 @@
 | Mode | LLM | Voix | Pour quoi |
 |---|---|---|---|
 | **local** | Ollama | Piper/Kokoro/Windows | tout local, **rien ne sort**, gratuit |
-| **hybride** *(défaut)* | profil quotidien du fournisseur choisi | moteur vocal configuré | demandes courtes en cloud ; **tâches de fond → Hermes** |
+| **hybride** *(défaut)* | modèle quotidien économique du fournisseur choisi : Luna pour OpenAI, Haiku pour Claude | moteur vocal configuré | demandes courtes en cloud ; **tâches de fond → Hermes** |
 | **qualite** | profil puissant du même fournisseur | moteur vocal configuré | modèle le plus capable pour les demandes exigeantes |
 
 *(L'ancien `mode: cloud` reste accepté = `hybride`.)* Changement **à la voix** :
@@ -19,6 +19,12 @@
 longue, veille) est confiée à Hermes via `deleguer_a_hermes` — le modèle l'appelle
 de lui-même (« je confie ça à Hermes »), plus besoin de le dire. Les réflexes
 restent sur le chemin court de Jarvis (rapide, économique).
+
+Le profil hybride contient bien **deux choix persistants** : le fournisseur et
+son modèle quotidien. Par défaut, Jarvis retient `gpt-5.6-luna` pour OpenAI et
+`claude-haiku-4-5` pour Anthropic. Un modèle choisi explicitement dans le HUD,
+le panneau ou `config.yaml` reste prioritaire ; Jarvis ne le remplace pas en
+silence. Le mode qualité possède son modèle séparé.
 
 ## Suivi des coûts (centralisé, persisté)
 
@@ -97,7 +103,7 @@ ne doivent jamais être figés dans le code sans date ni possibilité de les mod
 
 | Usage | Backend | Coût approx. |
 |---|---|---|
-| Commande domotique / timer / scène | hybride (`gpt-5.6-terra`) | dépend du contexte, généralement quelques millièmes de dollar |
+| Commande domotique / timer / scène | hybride (`gpt-5.6-luna` par défaut) | dépend du contexte, généralement une petite fraction de centime |
 | Question courte parlée (réponse ElevenLabs ~200 car.) | hybride | ~0,02 $ (voix) + LLM |
 | Question avec vision (capture d'écran) | hybride | ~0,01–0,03 $ |
 | Analyse / recherche de fond | Hermes | plus élevé (modèle fort, longue) |
