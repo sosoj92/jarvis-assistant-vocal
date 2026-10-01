@@ -307,6 +307,25 @@ footer,
 .notes-space .section-header { border-top-width: .7mm; }
 .writing-lines { height: 84mm; }
 .writing-lines span { display: block; height: 10.5mm; border-top: var(--hairline) solid var(--shade); }
+/* Sans agenda : priorites puis rappels coulent sur deux colonnes equilibrees,
+   comme un texte de journal, au lieu de laisser une colonne presque vide. */
+.day-grid.day-grid-tasks { display: block; column-count: 2; column-gap: 8mm; column-rule: var(--hairline) solid var(--ink); }
+.day-grid.day-grid-tasks > div + div { border-left: 0; padding-left: 0; }
+.day-grid-tasks .task-block + .task-block, .day-grid-tasks > div + div .task-block { margin-top: 4mm; }
+.day-grid-tasks .task-block { break-inside: auto; page-break-inside: auto; }
+.day-grid-tasks .numbered-list li { break-inside: avoid; }
+.day-grid-tasks .section-header { break-after: avoid; }
+/* Carnet ajuste par la pagination a la place restante (hauteur posee en JS). */
+.page-filler.is-sized { display: flex; flex-direction: column; overflow: hidden; }
+.page-filler.is-sized .writing-lines {
+  flex: 1 1 auto; height: auto; min-height: 0;
+  background: repeating-linear-gradient(to bottom, var(--shade) 0 var(--hairline), transparent var(--hairline) 10.5mm);
+}
+.page-filler.is-sized .writing-lines span { display: none; }
+/* Rubrique remontee sur une page peu remplie au lieu d'occuper une page presque vide. */
+.merged-section { margin-top: 7mm; }
+.merged-section > .section-header { margin-bottom: 4mm; border-top-width: .7mm; }
+.merged-section > .section-header h2 { font-size: 18pt; }
 
 .digest-item { padding: 0 0 3mm; margin-bottom: 3mm; border-bottom: var(--hairline) solid var(--shade); }
 .digest-item h3 { margin-bottom: 1mm; font-size: 12pt; line-height: 1.08; }

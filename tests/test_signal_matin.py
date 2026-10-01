@@ -14,7 +14,7 @@ from pypdf import PdfReader
 
 from core.signal_matin.daily_learning import construire_apprentissage_du_jour
 from core.signal_matin.mock_data import construire_demo
-from core.signal_matin.models import DensityMode, MorningEdition, WordOfTheDay
+from core.signal_matin.models import DensityMode, MorningEdition, TaskItem, WordOfTheDay
 from core.signal_matin.normalizer import normaliser_edition
 from core.signal_matin.pdf import (
     _fit_moderate_overflow,
@@ -357,10 +357,12 @@ class SignalMatinRenderTests(unittest.TestCase):
             construire_demo(dt.date(2026, 9, 26)), mode="extended")
 
     def test_no_major_overflow(self):
+        # EXTENDED : la rubrique tech de la demo remonte sur la page « Ta journee »
+        # au lieu d'occuper une page peu remplie (regroupement des pages creuses).
         expected = {
             DensityMode.COMPACT: 4,
             DensityMode.STANDARD: 7,
-            DensityMode.EXTENDED: 7,
+            DensityMode.EXTENDED: 6,
         }
         demo = construire_demo(dt.date(2026, 9, 26))
         for mode, page_count in expected.items():
@@ -375,7 +377,7 @@ class SignalMatinRenderTests(unittest.TestCase):
             path = Path(directory) / "signal-matin.pdf"
             generer_pdf(self.edition, path)
             reader = PdfReader(str(path))
-            self.assertEqual(len(reader.pages), 7)
+            self.assertEqual(len(reader.pages), 6)
             for page in reader.pages:
                 width = float(page.mediabox.width)
                 height = float(page.mediabox.height)
@@ -402,6 +404,7 @@ class SignalMatinRenderTests(unittest.TestCase):
             """
         )
         html = render_html(self.edition, css=css)
+        normal_pages = len(inspecter_html(render_html(self.edition)))
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             try:
@@ -410,7 +413,8 @@ class SignalMatinRenderTests(unittest.TestCase):
                 page.evaluate("document.fonts.ready")
                 result = _paginate_adaptive(page)
                 layout = _measure(page)
-                self.assertGreater(result["pages"], 7)
+                # Un contenu bien plus long que d'habitude cree des pages de suite.
+                self.assertGreater(result["pages"], normal_pages)
                 self.assertEqual(result["unresolved"], 0)
                 self.assertFalse([item for item in layout if item["overflow"]], layout)
                 adaptive = [item for item in layout if item["adaptive"]]
@@ -419,6 +423,32 @@ class SignalMatinRenderTests(unittest.TestCase):
                     item["used_ratio"] >= 0.52 or item["sparse"]
                     for item in adaptive
                 ), adaptive)
+            finally:
+                browser.close()
+
+    def test_carnet_et_pages_creuses_ne_coutent_jamais_une_page(self):
+        # Cas reel : journee sans agenda, huit rappels. Avant, la colonne agenda
+        # restait vide et le carnet partait seul sur une page a moitie blanche.
+        demo = construire_demo(dt.date(2026, 9, 26))
+        rappels = [TaskItem(title=f"Rappel {numero}") for numero in range(8)]
+        edition = normaliser_edition(
+            demo.model_copy(update={"agenda": [], "reminders": rappels}), mode="extended")
+        html = render_html(edition)
+        self.assertIn("day-grid-tasks", html)
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                page = browser.new_page(viewport={"width": 1280, "height": 900})
+                page.set_content(html, wait_until="load")
+                page.evaluate("document.fonts.ready")
+                result = _paginate_adaptive(page)
+                self.assertEqual(result["unresolved"], 0)
+                pages_sans_contenu = page.evaluate("""() => [...document.querySelectorAll('.sheet')]
+                  .filter(sheet => ![...sheet.querySelectorAll(':scope > .page-content > *')].some(node =>
+                    !node.hidden && !node.classList.contains('page-filler')
+                    && !node.classList.contains('section-header')
+                    && !node.classList.contains('adaptive-section-header'))).length""")
+                self.assertEqual(pages_sans_contenu, 0)
             finally:
                 browser.close()
 

@@ -502,9 +502,11 @@ def news_context_block(edition: MorningEdition, *, include_lead: bool = True) ->
 
 
 def notes_space(tall: bool = False) -> str:
+    """Carnet ligne. `page-filler` : la pagination l'ajuste a la place restante
+    et le retire plutot que de lui consacrer une page entiere."""
     lines = "".join('<span aria-hidden="true"></span>' for _ in range(8))
     return (
-        f'<section class="notes-space{" is-tall" if tall else ""}">'
+        f'<section class="notes-space page-filler{" is-tall" if tall else ""}">'
         f'{section_header("Carnet du jour", "Notes, idees, choses a retenir")}'
         f'<div class="writing-lines">{lines}</div></section>'
     )
@@ -519,7 +521,7 @@ def _page(edition: MorningEdition, number: int, label: str, content: str,
         <span>{_e(_date_fr(edition.edition.date))}</span>
       </header>"""
     return f"""
-    <section class="sheet page-{number}{f' page-{slug}' if slug else ''}" data-page="{number}" data-label="{_e(label)}">
+    <section class="sheet page-{number}{f' page-{slug}' if slug else ''}" data-page="{number}" data-label="{_e(label)}"{' data-merge="false"' if first else ''}>
       {header}
       <main class="page-content">{content}</main>
       <footer><span>{_e(edition.edition.title)} / {_e(edition.edition.subtitle)}</span><span>{number}</span></footer>
@@ -634,11 +636,18 @@ def _page_day(edition: MorningEdition, number: int) -> str:
     <div class="day-intro"><p class="dropcap">{_e(_truncate(edition.personal.greeting, 220))}</p>
     {f'<p class="free-window"><span>Fenetre libre</span>{_e(_truncate(edition.personal.free_window, 240))}</p>' if edition.personal.free_window else ''}</div>"""
     body = section_header("Ta journee", "Direction et respiration") + intro
-    body += '<div class="day-grid"><div>' + agenda_block(edition.agenda, 10)
-    body += '</div><div>'
-    body += task_list("Tes priorites", edition.priorities, 8)
-    body += task_list("A ne pas oublier", edition.reminders, 8)
-    body += '</div></div>'
+    priorities = task_list("Tes priorites", edition.priorities, 8)
+    reminders = task_list("A ne pas oublier", edition.reminders, 8)
+    if edition.agenda:
+        body += '<div class="day-grid"><div>' + agenda_block(edition.agenda, 10)
+        body += '</div><div>' + priorities + reminders + '</div></div>'
+    else:
+        # Sans agenda, la colonne de gauche resterait vide : les listes se
+        # partagent la largeur au lieu de s'empiler dans une seule colonne.
+        lists = [block for block in (priorities, reminders) if block]
+        body += '<div class="day-grid day-grid-tasks">' + "".join(
+            f"<div>{block}</div>" for block in lists
+        ) + '</div>'
     if edition.personal.note:
         body += f'<aside class="editorial-aside"><span>Note personnelle</span><p>{_e(_truncate(edition.personal.note, 500))}</p></aside>'
     # L'absence d'agenda ne signifie pas que la page est vide : des rappels et
