@@ -6,6 +6,19 @@ from core import panneau
 
 
 class PanneauSwitchTests(unittest.TestCase):
+    def test_hybride_sans_modele_choisit_le_defaut_economique(self):
+        def lire(cle, default=None):
+            return "cle-factice" if cle == "openai.cle" else default
+
+        with patch.object(panneau, "reglage", side_effect=lire), \
+                patch.object(panneau, "definir") as ecrire, \
+                patch("core.routage.definir_mode", return_value=True):
+            resultat = panneau._definir_actif(
+                "cloud", "", profil="hybride", fournisseur="openai")
+
+        self.assertTrue(resultat["ok"])
+        ecrire.assert_any_call("openai.modele", "gpt-5.6-luna")
+
     def test_gpt6_qualite_change_provider_mode_et_modele(self):
         def lire(cle, default=None):
             return "cle-factice" if cle == "openai.cle" else default

@@ -199,16 +199,18 @@ def _etat_controles():
 
     modeles_openai = list(openai.get("catalogue", []))
     noms_openai = {m.get("nom") for m in modeles_openai}
-    for nom in (reglage("openai.modele", "gpt-5.6-terra"),
-                reglage("openai.modele_qualite", "gpt-6-astra")):
+    for nom in (reglage("openai.modele", cloud.modele_par_defaut("openai")),
+                reglage("openai.modele_qualite",
+                        cloud.modele_par_defaut("openai", qualite=True))):
         if nom and nom not in noms_openai:
             modeles_openai.append({"nom": nom, "role": "Configure manuellement",
                                     "accessible": None})
             noms_openai.add(nom)
 
     modeles_anthropic = []
-    for nom in (reglage("anthropic.modele", "claude-haiku-4-5"),
-                reglage("anthropic.modele_qualite", "claude-sonnet-4-5")):
+    for nom in (reglage("anthropic.modele", cloud.modele_par_defaut("anthropic")),
+                reglage("anthropic.modele_qualite",
+                        cloud.modele_par_defaut("anthropic", qualite=True))):
         if nom and nom not in modeles_anthropic:
             modeles_anthropic.append(nom)
 
@@ -229,12 +231,18 @@ def _etat_controles():
             },
             "courants": {
                 "openai": {
-                    "hybride": reglage("openai.modele", "gpt-5.6-terra"),
-                    "qualite": reglage("openai.modele_qualite", "gpt-6-astra"),
+                    "hybride": reglage(
+                        "openai.modele", cloud.modele_par_defaut("openai")),
+                    "qualite": reglage(
+                        "openai.modele_qualite",
+                        cloud.modele_par_defaut("openai", qualite=True)),
                 },
                 "anthropic": {
-                    "hybride": reglage("anthropic.modele", "claude-haiku-4-5"),
-                    "qualite": reglage("anthropic.modele_qualite", "claude-sonnet-4-5"),
+                    "hybride": reglage(
+                        "anthropic.modele", cloud.modele_par_defaut("anthropic")),
+                    "qualite": reglage(
+                        "anthropic.modele_qualite",
+                        cloud.modele_par_defaut("anthropic", qualite=True)),
                 },
             },
             "modeles": {

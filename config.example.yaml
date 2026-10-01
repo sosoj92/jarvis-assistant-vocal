@@ -3,17 +3,17 @@
 
 mode: hybride                  # local | hybride | qualite  (voir docs/costs.md)
                                #  local   = tout local (Ollama + Piper), rien ne sort
-                               #  hybride = DEFAUT : profil quotidien du fournisseur cloud ;
+                               #  hybride = DEFAUT : modele quotidien economique du fournisseur ;
                                #            taches de fond confiees a Hermes
                                #  qualite = profil le plus puissant du meme fournisseur
                                # (l'ancien "cloud" reste accepte = hybride)
 
 cloud:
-  fournisseur: openai          # openai | anthropic (Claude)
+  fournisseur: openai          # openai | anthropic (Claude) ; le profil memorise aussi son modele
 
 openai:
   cle: "sk-proj-..."           # cle API Platform ; l'abonnement ChatGPT ne la remplace pas
-  modele: "gpt-5.6-terra"      # mode hybride : equilibre qualite/cout
+  modele: "gpt-5.6-luna"       # mode hybride : choix quotidien economique recommande
   modele_qualite: "gpt-6-astra" # mode qualite : flagship GPT-6
   raisonnement: low            # none|low|medium|high|xhigh|max (selon le modele)
   raisonnement_qualite: high

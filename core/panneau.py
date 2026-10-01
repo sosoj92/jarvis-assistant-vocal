@@ -61,10 +61,10 @@ CATALOGUE_LLM = [
 # Catalogue cloud verifie dans la documentation OpenAI. L'acces effectif depend
 # du projet API de l'utilisateur : le panneau le confirme via GET /v1/models.
 CATALOGUE_OPENAI = [
-    {"nom": "gpt-5.6-luna", "role": "Rapide / economique",
+    {"nom": "gpt-5.6-luna", "role": "Quotidien recommande / economique",
      "prix_entree": 0.20, "prix_sortie": 1.20,
      "tool_calling": True, "vision": True, "francais": True},
-    {"nom": "gpt-5.6-terra", "role": "Equilibre (hybride conseille)",
+    {"nom": "gpt-5.6-terra", "role": "Equilibre renforce / plus couteux",
      "prix_entree": 2.00, "prix_sortie": 12.00,
      "tool_calling": True, "vision": True, "francais": True},
     {"nom": "gpt-5.6-sol", "role": "Qualite professionnelle",
@@ -200,12 +200,19 @@ def _modeles():
         "actifs": {
             "local": reglage("ollama.modele", "qwen2.5:7b"),
             "cloud": cloud.modele(qualite=(mode == "qualite")),
-            "cloud_hybride": (reglage("openai.modele", "gpt-5.6-terra")
+            "cloud_hybride": (reglage(
+                "openai.modele", cloud.modele_par_defaut("openai"))
                                if cloud.fournisseur() == "openai"
-                               else reglage("anthropic.modele", "claude-haiku-4-5")),
-            "cloud_qualite": (reglage("openai.modele_qualite", "gpt-6-astra")
+                               else reglage(
+                                   "anthropic.modele",
+                                   cloud.modele_par_defaut("anthropic"))),
+            "cloud_qualite": (reglage(
+                "openai.modele_qualite",
+                cloud.modele_par_defaut("openai", qualite=True))
                                if cloud.fournisseur() == "openai"
-                               else reglage("anthropic.modele_qualite", "claude-sonnet-4-5")),
+                               else reglage(
+                                   "anthropic.modele_qualite",
+                                   cloud.modele_par_defaut("anthropic", qualite=True))),
             "cloud_fournisseur": cloud.fournisseur(),
             "whisper": whisper_actif,
             "hermes": _hermes_modele(),
@@ -399,14 +406,15 @@ def _hermes_definir_modele(modele):
 
 def _definir_actif(backend, modele, profil="hybride", fournisseur=""):
     backend = (backend or "").lower()
-    if not modele:
-        return {"ok": False, "message": "Modele manquant."}
     if backend == "local":
+        if not modele:
+            return {"ok": False, "message": "Modele manquant."}
         definir("ollama.modele", modele)
         from core.routage import definir_mode
         definir_mode("local", raison="panneau")
         return {"ok": True, "message": f"Backend LOCAL actif, modele {modele}."}
     if backend == "cloud":
+        from core import cloud
         fournisseur = (fournisseur or "openai").lower()
         if fournisseur not in {"openai", "anthropic"}:
             return {"ok": False, "message": "Fournisseur cloud inconnu."}
@@ -415,6 +423,8 @@ def _definir_actif(backend, modele, profil="hybride", fournisseur=""):
         if fournisseur == "anthropic" and not reglage("anthropic.cle", ""):
             return {"ok": False, "message": "Cle Anthropic absente dans config.yaml."}
         profil = "qualite" if profil == "qualite" else "hybride"
+        modele = modele or cloud.modele_par_defaut(
+            fournisseur, qualite=(profil == "qualite"))
         definir("cloud.fournisseur", fournisseur)
         definir(f"{fournisseur}.modele_qualite" if profil == "qualite"
                 else f"{fournisseur}.modele", modele)
@@ -422,9 +432,13 @@ def _definir_actif(backend, modele, profil="hybride", fournisseur=""):
         definir_mode(profil, raison="panneau")
         return {"ok": True, "message": f"{fournisseur.title()} {modele} actif en mode {profil}."}
     if backend == "whisper":
+        if not modele:
+            return {"ok": False, "message": "Modele manquant."}
         definir("whisper.modele", modele)
         return {"ok": True, "message": f"Whisper -> {modele}. Redemarre Jarvis."}
     if backend == "hermes":
+        if not modele:
+            return {"ok": False, "message": "Modele manquant."}
         return _hermes_definir_modele(modele)
     return {"ok": False, "message": f"Backend inconnu : {backend}."}
 

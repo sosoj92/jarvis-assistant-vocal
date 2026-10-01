@@ -17,6 +17,21 @@ from core.config import reglage
 
 LOG = logging.getLogger("jarvis")
 
+# Profils par defaut : le mode hybride privilegie le meilleur compromis
+# cout/latence pour les reflexes quotidiens. Les demandes de fond partent vers
+# Hermes et le profil qualite reste disponible ponctuellement. Une valeur
+# explicite dans config.yaml gagne toujours sur ces recommandations.
+PROFILS_CLOUD = {
+    "openai": {
+        "hybride": "gpt-5.6-luna",
+        "qualite": "gpt-6-astra",
+    },
+    "anthropic": {
+        "hybride": "claude-haiku-4-5",
+        "qualite": "claude-sonnet-4-5",
+    },
+}
+
 
 def fournisseur() -> str:
     """Fournisseur cloud actif : openai ou anthropic."""
@@ -26,6 +41,15 @@ def fournisseur() -> str:
     # Une ancienne config sans bloc cloud continue de fonctionner. Des qu'une
     # cle OpenAI est ajoutee, OpenAI devient naturellement le choix par defaut.
     return "openai" if reglage("openai.cle", "") else "anthropic"
+
+
+def modele_par_defaut(nom_fournisseur: str = "", qualite: bool = False) -> str:
+    """Modele recommande pour un profil, sans lire ni modifier config.yaml."""
+    nom_fournisseur = (nom_fournisseur or fournisseur()).strip().lower()
+    if nom_fournisseur not in PROFILS_CLOUD:
+        nom_fournisseur = "openai"
+    profil = "qualite" if qualite else "hybride"
+    return PROFILS_CLOUD[nom_fournisseur][profil]
 
 
 def modele(qualite: bool = False, surcharge: str = "") -> str:
@@ -40,9 +64,11 @@ def modele(qualite: bool = False, surcharge: str = "") -> str:
             return candidat
     if fournisseur() == "openai":
         cle = "openai.modele_qualite" if qualite else "openai.modele"
-        return str(reglage(cle, "gpt-6-astra" if qualite else "gpt-5.6-terra"))
+        return str(reglage(cle, modele_par_defaut("openai", qualite))
+                   or modele_par_defaut("openai", qualite))
     cle = "anthropic.modele_qualite" if qualite else "anthropic.modele"
-    return str(reglage(cle, "claude-sonnet-4-5" if qualite else "claude-haiku-4-5"))
+    return str(reglage(cle, modele_par_defaut("anthropic", qualite))
+               or modele_par_defaut("anthropic", qualite))
 
 
 def client_openai():
