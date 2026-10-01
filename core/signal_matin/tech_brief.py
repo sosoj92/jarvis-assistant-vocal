@@ -20,6 +20,7 @@ import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlparse
 
 from core import cloud
 from core.config import reglage
@@ -288,7 +289,7 @@ def _lire_textes(urls: list[str], allow_proxy: bool) -> list[str]:
 def _pistes_hermes(sujets: list[dict], urls_connues: set[str], jour: dt.date,
                    rapport: dict, timeout: int = 420) -> list[dict]:
     """Hermes propose des pages de contexte ; Jarvis les lira et verifiera lui-meme."""
-    if not sujets or not bool(reglage("signal_matin.brief_hermes", True)):
+    if not sujets:
         return []
     liste = "\n".join(
         f"{numero}. {s.get('sujet')} — recherche : {s.get('recherche') or s.get('sujet')}"
@@ -325,6 +326,90 @@ Réponds uniquement par un tableau JSON : [{{"sujet": 1, "url": "https://...", "
         pistes.append({"url": url, "titre": _txt(ligne.get("titre"), 240),
                        "media": _txt(ligne.get("media") or "Source web", 120)})
     return pistes[:8]
+
+
+def _pistes_web(sujets: list[dict], urls_connues: set[str], rapport: dict) -> list[dict]:
+    """Jarvis cherche lui-meme les pages de contexte (DuckDuckGo, sans cle d'API).
+
+    Aucun credential n'est en jeu et rien ne transite par Hermes. Les pages
+    proposees sont ensuite lues en entier et verifiees comme les articles.
+    """
+    if not sujets:
+        return []
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        rapport["contexte"] = "recherche web non installee"
+        return []
+    candidats: list[dict] = []
+    vues = set(urls_connues)
+    try:
+        with DDGS() as ddgs:
+            for numero, sujet in enumerate(sujets, start=1):
+                requetes = dict.fromkeys(
+                    r for r in (str(sujet.get("recherche") or "").strip(),
+                                str(sujet.get("sujet") or "").strip()) if r
+                )
+                for requete in requetes:
+                    for resultat in ddgs.text(requete, region="wt-wt", max_results=6) or []:
+                        url = str(resultat.get("href") or "").strip()
+                        if not url.startswith(("http://", "https://")) or url in vues:
+                            continue
+                        vues.add(url)
+                        hote = (urlparse(url).hostname or "Source web").removeprefix("www.")
+                        candidats.append({
+                            "sujet": numero, "url": url, "titre": _txt(resultat.get("title"), 240),
+                            "media": _txt(hote, 120), "extrait": _txt(resultat.get("body"), 200),
+                        })
+    except Exception as erreur:
+        LOG.warning("Signal Matin : recherche de contexte indisponible : %s", erreur)
+        rapport["contexte"] = f"recherche web indisponible ({type(erreur).__name__})"
+    pistes = _trier_sources(candidats, sujets, rapport)
+    if not isinstance(rapport.get("contexte"), str):
+        rapport["contexte"] = {"source": "web", "candidats": len(candidats), "pistes": len(pistes)}
+    return pistes
+
+
+def _trier_sources(candidats: list[dict], sujets: list[dict], rapport: dict) -> list[dict]:
+    """Garde au plus 3 sources fiables par sujet ; repli sur l'ordre du moteur si le tri echoue."""
+    def premiers(liste: list[dict]) -> list[dict]:
+        gardes, par_sujet = [], {}
+        for candidat in liste:
+            if par_sujet.get(candidat["sujet"], 0) < 3:
+                par_sujet[candidat["sujet"]] = par_sujet.get(candidat["sujet"], 0) + 1
+                gardes.append(candidat)
+        return gardes[:8]
+
+    if len(candidats) <= 3:
+        return premiers(candidats)
+    lignes = [{"i": i, "sujet": c["sujet"], "media": c["media"], "titre": c["titre"],
+               "extrait": c["extrait"]} for i, c in enumerate(candidats)]
+    liste_sujets = [{"sujet": n, "intitule": s.get("sujet")} for n, s in enumerate(sujets, start=1)]
+    try:
+        reponse = _cloud(
+            "Tu selectionnes des sources pour un brief d'actualite exigeant. Reponds uniquement "
+            "par l'objet JSON demande.",
+            "Pour chaque sujet, choisis au plus 3 pages de contexte, par ordre de preference : "
+            "sources primaires (textes officiels, communiques, etudes), institutions, puis medias "
+            "reconnus pour leur fiabilite. Ecarte les agregateurs, blogs de referencement, contenus "
+            "sponsorises, sites partisans et pages sans rapport avec le sujet. Mieux vaut moins de "
+            "sources que des sources douteuses.\n"
+            f"Sujets : {json.dumps(liste_sujets, ensure_ascii=False)}\n"
+            f"Candidats : {json.dumps(lignes, ensure_ascii=False)}\n"
+            'Format : {"choix": [0, 3, 5]}',
+            800, "signal_matin.modele_selection_brief",
+        )
+        indices = _json_objet(reponse).get("choix")
+        if not isinstance(indices, list):
+            raise ValueError("selection illisible")
+        choisis = [candidats[int(i)] for i in dict.fromkeys(indices)
+                   if str(i).isdigit() and int(i) < len(candidats)]
+    except Exception as erreur:
+        LOG.info("Signal Matin : tri des sources de contexte indisponible : %s", erreur)
+        rapport["tri_contexte"] = "repli sur l'ordre du moteur"
+        return premiers(candidats)
+    rapport["tri_contexte"] = f"{len(choisis)} source(s) retenue(s) sur {len(candidats)}"
+    return premiers(choisis)
 
 
 def _verifier_texte(texte: str, sources: dict[int, dict], retraits: list[str]) -> str:
@@ -493,9 +578,17 @@ def construire_brief(
     # et la relecture : un Hermes lent ne fait jamais perdre tout le brief.
     reserve_redaction = 360
     restant = budget_s - (time.monotonic() - debut) - reserve_redaction
-    if restant >= 90:
-        pistes = _pistes_hermes(sujets, {s["url"] for s in sources.values()} | urls_passees,
-                                now.date(), rapport, timeout=int(restant))
+    # web : Jarvis cherche lui-meme (DuckDuckGo, sans cle) ; hermes : agent avec
+    # recherche web ; aucun : analyses fondees sur les seuls articles du jour.
+    mode_contexte = str(reglage("signal_matin.brief_contexte", "web") or "web").lower()
+    connues = {s["url"] for s in sources.values()} | urls_passees
+    if mode_contexte == "aucun":
+        rapport["contexte"] = "desactive"
+    elif restant >= 90:
+        if mode_contexte == "hermes":
+            pistes = _pistes_hermes(sujets, connues, now.date(), rapport, timeout=int(restant))
+        else:
+            pistes = _pistes_web(sujets, connues, rapport)
         for piste, texte in zip(pistes, _lire_textes([p["url"] for p in pistes], True)):
             if len(texte) >= TEXTE_MIN and len(sources) < 30:
                 sources[len(sources) + 1] = {
@@ -504,7 +597,7 @@ def construire_brief(
                 }
         rapport["contexte_lu"] = sum(1 for s in sources.values() if s["role"] == "contexte")
     else:
-        rapport["hermes"] = "saute (plus assez de temps)"
+        rapport["contexte"] = "saute (plus assez de temps)"
 
     matiere = [{
         "source": i, "type": s["role"], "media": s["media"], "titre": s["titre"],

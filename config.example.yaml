@@ -299,7 +299,7 @@ signal_matin:                   # quotidien personnel A4 ; voir docs/signal_mati
   brief_tech: false             # Brief Tech & IA analytique a la place du cahier tech ; voir docs/signal_matin.md
   modele_brief: ""              # redaction + relecture du brief ; ex. "gpt-5.6-terra" ; vide = modele economique actif
   modele_selection_brief: ""    # tri des titres candidats ; vide = modele economique actif
-  brief_hermes: true            # pistes de contexte web par Hermes ; Jarvis relit et verifie chaque page
+  brief_contexte: "web"         # web (Jarvis cherche via DuckDuckGo, sans cle) | hermes | aucun ; Jarvis lit et verifie chaque page
   brief_articles_max: 14        # articles lus en entier et fournis a la redaction
   brief_candidats: 72           # titres collectes dans les flux tech avant le tri
   brief_fenetre_heures: 72      # 24 h privilegiees ; au-dela, seulement un sujet pas encore traite

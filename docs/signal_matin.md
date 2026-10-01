@@ -220,9 +220,11 @@ Chaine de production (`core/signal_matin/tech_brief.py`) :
    les titres candidats des dernieres `brief_fenetre_heures`.
 2. Le modele economique trie les titres ; les articles retenus sont lus en
    entier par Jarvis.
-3. Si `brief_hermes` est actif et qu'Hermes dispose d'une recherche web, il
-   propose des pages de contexte. Hermes ne recoit que des sujets publics ; Jarvis
-   lit lui-meme chaque page proposee.
+3. Pour les analyses, des pages de contexte sont recherchees selon
+   `brief_contexte` : `web` (par defaut, Jarvis interroge DuckDuckGo, sans cle
+   d'API), `hermes` (un agent Hermes disposant d'une recherche web, qui ne recoit
+   que des sujets publics) ou `aucun`. Dans tous les cas, Jarvis lit lui-meme
+   chaque page proposee.
 4. Le modele `modele_brief` redige a partir de ces seuls textes, puis une
    relecture retire toute affirmation non soutenue par sa source.
 5. Chaque citation est recherchee mot pour mot dans le texte de sa source ; une

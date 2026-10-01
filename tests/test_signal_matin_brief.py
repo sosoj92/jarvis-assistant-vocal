@@ -174,7 +174,7 @@ class ChaineCompleteTest(unittest.TestCase):
         textes = {"https://www.theverge.com/a": VERGE, "https://techcrunch.com/b": TECHCRUNCH,
                   "https://www.numerama.com/c": NUMERAMA}
         appels: list[str] = []
-        reglages = {"signal_matin.brief_tech": True, "signal_matin.brief_hermes": False,
+        reglages = {"signal_matin.brief_tech": True, "signal_matin.brief_contexte": "aucun",
                     "signal_matin.modele_brief": "gpt-5.6-terra"}
         with tempfile.TemporaryDirectory() as dossier, \
                 patch.object(tech_brief, "reglage", _reglages(reglages)), \
@@ -211,6 +211,64 @@ class ChaineCompleteTest(unittest.TestCase):
         self.assertIsNone(brief)
         self.assertEqual(statut.state.value, "unavailable")
         self.assertIn("Cahier tech classique", statut.detail)
+
+
+class ContexteWebTest(unittest.TestCase):
+    def _faux_ddgs(self, requetes: list[str]):
+        class FauxDDGS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def text(self, requete, region="", max_results=0):
+                requetes.append(requete)
+                return [
+                    {"href": "https://www.techcrunch.com/deja-lu", "title": "Deja lu"},
+                    {"href": "https://www.reuters.com/a", "title": "Contexte A"},
+                    {"href": "javascript:alert(1)", "title": "Piege"},
+                    {"href": "https://arstechnica.com/b", "title": "Contexte B"},
+                    {"href": "https://example.org/c", "title": "Contexte C"},
+                    {"href": "https://seo-blog.example/d", "title": "Contexte D"},
+                ]
+        return type("M", (), {"DDGS": FauxDDGS})
+
+    def test_le_modele_trie_les_sources_fiables(self):
+        requetes: list[str] = []
+        rapport: dict = {}
+        with patch.dict("sys.modules", {"ddgs": self._faux_ddgs(requetes)}), \
+                patch.object(tech_brief, "_cloud", return_value='{"choix": [1, 0]}'):
+            pistes = tech_brief._pistes_web(
+                [{"sujet": "Gemini 4", "recherche": "modeles a acces restreint"}],
+                {"https://www.techcrunch.com/deja-lu"}, rapport)
+        # Les deux requetes sont faites ; URL deja lue et lien piege ecartes avant le tri.
+        self.assertEqual(requetes, ["modeles a acces restreint", "Gemini 4"])
+        self.assertEqual([p["url"] for p in pistes],
+                         ["https://arstechnica.com/b", "https://www.reuters.com/a"])
+        self.assertEqual(pistes[1]["media"], "reuters.com")
+        self.assertEqual(rapport["contexte"], {"source": "web", "candidats": 4, "pistes": 2})
+
+    def test_tri_en_panne_garde_les_premiers_resultats(self):
+        with patch.dict("sys.modules", {"ddgs": self._faux_ddgs([])}), \
+                patch.object(tech_brief, "_cloud", side_effect=RuntimeError("cloud")):
+            rapport: dict = {}
+            pistes = tech_brief._pistes_web([{"sujet": "x"}], set(), rapport)
+        self.assertEqual(len(pistes), 3)
+        self.assertEqual(rapport["tri_contexte"], "repli sur l'ordre du moteur")
+
+    def test_panne_de_recherche_ne_bloque_pas_le_brief(self):
+        class EnPanne:
+            def __enter__(self):
+                raise RuntimeError("limite atteinte")
+
+            def __exit__(self, *args):
+                return False
+
+        rapport: dict = {}
+        with patch.dict("sys.modules", {"ddgs": type("M", (), {"DDGS": EnPanne})}):
+            self.assertEqual(tech_brief._pistes_web([{"sujet": "x"}], set(), rapport), [])
+        self.assertIn("indisponible", rapport["contexte"])
 
 
 class RSSTest(unittest.TestCase):
