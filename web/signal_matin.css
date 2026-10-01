@@ -170,6 +170,29 @@ footer,
 .briefs-detail-side { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
 .briefs-detail-side .brief-detail { padding: 0 4mm; border-bottom: 0; }
 .briefs-detail-side .brief-detail + .brief-detail { padding-right: 0; border-left: var(--hairline) solid var(--shade); }
+.briefs-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  padding-bottom: 4mm;
+  border-bottom: .7mm solid var(--ink);
+}
+.briefs-detail-grid .brief-detail {
+  padding: 0 4mm 5mm;
+  border-bottom: var(--hairline) solid var(--shade);
+}
+.briefs-detail-grid .brief-detail:nth-child(3n+1) { padding-left: 0; }
+.briefs-detail-grid .brief-detail:nth-child(3n) { padding-right: 0; }
+.briefs-detail-grid .brief-detail:not(:nth-child(3n+1)) { border-left: var(--hairline) solid var(--shade); }
+.briefs-detail-grid .brief-detail:nth-child(n+4) { padding-top: 5mm; }
+.briefs-detail-grid .brief-detail:nth-last-child(-n+3) { border-bottom: 0; }
+.briefs-detail-grid .brief-detail h3 { font-size: 15.5pt; }
+.briefs-detail-grid .brief-copy p { font-size: 8.5pt; line-height: 1.38; }
+.briefs-detail-grid.is-short .brief-detail h3 { font-size: 18pt; line-height: .98; }
+.briefs-detail-grid.is-short .brief-copy p { font-size: 9.4pt; line-height: 1.5; }
+.briefs-detail-grid.is-short .brief-detail { padding-bottom: 6mm; }
+.briefs-detail-floor .curiosity-engraving { margin-top: 4mm; }
+.briefs-detail-floor .curiosity-engraving svg { height: 27mm; }
 .continued-note { margin: 3mm 0 0; text-align: right; font: italic 6.4pt var(--serif); color: var(--muted); }
 
 .front-lower { display: grid; grid-template-columns: 1fr 1.22fr; gap: 0; margin-top: 2.5mm; border-top: var(--rule) solid; }
@@ -240,6 +263,13 @@ footer,
 .news-followups { columns: 3; column-gap: 5mm; column-rule: var(--hairline) solid var(--shade); }
 .news-followups .news-card { margin-bottom: 3.2mm; }
 .density-standard .news-followups { columns: 2; }
+.news-continuation-short .news-feature h2 { font-size: 29pt; }
+.news-continuation-short .feature-summary { font-size: 10.8pt; line-height: 1.48; }
+.news-continuation-short .news-side .news-card h3 { font-size: 14pt; }
+.news-continuation-short .news-side .news-card p:last-child { font-size: 8.7pt; line-height: 1.4; }
+.news-continuation-short .news-followups { columns: 2; margin-top: 6mm; }
+.news-continuation-short .news-followups .news-card h3 { font-size: 15pt; }
+.news-continuation-short .news-followups .news-card p:last-child { font-size: 9.2pt; line-height: 1.45; }
 
 .news-context {
   display: grid;
@@ -301,9 +331,77 @@ footer,
 .tech-secondary { display: grid; grid-template-columns: 1fr 1fr; gap: 0 5mm; }
 .tech-secondary .dossier-story:nth-child(even) { padding-left: 5mm; border-left: var(--hairline) solid var(--shade); }
 .tech-secondary .dossier-story:nth-child(n+3) { padding-top: 4mm; border-top: var(--hairline) solid var(--shade); }
+.tech-continuation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6mm;
+  flex: 1;
+  min-height: 0;
+  padding-top: 2mm;
+}
+.tech-continuation .dossier-story { padding-right: 5mm; }
+.tech-continuation .dossier-story + .dossier-story {
+  padding: 0 0 0 6mm;
+  border-left: var(--hairline) solid var(--ink);
+}
+.tech-continuation .dossier-story h2 { font-size: 22pt; line-height: 1; }
+.tech-continuation .dossier-copy p { font-size: 9.2pt; line-height: 1.48; }
+.tech-continuation.is-single,
+.curiosity-continuation.is-single {
+  display: block;
+  max-width: 158mm;
+  margin: 4mm auto 0;
+}
+.tech-continuation.is-single .dossier-story,
+.curiosity-continuation.is-single .dossier-story { padding: 0; border: 0; }
+.tech-continuation.is-single .dossier-story h2,
+.curiosity-continuation.is-single .dossier-story h2 { font-size: 30pt; line-height: .98; }
+.tech-continuation.is-single .dossier-copy p,
+.curiosity-continuation.is-single .dossier-copy p { font-size: 10.5pt; line-height: 1.58; }
+.tech-continuation.is-three,
+.curiosity-continuation.is-three {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+}
+.tech-continuation.is-three .dossier-story,
+.curiosity-continuation.is-three .dossier-story { padding: 0 5mm; }
+.tech-continuation.is-three .dossier-story:first-child,
+.curiosity-continuation.is-three .dossier-story:first-child { padding-left: 0; }
+.tech-continuation.is-three .dossier-story:last-child,
+.curiosity-continuation.is-three .dossier-story:last-child { padding-right: 0; }
+.tech-continuation.is-three .dossier-story + .dossier-story,
+.curiosity-continuation.is-three .dossier-story + .dossier-story {
+  border-left: var(--hairline) solid var(--shade);
+}
+.tech-continuation.is-three .dossier-story h2,
+.curiosity-continuation.is-three .dossier-story h2 { font-size: 18pt; }
+.tech-continuation.is-four,
+.curiosity-continuation.is-four {
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.tech-continuation.is-four .dossier-story,
+.curiosity-continuation.is-four .dossier-story {
+  padding: 0 0 5mm;
+  border-bottom: var(--hairline) solid var(--shade);
+}
+.tech-continuation.is-four .dossier-story:nth-child(even),
+.curiosity-continuation.is-four .dossier-story:nth-child(even) {
+  padding-left: 6mm;
+  border-left: var(--hairline) solid var(--shade);
+}
+.tech-continuation.is-four .dossier-story:nth-child(odd),
+.curiosity-continuation.is-four .dossier-story:nth-child(odd) { padding-right: 6mm; }
+.tech-continuation.is-four .dossier-story:nth-child(n+3),
+.curiosity-continuation.is-four .dossier-story:nth-child(n+3) { padding-top: 5mm; }
+.tech-continuation.is-four .dossier-story h2,
+.curiosity-continuation.is-four .dossier-story h2 { font-size: 20pt; }
+.continuation-art-floor .curiosity-engraving { margin-top: 5mm; }
+.continuation-art-floor .curiosity-engraving svg { height: 32mm; }
 .dossier-story { min-width: 0; }
 .dossier-story h2 { margin: 0 0 2mm; font-family: var(--display); font-size: 15pt; line-height: 1; letter-spacing: -.04em; }
 .dossier-story.is-featured h2 { font-size: 25pt; line-height: .96; }
+.page-tech .dossier-story.is-featured h2 { font-size: 21pt; line-height: .98; }
 .dossier-copy p { margin: 0 0 2.6mm; font-size: 8.35pt; line-height: 1.37; }
 .dossier-story.is-featured .dossier-copy p { font-size: 9.2pt; line-height: 1.43; }
 .tech-fallback { columns: 3; column-gap: 5mm; column-rule: var(--hairline) solid var(--shade); }
@@ -346,6 +444,21 @@ footer,
 .curiosity-lower .recommendation h3 { font-size: 9.3pt; }
 .curiosity-lower .digest-item p,
 .curiosity-lower .recommendation p { font-size: 7pt; line-height: 1.25; }
+.curiosity-art-floor .curiosity-engraving { margin-top: 6mm; }
+.curiosity-art-floor .curiosity-engraving svg { height: 30mm; }
+.curiosity-continuation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7mm;
+  flex: 1;
+  min-height: 0;
+}
+.curiosity-continuation .dossier-story + .dossier-story {
+  padding-left: 7mm;
+  border-left: var(--hairline) solid var(--ink);
+}
+.curiosity-continuation .dossier-story h2 { font-size: 23pt; }
+.curiosity-continuation .dossier-copy p { font-size: 9.4pt; line-height: 1.5; }
 
 .crossword-panel { flex: 0 0 auto; min-height: 0; }
 .crossword-panel > .section-header { margin-bottom: 3mm; }
@@ -402,6 +515,53 @@ blockquote cite { font: 6pt var(--sans); color: var(--muted); }
 .quiz small { display: inline-block; margin-top: 2mm; color: var(--muted); transform: rotate(180deg); }
 .empty-state { margin: 20mm auto; max-width: 110mm; text-align: center; color: var(--muted); font-style: italic; }
 
+/* Pagination elastique : ces pages n'existent que lorsqu'une edition reelle
+   depasse une A4. Elles reprennent les codes du cahier d'origine au lieu de
+   reduire tout le journal ou de couper silencieusement du texte. */
+.page-adaptive-continuation .adaptive-section-header {
+  margin-bottom: 5mm;
+  border-top-width: .7mm;
+}
+.page-adaptive-continuation .adaptive-section-header h2 { font-size: 22pt; }
+.adaptive-flow {
+  columns: 2;
+  column-gap: 6mm;
+  column-rule: var(--hairline) solid var(--shade);
+}
+.adaptive-flow > article {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 5mm;
+  padding: 0 0 4mm;
+  border: 0;
+  border-bottom: var(--hairline) solid var(--shade);
+}
+.adaptive-flow .brief-detail.is-featured,
+.adaptive-flow .dossier-story.is-featured {
+  padding-right: 0;
+  border-right: 0;
+}
+.adaptive-flow .brief-detail h2,
+.adaptive-flow .brief-detail h3,
+.adaptive-flow .dossier-story h2 { font-size: 18pt; line-height: 1; }
+.adaptive-flow .brief-copy p,
+.adaptive-flow .dossier-copy p { font-size: 9.2pt; line-height: 1.43; }
+
+/* Une page de suite courte respire comme une vraie page editoriale : titrage et
+   corps legerement agrandis, sans faux encadre ni remplissage artificiel. */
+.page-adaptive-continuation.adaptive-sparse .adaptive-section-header h2 { font-size: 28pt; }
+.page-adaptive-continuation.adaptive-sparse .adaptive-flow { columns: 1; max-width: 150mm; }
+.page-adaptive-continuation.adaptive-sparse .adaptive-flow > article { margin-bottom: 7mm; padding-bottom: 6mm; }
+.page-adaptive-continuation.adaptive-sparse .adaptive-flow h2,
+.page-adaptive-continuation.adaptive-sparse .adaptive-flow h3 { font-size: 22pt; }
+.page-adaptive-continuation.adaptive-sparse .adaptive-flow p { font-size: 10pt; line-height: 1.5; }
+.page-adaptive-continuation.adaptive-sparse .continuation-news h3,
+.page-adaptive-continuation.adaptive-sparse .news-card h3,
+.page-adaptive-continuation.adaptive-sparse .digest-item h3 { font-size: 14pt; }
+.page-adaptive-continuation.adaptive-sparse .continuation-news p,
+.page-adaptive-continuation.adaptive-sparse .news-card p,
+.page-adaptive-continuation.adaptive-sparse .digest-item p { font-size: 9pt; line-height: 1.42; }
+
 footer { position: absolute; left: 11mm; right: 11mm; bottom: 6mm; display: flex; justify-content: space-between; border-top: var(--hairline) solid; padding-top: 1.2mm; font-size: 5.4pt; color: var(--muted); }
 
 .density-compact .news-card h3 { font-size: 11.2pt; }
@@ -426,6 +586,35 @@ footer { position: absolute; left: 11mm; right: 11mm; bottom: 6mm; display: flex
 .page-curiosity .extras-grid { margin-top: auto; }
 .news-context.context-count-2 { grid-template-columns: 1fr 1fr; }
 .density-extended .page-day .notes-space.is-tall .writing-lines { height: 121mm; }
+
+/* Brief Tech & IA : blocs independants que la pagination repartit sans tronquer. */
+.tb-block { margin: 0 0 3.2mm; font-size: 8.7pt; line-height: 1.34; }
+.tb-block p { margin: 0 0 1.4mm; }
+.tb-part { margin: 1mm 0 2.4mm; padding-top: 1.6mm; border-top: var(--rule) solid var(--ink); font-family: var(--display); font-size: 13.5pt; line-height: 1; letter-spacing: -.035em; }
+.tb-essential { padding: 2.6mm 3.2mm; background: var(--wash); border-top: .7mm solid var(--ink); }
+.tb-essential h3 { margin: 0 0 1.6mm; font-family: var(--sans); font-size: 6.2pt; letter-spacing: .08em; text-transform: uppercase; }
+.tb-essential ol { margin: 0; padding-left: 4.4mm; font-size: 9.6pt; line-height: 1.32; }
+.tb-essential li + li { margin-top: 1mm; }
+.tb-fact { padding-bottom: 2.6mm; border-bottom: var(--hairline) solid var(--shade); }
+.tb-fact-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 5mm; }
+.tb-fact-grid > aside { padding-left: 4mm; border-left: var(--hairline) solid var(--ink); }
+.tb-fact-text { font-size: 9.4pt; line-height: 1.3; }
+.tb-why { color: var(--ink); }
+.tb-why strong { font-family: var(--sans); font-size: 6.4pt; letter-spacing: .04em; text-transform: uppercase; }
+.tb-fact blockquote { margin: 0 0 1.2mm; font-family: var(--display); font-size: 10.2pt; font-style: italic; line-height: 1.22; letter-spacing: -.01em; }
+.tb-translation { display: block; margin-top: .8mm; font-family: var(--serif); font-size: 7.8pt; font-style: normal; color: var(--muted); }
+.tb-analysis-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4mm; margin: 0 0 1.6mm; }
+.tb-analysis-head h4 { margin: 0; font-family: var(--display); font-size: 15pt; line-height: 1; letter-spacing: -.04em; }
+.tb-confidence { font-family: var(--sans); font-size: 6pt; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.tb-block h5 { margin: 0 0 .9mm; font-family: var(--sans); font-size: 6.2pt; letter-spacing: .07em; text-transform: uppercase; }
+.tb-prose { column-count: 2; column-gap: 6mm; column-rule: var(--hairline) solid var(--shade); }
+.tb-ref { font-family: var(--sans); font-size: 6pt; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.tb-ref::before { content: "("; }
+.tb-ref::after { content: ")"; }
+.tb-list ul { margin: 0; padding-left: 4mm; }
+.tb-list li + li { margin-top: .9mm; }
+.tb-nature { font-size: 7.4pt; color: var(--muted); }
+.tb-unknowns { padding-top: 1mm; }
 @media print {
   body { background: #fff; }
   .publication { margin: 0; }

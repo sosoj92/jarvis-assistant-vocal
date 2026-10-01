@@ -45,10 +45,81 @@ def _measure(page) -> list[dict[str, Any]]:
             height: Math.round(rect.height),
             content_client_height: content ? content.clientHeight : 0,
             content_scroll_height: content ? content.scrollHeight : 0,
-            overflow: content ? content.scrollHeight > content.clientHeight + 2 : false
+            overflow: content ? content.scrollHeight > content.clientHeight + 2 : false,
+            used_ratio: content && content.children.length
+              ? Math.round((Math.max(...[...content.children].map(
+                  child => child.getBoundingClientRect().bottom
+                )) - content.getBoundingClientRect().top) / content.clientHeight * 1000) / 1000
+              : 0,
+            adaptive: p.dataset.adaptiveContinuation === 'true',
+            sparse: p.classList.contains('adaptive-sparse')
           };
         })""",
     )
+
+
+def _paginate_adaptive(page) -> dict[str, int]:
+    """Laisse le document creer/repartir ses pages de continuation."""
+    result = page.evaluate(
+        """() => window.SignalMatinPagination
+          ? window.SignalMatinPagination.paginate()
+          : {pages: document.querySelectorAll('.sheet').length, unresolved: 0}
+        """
+    )
+    return result or {"pages": 0, "unresolved": 0}
+
+
+def _fit_moderate_overflow(
+    page,
+    layout: list[dict[str, Any]],
+    *,
+    minimum_scale: float = 0.85,
+) -> list[dict[str, Any]]:
+    """Reduit seulement les pages legerement trop longues.
+
+    Les sources live n'ont pas toujours la meme longueur. Un depassement modere
+    ne doit pas annuler tout le journal du matin : Chromium agrandit ici la
+    hauteur logique du contenu et applique un zoom equivalent, sans changer le
+    format A4 physique. Les gros depassements restent des erreurs afin de ne pas
+    produire une page minuscule ou illisible.
+    """
+    overflowing = [item for item in layout if item["overflow"]]
+    if not overflowing:
+        return layout
+
+    for _ in range(4):
+        page.evaluate(
+            """({ overflowing, minimumScale }) => {
+              for (const item of overflowing) {
+                const sheet = document.querySelector(`.sheet[data-page="${item.page}"]`);
+                const content = sheet && sheet.querySelector('.page-content');
+                if (!content || !item.content_scroll_height) continue;
+
+                const currentScale = Number(content.dataset.autoFit || 1);
+                const physicalHeight = Number(
+                  content.dataset.autoFitPhysicalHeight ||
+                  content.clientHeight * currentScale
+                );
+                const nextScale = Math.min(
+                  1,
+                  currentScale *
+                    ((item.content_client_height - 3) / item.content_scroll_height)
+                );
+                if (nextScale < minimumScale) continue;
+
+                content.dataset.autoFitPhysicalHeight = String(physicalHeight);
+                content.dataset.autoFit = String(nextScale);
+                content.style.zoom = String(nextScale);
+                content.style.height = `${physicalHeight / nextScale}px`;
+              }
+            }""",
+            {"overflowing": overflowing, "minimumScale": minimum_scale},
+        )
+        layout = _measure(page)
+        overflowing = [item for item in layout if item["overflow"]]
+        if not overflowing:
+            break
+    return layout
 
 
 def inspecter_html(html_text: str) -> list[dict[str, Any]]:
@@ -60,6 +131,7 @@ def inspecter_html(html_text: str) -> list[dict[str, Any]]:
             page = browser.new_page(viewport={"width": 1280, "height": 900})
             page.set_content(html_text, wait_until="load")
             page.evaluate("document.fonts.ready")
+            _paginate_adaptive(page)
             return _measure(page)
         finally:
             browser.close()
@@ -85,7 +157,11 @@ def generer_pdf(
             page = browser.new_page(viewport={"width": 1280, "height": 900})
             page.set_content(html_text, wait_until="load")
             page.evaluate("document.fonts.ready")
+            _paginate_adaptive(page)
             layout = _measure(page)
+            # Une variation minime peut encore venir d'une police ou d'un pilote.
+            # Au-dela de 5 %, la pagination a deja cree une vraie page de suite.
+            layout = _fit_moderate_overflow(page, layout, minimum_scale=0.95)
             overflows = [item["page"] for item in layout if item["overflow"]]
             if verifier_debordement and overflows:
                 raise RuntimeError(

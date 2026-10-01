@@ -9,6 +9,7 @@ import base64
 import datetime as dt
 import html
 import mimetypes
+import re
 from pathlib import Path
 
 from .models import (
@@ -18,6 +19,7 @@ from .models import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CSS_PATH = ROOT / "web" / "signal_matin.css"
+PAGINATION_PATH = ROOT / "web" / "signal_matin_pagination.js"
 WEEKDAYS = ("Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche")
 MONTHS = ("janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
           "aout", "septembre", "octobre", "novembre", "decembre")
@@ -224,11 +226,13 @@ def news_feature(item: NewsItem, summary_limit: int = 420) -> str:
     """
 
 
-def news_opening(items: list[NewsItem], *, compact: bool = False) -> str:
+def news_opening(
+    items: list[NewsItem], *, compact: bool = False, roomy: bool = False,
+) -> str:
     if not items:
         return ""
-    feature_limit = 250 if compact else 440
-    side_limit = 0 if compact else 125
+    feature_limit = 250 if compact else (760 if roomy else 440)
+    side_limit = 0 if compact else (300 if roomy else 125)
     side_cards = []
     for item in items[1:3]:
         side_cards.append(
@@ -296,6 +300,32 @@ def dossier_story(
       <div class="dossier-copy">{paragraphs}</div>
     </article>
     """
+
+
+def _story_weight(item: NewsItem) -> int:
+    return len(item.title) * 2 + len(item.expanded_summary or item.summary)
+
+
+def _balanced_story_chunks(
+    items: list[NewsItem], *, max_items: int = 4,
+) -> list[list[NewsItem]]:
+    """Repartit un cahier sans laisser une derniere page orpheline.
+
+    Le navigateur reste responsable des debordements reels : si quatre sujets
+    exceptionnellement longs ne tiennent pas, la pagination DOM cree une page
+    supplementaire. Ici, on evite surtout les decoupages 3 + 1 qui produisent
+    une A4 presque vide alors que 2 + 2 ou 4 sujets auraient ete plus naturels.
+    """
+    chunks: list[list[NewsItem]] = []
+    offset = 0
+    while offset < len(items):
+        remaining = len(items) - offset
+        count = min(max_items, remaining)
+        if remaining - count == 1 and count > 2:
+            count -= 1
+        chunks.append(items[offset:offset + count])
+        offset += count
+    return chunks
 
 
 def front_watch(items: list[DigestItem], limit: int = 3) -> str:
@@ -489,7 +519,7 @@ def _page(edition: MorningEdition, number: int, label: str, content: str,
         <span>{_e(_date_fr(edition.edition.date))}</span>
       </header>"""
     return f"""
-    <section class="sheet page-{number}{f' page-{slug}' if slug else ''}" data-page="{number}">
+    <section class="sheet page-{number}{f' page-{slug}' if slug else ''}" data-page="{number}" data-label="{_e(label)}">
       {header}
       <main class="page-content">{content}</main>
       <footer><span>{_e(edition.edition.title)} / {_e(edition.edition.subtitle)}</span><span>{number}</span></footer>
@@ -520,42 +550,86 @@ def _page_one(edition: MorningEdition) -> str:
 
 
 def _page_briefs_detail(
-    edition: MorningEdition, number: int, *, start: int = 0, part: int = 1,
+    edition: MorningEdition,
+    number: int,
+    *,
+    items: list[NewsItem],
+    part: int = 1,
+    has_more: bool = False,
 ) -> str:
-    items = edition.news.all_secondary()[start:start + BRIEF_DETAIL_PAGE_LIMIT]
     if not items:
         return ""
     eyebrow = "Les sujets annonces en une" if part == 1 else "La suite du cahier d actualites"
     body = section_header("En bref, en detail", eyebrow)
-    body += '<div class="briefs-detail-layout">'
-    body += detailed_brief(items[0], featured=True)
-    body += '<div class="briefs-detail-side">'
-    body += "".join(detailed_brief(item) for item in items[1:])
-    body += '</div></div>'
-    if part == 1:
+    if len(items) > BRIEF_DETAIL_PAGE_LIMIT:
+        short_page = sum(map(_story_weight, items)) < 3600
+        body += f'<div class="briefs-detail-grid{" is-short" if short_page else ""}">'
+        body += "".join(detailed_brief(item) for item in items)
+        body += "</div>"
+        if short_page:
+            body += '<div class="briefs-detail-floor">' + curiosity_engraving() + "</div>"
+    else:
+        body += '<div class="briefs-detail-layout">'
+        body += detailed_brief(items[0], featured=True)
+        body += '<div class="briefs-detail-side">'
+        body += "".join(detailed_brief(item) for item in items[1:])
+        body += '</div></div>'
+    if has_more:
         body += '<p class="continued-note">Suite du cahier d actualites page suivante.</p>'
     return _page(edition, number, "En bref, en detail", body, slug="briefs-detail")
 
 
-def _page_news(edition: MorningEdition, number: int = 2, start: int = 0) -> str:
-    items = edition.news.all_secondary()[start:]
-    body = section_header("Actualites & monde", "Comprendre sans defiler")
+def _page_news(
+    edition: MorningEdition,
+    number: int = 2,
+    *,
+    items: list[NewsItem] | None = None,
+    continuation: bool = False,
+) -> str:
+    items = edition.news.all_secondary() if items is None else items
+    title = "Actualites & monde - suite" if continuation else "Actualites & monde"
+    eyebrow = "La suite, sans rien tasser" if continuation else "Comprendre sans defiler"
+    roomy = continuation and len(items) <= 5
+    body = section_header(title, eyebrow)
     if items:
-        selected = items[:NEWS_PAGE_LIMIT]
-        body += news_opening(selected)
+        body += news_opening(items, roomy=roomy)
         body += news_followups(
-            selected[3:],
-            summary_limit=150 if edition.edition.density == DensityMode.EXTENDED else 260,
+            items[3:],
+            summary_limit=(520 if roomy else (
+                150 if edition.edition.density == DensityMode.EXTENDED else 260
+            )),
         )
-    elif edition.news.lead:
+    elif edition.news.lead and not continuation:
         body += news_lead(edition.news.lead)
     else:
         body += '<p class="empty-state">Aucune actualite disponible : aucun flux n\'a pu etre lu. Cette rubrique reste volontairement vide et aucun article n\'est invente.</p>'
-    body += news_context_block(edition)
-    return _page(edition, number, "Actualites & monde", body, slug="news")
+    if not continuation:
+        body += news_context_block(edition)
+    slug = "news news-continuation-short" if roomy else "news"
+    return _page(edition, number, title, body, slug=slug)
+
+
+def _pages_news(
+    edition: MorningEdition, number: int, *, start: int = 0,
+) -> list[str]:
+    remaining = edition.news.all_secondary()[start:]
+    if not remaining:
+        return [_page_news(edition, number, items=[])]
+    pages = []
+    for offset in range(0, len(remaining), NEWS_PAGE_LIMIT):
+        pages.append(_page_news(
+            edition,
+            number + len(pages),
+            items=remaining[offset:offset + NEWS_PAGE_LIMIT],
+            continuation=offset > 0,
+        ))
+    return pages
 
 
 def _page_day(edition: MorningEdition, number: int) -> str:
+    active_tasks = sum(
+        1 for item in (*edition.priorities, *edition.reminders) if not item.done
+    )
     intro = f"""
     <div class="day-intro"><p class="dropcap">{_e(_truncate(edition.personal.greeting, 220))}</p>
     {f'<p class="free-window"><span>Fenetre libre</span>{_e(_truncate(edition.personal.free_window, 240))}</p>' if edition.personal.free_window else ''}</div>"""
@@ -567,18 +641,39 @@ def _page_day(edition: MorningEdition, number: int) -> str:
     body += '</div></div>'
     if edition.personal.note:
         body += f'<aside class="editorial-aside"><span>Note personnelle</span><p>{_e(_truncate(edition.personal.note, 500))}</p></aside>'
-    body += notes_space(tall=not edition.agenda)
+    # L'absence d'agenda ne signifie pas que la page est vide : des rappels et
+    # une note personnelle peuvent deja occuper une grande hauteur. Le grand
+    # carnet est reserve aux journees reellement legeres.
+    tall_notes = (
+        not edition.agenda
+        and active_tasks <= 3
+        and not edition.personal.note
+    )
+    body += notes_space(tall=tall_notes)
     return _page(edition, number, "Ta journee", body, slug="day")
 
 
-def _page_tech(edition: MorningEdition, number: int) -> str:
+def _page_tech(
+    edition: MorningEdition,
+    number: int,
+    items: list[NewsItem] | None = None,
+    *,
+    has_continuation: bool = False,
+) -> str:
     body = section_header("Technologie & IA", "Comprendre ce qui change vraiment")
-    items = edition.tech_news
+    items = edition.tech_news if items is None else items
     if items:
+        # Les titres tech sont souvent tres longs. Quand un second cahier est
+        # present, la premiere page privilegie une synthese nette et conserve les
+        # articles restants, plus developpes, sur la page de continuation.
+        featured_limit = 650 if has_continuation else 950
+        secondary_limit = 360 if has_continuation else 480
         body += '<div class="tech-dossier">'
-        body += dossier_story(items[0], featured=True, max_chars=950)
+        body += dossier_story(items[0], featured=True, max_chars=featured_limit)
         body += '<div class="tech-secondary">'
-        body += "".join(dossier_story(item, max_chars=480) for item in items[1:5])
+        body += "".join(
+            dossier_story(item, max_chars=secondary_limit) for item in items[1:5]
+        )
         body += '</div></div>'
     elif edition.tech:
         body += '<div class="tech-fallback">' + digest_list(
@@ -587,6 +682,177 @@ def _page_tech(edition: MorningEdition, number: int) -> str:
     else:
         body += '<p class="empty-state">Aucune actualite technique recente n a pu etre verifiee ce matin. La page reste volontairement vide plutot que de recycler un ancien sujet.</p>'
     return _page(edition, number, "Technologie & IA", body, slug="tech")
+
+
+def _page_tech_continuation(
+    edition: MorningEdition,
+    number: int,
+    items: list[NewsItem],
+) -> str:
+    body = section_header(
+        "Technologie & IA - suite",
+        "Deux sujets a lire avec un peu plus de recul",
+    )
+    single = len(items) == 1
+    count_class = {
+        1: " is-single", 2: " is-two", 3: " is-three", 4: " is-four",
+    }.get(len(items), "")
+    body += f'<div class="tech-continuation{count_class}">'
+    body += "".join(
+        dossier_story(item, featured=single, max_chars=1500 if single else (900 if len(items) == 4 else 1050))
+        for item in items
+    )
+    body += "</div>"
+    if 3 <= len(items) <= 4 and sum(map(_story_weight, items)) < 2800:
+        body += '<div class="continuation-art-floor">' + curiosity_engraving() + "</div>"
+    return _page(
+        edition,
+        number,
+        "Technologie & IA - suite",
+        body,
+        slug="tech tech-continuation-page",
+    )
+
+
+_BRIEF_REF = re.compile(r"\[(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)\]")
+
+
+def _brief_refs(text: str, names: dict[int, str]) -> str:
+    """Echappe le texte ; [3] devient le nom du media. Aucune URL sur papier."""
+    def media(match: re.Match) -> str:
+        labels: list[str] = []
+        for value in re.split(r"\s*[,;]\s*", match.group(1)):
+            name = names.get(int(value))
+            if name and name not in labels:
+                labels.append(name)
+        return f'<span class="tb-ref">{" · ".join(_e(label) for label in labels)}</span>' if labels else ""
+    return _BRIEF_REF.sub(media, _e(text))
+
+
+def _brief_paragraphs(text: str, names: dict[int, str]) -> str:
+    return "".join(
+        f"<p>{_brief_refs(paragraph, names)}</p>"
+        for paragraph in str(text or "").split("\n") if paragraph.strip()
+    )
+
+
+def _brief_date(value: dt.datetime | None) -> str:
+    if value is None:
+        return ""
+    local = value.astimezone()
+    return f"{local.day} {MONTHS[local.month - 1][:4]}."
+
+
+def _brief_list(rows: list[str], names: dict[int, str]) -> str:
+    return "<ul>" + "".join(f"<li>{_brief_refs(row, names)}</li>" for row in rows) + "</ul>"
+
+
+def _pages_brief(edition: MorningEdition, number: int) -> list[str]:
+    """Brief Tech & IA en blocs independants : la pagination les repartit sans tronquer."""
+    brief = edition.tech_brief
+    names = {source.id: source.name for source in brief.sources}
+    sources = {source.id: source for source in brief.sources}
+    blocks = [section_header(brief.title, "Comprendre, pas seulement connaître")]
+    if brief.essentials:
+        rows = "".join(f"<li>{_brief_refs(line, names)}</li>" for line in brief.essentials)
+        blocks.append(
+            '<section class="tb-block tb-essential">'
+            f"<h3>L'essentiel en 5 lignes</h3><ol>{rows}</ol></section>"
+        )
+    for index, fact in enumerate(brief.facts):
+        heading = '<h3 class="tb-part">Les informations du jour</h3>' if index == 0 else ""
+        source = sources.get(fact.source_id)
+        meta = " / ".join(filter(None, [
+            source.name if source else "", _brief_date(source.published_at) if source else "",
+        ]))
+        translation = (
+            f'<span class="tb-translation">({_e(fact.translation)})</span>' if fact.translation else ""
+        )
+        why = (
+            f'<p class="tb-why"><strong>Pourquoi c\'est important.</strong> {_brief_refs(fact.why, names)}</p>'
+            if fact.why else ""
+        )
+        blocks.append(
+            f'<article class="tb-block tb-fact">{heading}<div class="tb-fact-grid">'
+            f'<div><p class="tb-fact-text">{_brief_refs(fact.fact, names)}</p>{why}</div>'
+            f'<aside><blockquote>« {_e(fact.quote)} »{translation}</blockquote>'
+            f'<p class="article-meta">{_e(meta)}</p></aside></div></article>'
+        )
+    for index, analysis in enumerate(brief.analyses):
+        parts = [(label, text) for label, text in (
+            ("Les faits", analysis.facts),
+            ("Le contexte", analysis.context),
+            ("Enjeux géopolitiques", analysis.geopolitics),
+            ("Enjeux économiques", analysis.economics),
+            ("Qui y gagne, qui y perd", analysis.stakes),
+            ("Lectures divergentes", analysis.readings),
+            ("Ce qui reste incertain", analysis.uncertain),
+        ) if text]
+        confidence = (
+            f'<span class="tb-confidence">Confiance : {_e(analysis.confidence)}</span>'
+            if analysis.confidence else ""
+        )
+        for part_index, (label, text) in enumerate(parts):
+            head = ""
+            if part_index == 0:
+                part_title = '<h3 class="tb-part">Analyses approfondies</h3>' if index == 0 else ""
+                head = (
+                    f'{part_title}<header class="tb-analysis-head">'
+                    f'<h4>{_e(analysis.subject)}</h4>{confidence}</header>'
+                )
+            blocks.append(
+                f'<section class="tb-block tb-analysis">{head}'
+                f'<h5>{_e(label)}</h5><div class="tb-prose">{_brief_paragraphs(text, names)}</div></section>'
+            )
+    if brief.threads:
+        rows = "".join(
+            f'<li>{_brief_refs(thread.text, names)} <em class="tb-nature">'
+            f'({"établi par les sources" if thread.established else "interprétation"})</em></li>'
+            for thread in brief.threads
+        )
+        blocks.append(f'<section class="tb-block tb-list"><h3 class="tb-part">Fil rouge</h3><ul>{rows}</ul></section>')
+    first = True
+    for label, rows in (
+        ("Questions à se poser", brief.questions),
+        ("Biais et angles morts de la couverture", brief.blind_spots),
+        ("À surveiller", brief.watch),
+    ):
+        if not rows:
+            continue
+        head = '<h3 class="tb-part">Pour exercer mon esprit critique</h3>' if first else ""
+        first = False
+        blocks.append(f'<section class="tb-block tb-list">{head}<h5>{label}</h5>{_brief_list(rows, names)}</section>')
+    if brief.unknowns:
+        blocks.append(
+            '<section class="tb-block tb-list tb-unknowns">'
+            "<h3 class=\"tb-part\">Ce que je n'ai pas pu établir</h3>"
+            f"{_brief_list(brief.unknowns, names)}</section>"
+        )
+    return [_page(edition, number, "Brief Tech & IA", "".join(blocks), slug="brief-tech")]
+
+
+def _pages_tech(edition: MorningEdition, number: int) -> list[str]:
+    """Ajoute un cahier tech au lieu de tasser cinq articles sur une seule A4."""
+    if edition.tech_brief:
+        return _pages_brief(edition, number)
+    if len(edition.tech_news) <= 4:
+        return [_page_tech(edition, number)]
+
+    first_five = edition.tech_news[:5]
+    first_count = 5 if sum(map(_story_weight, first_five)) <= 3200 else 3
+    pages = [_page_tech(
+        edition,
+        number,
+        edition.tech_news[:first_count],
+        has_continuation=first_count < len(edition.tech_news),
+    )]
+    for chunk in _balanced_story_chunks(edition.tech_news[first_count:]):
+        pages.append(_page_tech_continuation(
+            edition,
+            number + len(pages),
+            chunk,
+        ))
+    return pages
 
 
 def _page_curiosity(edition: MorningEdition, number: int) -> str:
@@ -606,12 +872,57 @@ def _page_curiosity(edition: MorningEdition, number: int) -> str:
     body += recommendation_list(edition.recommendations, 3)
     body += social_digest(edition, 4)
     body += '</div>'
+    if edition.curiosity_news and sum(map(_story_weight, edition.curiosity_news[:4])) < 2400:
+        body += '<div class="curiosity-art-floor">' + curiosity_engraving() + "</div>"
     if not edition.curiosity_news and not any((
         edition.watch, edition.newsletter_digest, edition.recommendations,
         edition.social_digest, edition.community_digest,
     )):
         body += curiosity_engraving()
     return _page(edition, number, "Veille & curiosite", body, slug="curiosity")
+
+
+def _page_curiosity_continuation(
+    edition: MorningEdition, number: int, items: list[NewsItem],
+) -> str:
+    single = len(items) == 1
+    count_class = {
+        1: " is-single", 2: " is-two", 3: " is-three", 4: " is-four",
+    }.get(len(items), "")
+    body = section_header(
+        "Veille & curiosites - suite",
+        "Pour aller un peu plus loin",
+    )
+    body += f'<div class="curiosity-continuation{count_class}">'
+    body += "".join(
+        dossier_story(
+            item,
+            featured=single,
+            max_chars=1500 if single else (900 if len(items) == 4 else 1050),
+        )
+        for item in items
+    )
+    body += "</div>"
+    if 3 <= len(items) <= 4 and sum(map(_story_weight, items)) < 2800:
+        body += '<div class="continuation-art-floor">' + curiosity_engraving() + "</div>"
+    return _page(
+        edition,
+        number,
+        "Veille & curiosites - suite",
+        body,
+        slug="curiosity curiosity-continuation-page",
+    )
+
+
+def _pages_curiosity(edition: MorningEdition, number: int) -> list[str]:
+    pages = [_page_curiosity(edition, number)]
+    for chunk in _balanced_story_chunks(edition.curiosity_news[4:]):
+        pages.append(_page_curiosity_continuation(
+            edition,
+            number + len(pages),
+            chunk,
+        ))
+    return pages
 
 
 def crossword_block(edition: MorningEdition) -> str:
@@ -726,9 +1037,6 @@ def _page_standard_tail(edition: MorningEdition, number: int) -> str:
         edition.agenda, edition.priorities, edition.reminders,
         edition.social_digest, edition.community_digest,
     ))) <= 11
-    secondary_count = len(edition.news.all_secondary())
-    detail_count = min(secondary_count, FRONT_BRIEF_LIMIT * 2)
-    continuation = edition.news.all_secondary()[detail_count + NEWS_PAGE_LIMIT:]
     body = '<div class="standard-tail"><div>'
     body += section_header("Ta journee", "Ce qui merite ton attention")
     body += agenda_block(edition.agenda, 8)
@@ -740,10 +1048,8 @@ def _page_standard_tail(edition: MorningEdition, number: int) -> str:
     body += section_header("Reseaux & liens")
     body += social_digest(edition, 5)
     body += digest_list("Boite de reception", edition.newsletter_digest, 3)
-    if sparse:
-        body += continuation_news("A lire ensuite", continuation, 4)
     body += '</div></div>'
-    if sparse and not continuation:
+    if sparse:
         body += '<div class="standard-tail-floor">' + curiosity_engraving() + '</div>'
     body += extras_block(edition, limit=3)
     return _page(edition, number, "Journee & liens", body, slug="standard-tail")
@@ -751,39 +1057,68 @@ def _page_standard_tail(edition: MorningEdition, number: int) -> str:
 
 def render_html(edition: MorningEdition, css: str | None = None) -> str:
     css = CSS_PATH.read_text(encoding="utf-8") if css is None else css
+    pagination = PAGINATION_PATH.read_text(encoding="utf-8")
     mode = edition.edition.density
     pages = [_page_one(edition)]
     secondary = edition.news.all_secondary()
     brief_count = min(FRONT_BRIEF_LIMIT, len(secondary))
-    detail_pages = 1 if brief_count else 0
-    if mode != DensityMode.COMPACT and len(secondary) > FRONT_BRIEF_LIMIT:
-        detail_pages = 2
-    detail_count = min(len(secondary), detail_pages * BRIEF_DETAIL_PAGE_LIMIT)
+    detail_chunks: list[list[NewsItem]] = []
+    if brief_count:
+        if mode == DensityMode.COMPACT:
+            detail_chunks = [secondary[:FRONT_BRIEF_LIMIT]]
+        else:
+            candidates = secondary[:FRONT_BRIEF_LIMIT * 2]
+            detail_weight = sum(
+                len(item.expanded_summary or item.summary) + len(item.title) * 2
+                for item in candidates
+            )
+            if len(candidates) > FRONT_BRIEF_LIMIT and detail_weight <= 3600:
+                detail_chunks = [candidates]
+            else:
+                detail_chunks = [
+                    candidates[offset:offset + BRIEF_DETAIL_PAGE_LIMIT]
+                    for offset in range(0, len(candidates), BRIEF_DETAIL_PAGE_LIMIT)
+                ]
+    detail_count = sum(len(chunk) for chunk in detail_chunks)
     number = 2
-    for part in range(detail_pages):
+    for part, chunk in enumerate(detail_chunks):
         pages.append(_page_briefs_detail(
-            edition, number, start=part * BRIEF_DETAIL_PAGE_LIMIT, part=part + 1,
+            edition,
+            number,
+            items=chunk,
+            part=part + 1,
+            has_more=part + 1 < len(detail_chunks),
         ))
         number += 1
     if mode == DensityMode.COMPACT:
         pages.append(_page_compact(edition, number, start=detail_count))
         pages.append(_page_learning(edition, number + 1))
     elif mode == DensityMode.STANDARD:
-        pages.extend([
-            _page_news(edition, number, start=detail_count),
-            _page_tech(edition, number + 1),
-            _page_standard_tail(edition, number + 2),
-            _page_curiosity(edition, number + 3),
-            _page_learning(edition, number + 4),
-        ])
+        news_pages = _pages_news(edition, number, start=detail_count)
+        pages.extend(news_pages)
+        number += len(news_pages)
+        tech_pages = _pages_tech(edition, number)
+        pages.extend(tech_pages)
+        number += len(tech_pages)
+        pages.append(_page_standard_tail(edition, number))
+        number += 1
+        curiosity_pages = _pages_curiosity(edition, number)
+        pages.extend(curiosity_pages)
+        number += len(curiosity_pages)
+        pages.append(_page_learning(edition, number))
     else:
-        pages.extend([
-            _page_news(edition, number, start=detail_count),
-            _page_day(edition, number + 1),
-            _page_tech(edition, number + 2),
-            _page_curiosity(edition, number + 3),
-            _page_learning(edition, number + 4),
-        ])
+        news_pages = _pages_news(edition, number, start=detail_count)
+        pages.extend(news_pages)
+        number += len(news_pages)
+        pages.append(_page_day(edition, number))
+        number += 1
+        tech_pages = _pages_tech(edition, number)
+        pages.extend(tech_pages)
+        number += len(tech_pages)
+        curiosity_pages = _pages_curiosity(edition, number)
+        pages.extend(curiosity_pages)
+        number += len(curiosity_pages)
+        pages.append(_page_learning(edition, number))
     return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -794,6 +1129,7 @@ def render_html(edition: MorningEdition, css: str | None = None) -> str:
 </head>
 <body class="density-{mode.value}">
   <div class="publication">{''.join(pages)}</div>
+  <script>{pagination}</script>
 </body>
 </html>"""
 

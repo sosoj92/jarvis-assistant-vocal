@@ -273,12 +273,12 @@ def _usage_tuple(usage, modele_repli=""):
     return tokens, cout, str(usage.get("model") or modele_repli or "")
 
 
-def _appeler_hermes_cli(prompt):
+def _appeler_hermes_cli(prompt, timeout=None):
     """Hermes recent : exécute une tâche one-shot via son CLI officiel."""
     exe = shutil.which("hermes")
     if not exe:
         raise RuntimeError("CLI Hermes introuvable")
-    timeout = int(reglage("hermes.timeout", 900))
+    timeout = int(timeout or reglage("hermes.timeout", 900))
     dossier = Path(reglage("hermes.workspace", "") or Path.home() / "hermes-workspace")
     cwd = str(dossier) if dossier.is_dir() else None
     with tempfile.TemporaryDirectory(prefix="jarvis-hermes-") as temporaire:
@@ -304,7 +304,7 @@ def _appeler_hermes_cli(prompt):
     return texte or "(reponse vide d'Hermes)", tokens, cout, modele
 
 
-def _appeler_hermes_http(prompt, session):
+def _appeler_hermes_http(prompt, session, timeout=None):
     """Ancienne passerelle OpenAI-compatible, gardée pour compatibilité."""
     base = reglage("hermes.api_url", "http://127.0.0.1:8642").rstrip("/")
     cle = _cle_api()
@@ -318,7 +318,7 @@ def _appeler_hermes_http(prompt, session):
     reponse = requests.post(
         f"{base}/v1/responses", json=body,
         headers={"Authorization": f"Bearer {cle}"},
-        timeout=int(reglage("hermes.timeout", 900)),
+        timeout=int(timeout or reglage("hermes.timeout", 900)),
     )
     reponse.raise_for_status()
     data = reponse.json()
@@ -351,16 +351,24 @@ def _appeler_hermes(tache: str, session: str = ""):
     `auto` conserve l'ancienne API lorsqu'elle est disponible et se replie sur
     `hermes -z` avec les versions recentes, dont `gateway` ne sert plus d'API.
     """
-    prompt = _prompt_hermes(tache)
+    return appeler_hermes_brut(_prompt_hermes(tache), session)
+
+
+def appeler_hermes_brut(prompt: str, session: str = "", timeout=None):
+    """Appel Hermes synchrone sans consigne vocale, pour les pipelines internes.
+
+    Meme transport que les delegations (API puis repli CLI). Hermes ne recoit
+    que le texte du prompt : aucun credential Jarvis ne transite.
+    """
     transport = str(reglage("hermes.transport", "auto") or "auto").lower()
     if transport == "cli":
-        return _appeler_hermes_cli(prompt)
+        return _appeler_hermes_cli(prompt, timeout)
     try:
-        return _appeler_hermes_http(prompt, session)
+        return _appeler_hermes_http(prompt, session, timeout)
     except Exception:
         if transport == "http":
             raise
-        return _appeler_hermes_cli(prompt)
+        return _appeler_hermes_cli(prompt, timeout)
 
 
 def _resume_vocal(texte: str) -> str:

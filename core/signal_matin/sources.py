@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import json
 import logging
 import math
 import re
@@ -21,11 +22,13 @@ from core.config import reglage
 from .models import (
     AgendaItem, DataSourceStatus, DataState, DigestItem, EditionMeta, Extras,
     Illustration, Importance, MorningEdition, NewsBundle, NewsItem, PersonalBlock,
-    SourceRef, TaskItem, WeatherBlock,
+    SourceRef, TaskItem, TechBrief, WeatherBlock,
 )
 from .daily_learning import construire_apprentissage_du_jour
+from .learning_generation import generer_mot_francais, generer_termes_mots_croises
 from .normalizer import normaliser_edition
 from .news_enrichment import enrichir_actualites
+from .tech_brief import construire_brief
 
 LOG = logging.getLogger("jarvis.signal_matin")
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,10 +44,35 @@ DEFAULT_PUBLIC_FEEDS = [
     {"nom": "Le Monde", "categorie": "Culture", "url": "https://www.lemonde.fr/culture/rss_full.xml"},
 ]
 
+# Veille tech publique : medias francais et anglophones, couverture regionale
+# et sources primaires (entreprises, regulateurs). Chaque flux a ete verifie
+# lisible en entier par l'extracteur, directement ou via le proxy public.
 DEFAULT_TECH_FEEDS = [
     {"nom": "Le Monde Pixels", "categorie": "Tech", "url": "https://www.lemonde.fr/pixels/rss_full.xml"},
     {"nom": "Le Monde IA", "categorie": "IA", "url": "https://www.lemonde.fr/intelligence-artificielle/rss_full.xml"},
-    {"nom": "Le Monde Culture web", "categorie": "Tech", "url": "https://www.lemonde.fr/cultures-web/rss_full.xml"},
+    {"nom": "The Verge", "categorie": "Tech", "url": "https://www.theverge.com/rss/index.xml"},
+    {"nom": "Numerama", "categorie": "Tech", "url": "https://www.numerama.com/feed/"},
+    {"nom": "TechCrunch", "categorie": "Tech", "url": "https://techcrunch.com/feed/"},
+    {"nom": "Next", "categorie": "Tech", "url": "https://next.ink/feed/"},
+    {"nom": "Ars Technica", "categorie": "Tech", "url": "https://feeds.arstechnica.com/arstechnica/index"},
+    {"nom": "MIT Technology Review", "categorie": "IA", "url": "https://www.technologyreview.com/feed/"},
+    {"nom": "Rest of World", "categorie": "Tech", "url": "https://restofworld.org/feed/latest"},
+    {"nom": "The Decoder", "categorie": "IA", "url": "https://the-decoder.com/feed/"},
+    {"nom": "Siecle Digital", "categorie": "Tech", "url": "https://siecledigital.fr/feed/"},
+    {"nom": "The Register", "categorie": "Tech", "url": "https://www.theregister.com/headlines.atom"},
+    {"nom": "Wired", "categorie": "Tech", "url": "https://www.wired.com/feed/rss"},
+    {"nom": "01net", "categorie": "Tech", "url": "https://www.01net.com/actualites/feed/"},
+    {"nom": "TechNode", "categorie": "Tech", "url": "https://technode.com/feed/"},
+    {"nom": "SCMP Tech", "categorie": "Tech", "url": "https://www.scmp.com/rss/36/feed"},
+    {"nom": "TechCabal", "categorie": "Tech", "url": "https://techcabal.com/feed/"},
+    {"nom": "OpenAI", "categorie": "IA", "url": "https://openai.com/news/rss.xml"},
+    {"nom": "Google", "categorie": "IA", "url": "https://blog.google/technology/ai/rss/"},
+    {"nom": "Google DeepMind", "categorie": "IA", "url": "https://deepmind.google/blog/rss.xml"},
+    {"nom": "Microsoft", "categorie": "Tech", "url": "https://blogs.microsoft.com/feed/"},
+    {"nom": "NVIDIA", "categorie": "Semi-conducteurs", "url": "https://nvidianews.nvidia.com/releases.xml"},
+    {"nom": "Commission europeenne", "categorie": "Regulation", "url": "https://digital-strategy.ec.europa.eu/en/rss.xml"},
+    {"nom": "CNIL", "categorie": "Regulation", "url": "https://www.cnil.fr/fr/rss.xml"},
+    {"nom": "FTC", "categorie": "Regulation", "url": "https://www.ftc.gov/feeds/press-release.xml"},
 ]
 
 
@@ -139,12 +167,18 @@ def _collect_rss(
                     continue
                 seen.add(dedupe_key)
                 summary = _child_text(item, {"description", "summary", "content"})
-                bucket.append(NewsItem(
-                    title=_plain_text(title),
-                    category=category,
-                    summary=_plain_text(summary) or "Resume non fourni par le flux.",
-                    source=SourceRef(name=name, url=link, published_at=published),
-                ))
+                # Un article atypique (resume geant, lien invalide) est ignore
+                # seul : il ne doit jamais faire perdre tout le flux.
+                try:
+                    bucket.append(NewsItem(
+                        title=_plain_text(title)[:240],
+                        category=category,
+                        summary=_plain_text(summary)[:1600] or "Resume non fourni par le flux.",
+                        source=SourceRef(name=name, url=link, published_at=published),
+                    ))
+                except ValueError as error:
+                    LOG.info("Signal Matin : article ignore (%s): %s", name, error)
+                    continue
                 if len(bucket) >= per_feed:
                     break
             if bucket:
@@ -196,7 +230,9 @@ class RssSource:
 class TechRssSource:
     """Cahier tech distinct pour garantir une vraie profondeur editoriale."""
 
-    def collect(self, now: dt.datetime) -> tuple[list[NewsItem], DataSourceStatus]:
+    def collect(
+        self, now: dt.datetime, *, limit: int | None = None, max_age: int | None = None,
+    ) -> tuple[list[NewsItem], DataSourceStatus]:
         entries = reglage("signal_matin.flux_tech", []) or []
         fallback = not entries and bool(reglage("signal_matin.actualites_publiques_par_defaut", True))
         if fallback:
@@ -206,8 +242,9 @@ class TechRssSource:
                 name="Actualites tech", state=DataState.UNAVAILABLE,
                 detail="Aucun flux tech configure.",
             )
-        limit = max(3, min(int(reglage("signal_matin.nombre_actualites_tech", 6) or 6), 12))
-        max_age = max(24, min(int(reglage("signal_matin.tech_age_max_heures", 72) or 72), 168))
+        # Le brief lit un vivier plus large ; le cahier classique garde ses bornes.
+        limit = limit or max(3, min(int(reglage("signal_matin.nombre_actualites_tech", 6) or 6), 12))
+        max_age = max_age or max(24, min(int(reglage("signal_matin.tech_age_max_heures", 72) or 72), 168))
         return _collect_rss(
             entries, now, limit=limit, max_age_hours=max_age,
             status_name="Actualites tech",
@@ -580,13 +617,49 @@ def _free_window(items: list[AgendaItem], now: dt.datetime) -> str:
     return f"Plus grande plage libre : {start:%H h %M} - {end:%H h %M}."
 
 
+def _tech_brief(
+    tech_items: list[NewsItem], now: dt.datetime, active: bool, *, allow_proxy: bool,
+) -> tuple[TechBrief | None, DataSourceStatus]:
+    """Brief Tech & IA facultatif ; tout echec rend la main au cahier classique."""
+    if not active:
+        return None, DataSourceStatus(
+            name="Brief Tech & IA", state=DataState.DISABLED, detail="Desactive dans config.yaml.",
+        )
+    rapport: dict = {}
+    brief = None
+    try:
+        brief = construire_brief(tech_items, now, allow_proxy=allow_proxy, rapport=rapport)
+    except Exception as error:
+        LOG.warning("Signal Matin : brief Tech & IA indisponible : %s", error)
+        rapport["etat"] = f"erreur ({type(error).__name__})"
+    LOG.info("Signal Matin : rapport du brief %s", json.dumps(rapport, ensure_ascii=False, default=str))
+    if brief:
+        return brief, DataSourceStatus(
+            name="Brief Tech & IA", state=DataState.LIVE,
+            detail=brief.verification[:240], item_count=len(brief.facts),
+        )
+    return None, DataSourceStatus(
+        name="Brief Tech & IA", state=DataState.UNAVAILABLE,
+        detail=f"Cahier tech classique imprime ({rapport.get('etat', 'echec')})."[:240],
+    )
+
+
 def construire_edition_live(
     now: dt.datetime | None = None,
     mode: str = "auto",
 ) -> MorningEdition:
     now = now or dt.datetime.now().astimezone()
     items, news_status = RssSource().collect(now)
-    dedicated_tech, tech_status = TechRssSource().collect(now)
+    brief_active = bool(reglage("signal_matin.brief_tech", False))
+    if brief_active:
+        # Vivier large pour le brief ; le cahier classique de secours en prend la tete.
+        dedicated_tech, tech_status = TechRssSource().collect(
+            now,
+            limit=max(12, min(int(reglage("signal_matin.brief_candidats", 72) or 72), 120)),
+            max_age=max(24, min(int(reglage("signal_matin.brief_fenetre_heures", 72) or 72), 168)),
+        )
+    else:
+        dedicated_tech, tech_status = TechRssSource().collect(now)
     news_items = [item for item in items if item.category.casefold() not in {"tech", "ia", "ia & tech"}]
     inline_tech = [item for item in items if item.category.casefold() in {"tech", "ia", "ia & tech"}]
     tech_items: list[NewsItem] = []
@@ -653,8 +726,15 @@ def construire_edition_live(
     curiosity_limit = max(1, min(
         int(reglage("signal_matin.nombre_curiosites_detaillees", 4) or 4), 6,
     ))
+    tech_brief, brief_status = _tech_brief(
+        tech_items, now, brief_active,
+        allow_proxy=tech_status.state == DataState.FALLBACK
+        or bool(reglage("signal_matin.extracteur_public", False)),
+    )
+    # Avec un brief, le cahier tech classique n'est ni enrichi ni imprime.
+    tech_count = 0 if tech_brief else min(tech_detail_limit, len(tech_items))
     deep_targets = [
-        *tech_items[:tech_detail_limit],
+        *tech_items[:tech_count],
         *curiosity_candidates[:curiosity_limit],
     ]
     deep_proxy = (
@@ -665,9 +745,8 @@ def construire_edition_live(
     enriched_deep = enrichir_actualites(
         deep_targets, limite=len(deep_targets), allow_public_proxy=deep_proxy,
     )
-    tech_news = enriched_deep[:min(tech_detail_limit, len(tech_items))]
-    curiosity_start = min(tech_detail_limit, len(tech_items))
-    curiosity_news = enriched_deep[curiosity_start:curiosity_start + curiosity_limit]
+    tech_news = enriched_deep[:tech_count]
+    curiosity_news = enriched_deep[tech_count:tech_count + curiosity_limit]
 
     weather, weather_status = _weather()
     agenda, agenda_status = _agenda(now)
@@ -699,7 +778,7 @@ def construire_edition_live(
         sources=[
             weather_status, agenda_status, news_status, tech_status, content_status,
             loopstr_status, hermes_status, mail_status, social_status,
-            community_status,
+            community_status, brief_status,
         ],
         weather=weather,
         agenda=agenda,
@@ -708,6 +787,7 @@ def construire_edition_live(
         news=bundle,
         tech=tech,
         tech_news=tech_news,
+        tech_brief=tech_brief,
         curiosity_news=curiosity_news,
         watch=hermes,
         newsletter_digest=mails,
@@ -724,6 +804,12 @@ def construire_edition_live(
                 summary="rendez-vous dans l'agenda aujourd'hui.",
             ) if agenda_status.state == DataState.LIVE else None,
         ),
-        learning=construire_apprentissage_du_jour(now.date()),
+        learning=construire_apprentissage_du_jour(
+            now.date(),
+            history_path=ROOT / "notes" / "signal_matin_learning_history.json",
+            archive_dir=ROOT / "output" / "data",
+            word_generator=generer_mot_francais,
+            crossword_term_generator=generer_termes_mots_croises,
+        ),
     )
     return normaliser_edition(edition, mode=mode)

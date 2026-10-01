@@ -31,21 +31,19 @@ $uv = Get-Command uv.exe -ErrorAction SilentlyContinue
 $python = Get-Command python.exe -ErrorAction SilentlyContinue
 
 if ($uv) {
-    $executable = $uv.Source
-    $commande = if ($Imprimer) { "print --confirm" } else { "generate" }
-    $imprimanteArgs = if ($Imprimer -and $Imprimante) { " --printer `"$Imprimante`"" } else { "" }
-    $duplexArgs = if ($Imprimer -and $RectoVerso) { " --duplex" } else { "" }
-    $arguments = "run --project `"$Projet`" generate-morning-paper $commande$imprimanteArgs$duplexArgs"
+    $moteur = "-UvExe `"$($uv.Source)`""
 } elseif ($python) {
-    $executable = $python.Source
-    $commande = if ($Imprimer) { "print --confirm" } else { "generate" }
-    $imprimanteArgs = if ($Imprimer -and $Imprimante) { " --printer `"$Imprimante`"" } else { "" }
-    $duplexArgs = if ($Imprimer -and $RectoVerso) { " --duplex" } else { "" }
-    $arguments = "-m core.signal_matin.cli $commande$imprimanteArgs$duplexArgs"
+    $moteur = "-PythonExe `"$($python.Source)`""
 } else {
     throw "Ni uv.exe ni python.exe n'est disponible dans le PATH."
 }
 
+$runner = Join-Path $PSScriptRoot "executer_signal_matin_planifie.ps1"
+$executable = (Get-Command powershell.exe -ErrorAction Stop).Source
+$printArgs = if ($Imprimer) { " -Imprimer" } else { "" }
+$imprimanteArgs = if ($Imprimer -and $Imprimante) { " -Imprimante `"$Imprimante`"" } else { "" }
+$duplexArgs = if ($Imprimer -and $RectoVerso) { " -RectoVerso" } else { "" }
+$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`" -Projet `"$Projet`" $moteur$printArgs$imprimanteArgs$duplexArgs"
 $action = New-ScheduledTaskAction -Execute $executable -Argument $arguments -WorkingDirectory $Projet
 $trigger = New-ScheduledTaskTrigger -Daily -At $Heure
 $settings = New-ScheduledTaskSettingsSet `

@@ -190,6 +190,56 @@ class PersonalBlock(Modele):
     free_window: str = Field(default="", max_length=240)
 
 
+class BriefSource(Modele):
+    """Source lue en entier par Jarvis ; l'URL sert a la verification, pas au papier."""
+    id: int = Field(ge=1, le=99)
+    name: str = Field(min_length=1, max_length=120)
+    title: str = Field(default="", max_length=240)
+    url: HttpUrl | None = None
+    published_at: dt.datetime | None = None
+    role: Literal["actualite", "contexte"] = "actualite"
+
+
+class BriefFact(Modele):
+    fact: str = Field(min_length=1, max_length=900)
+    quote: str = Field(min_length=1, max_length=300)
+    translation: str = Field(default="", max_length=400)
+    source_id: int = Field(ge=1, le=99)
+    why: str = Field(default="", max_length=600)
+
+
+class BriefAnalysis(Modele):
+    subject: str = Field(min_length=1, max_length=200)
+    facts: str = Field(default="", max_length=2400)
+    context: str = Field(default="", max_length=2400)
+    geopolitics: str = Field(default="", max_length=2400)
+    economics: str = Field(default="", max_length=2400)
+    stakes: str = Field(default="", max_length=2400)
+    readings: str = Field(default="", max_length=2400)
+    uncertain: str = Field(default="", max_length=1600)
+    confidence: str = Field(default="", max_length=20)
+
+
+class BriefThread(Modele):
+    text: str = Field(min_length=1, max_length=900)
+    established: bool = False
+
+
+class TechBrief(Modele):
+    """Brief Tech & IA analytique : faits sources, citations verifiees, analyses."""
+    title: str = Field(min_length=1, max_length=120)
+    essentials: list[str] = Field(default_factory=list, max_length=5)
+    facts: list[BriefFact] = Field(default_factory=list, max_length=8)
+    analyses: list[BriefAnalysis] = Field(default_factory=list, max_length=3)
+    threads: list[BriefThread] = Field(default_factory=list, max_length=6)
+    questions: list[str] = Field(default_factory=list, max_length=3)
+    blind_spots: list[str] = Field(default_factory=list, max_length=4)
+    watch: list[str] = Field(default_factory=list, max_length=5)
+    unknowns: list[str] = Field(default_factory=list, max_length=6)
+    sources: list[BriefSource] = Field(default_factory=list, max_length=40)
+    verification: str = Field(default="", max_length=600)
+
+
 class MorningEdition(Modele):
     schema_version: Literal["1.0"] = "1.0"
     generated_at: dt.datetime
@@ -203,6 +253,8 @@ class MorningEdition(Modele):
     news: NewsBundle = Field(default_factory=NewsBundle)
     tech: list[DigestItem] = Field(default_factory=list, max_length=16)
     tech_news: list[NewsItem] = Field(default_factory=list, max_length=12)
+    # Remplace le cahier tech quand il est present ; absent du JSON sinon.
+    tech_brief: TechBrief | None = None
     curiosity_news: list[NewsItem] = Field(default_factory=list, max_length=8)
     watch: list[DigestItem] = Field(default_factory=list, max_length=16)
     newsletter_digest: list[DigestItem] = Field(default_factory=list, max_length=16)
@@ -233,4 +285,6 @@ class MorningEdition(Modele):
             + len(self.newsletter_digest) + len(self.social_digest) * 2
             + len(self.community_digest) * 2
             + len(self.recommendations) + extras
+            + (len(self.tech_brief.facts) * 2 + len(self.tech_brief.analyses) * 4
+               if self.tech_brief else 0)
         )
