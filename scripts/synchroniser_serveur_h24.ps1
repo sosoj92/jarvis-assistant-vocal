@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'tester_signal_matin', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -118,6 +118,114 @@ if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 git -C `$repo pull --ff-only origin main
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 Write-Output ('Serveur synchronise sur ' + (git -C `$repo rev-parse --short HEAD))
+"@
+    exit 0
+}
+
+if ($Action -eq 'modifications') {
+    # Lecture seule : noms des fichiers modifies sur le serveur et comparaison avec
+    # la version publiee (origin/main). Aucun contenu n'est affiche, rien n'est ecrase.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+git -C `$repo fetch -q origin
+`$lignes = @(git -C `$repo status --porcelain --untracked-files=no)
+Write-Output ('commit_local=' + (git -C `$repo rev-parse --short HEAD) + ' origin_main=' + (git -C `$repo rev-parse --short origin/main))
+foreach (`$ligne in `$lignes) {
+    `$fichier = `$ligne.Substring(3)
+    git -C `$repo diff --quiet origin/main -- `$fichier
+    `$verdict = if (`$LASTEXITCODE -eq 0) { 'IDENTIQUE a origin/main' } else { 'DIFFERE de origin/main' }
+    `$taille = (git -C `$repo diff --shortstat HEAD -- `$fichier)
+    Write-Output (`$ligne.Substring(0, 2) + ' ' + `$fichier + ' | ' + `$verdict + ' |' + `$taille)
+}
+"@
+    exit 0
+}
+
+if ($Action -eq 'sauvegarder_et_mettre_a_jour') {
+    # Les modifications locales du serveur sont mises de cote dans un stash Git
+    # (recuperables avec git stash list / git stash pop), jamais supprimees, puis
+    # le depot avance en fast-forward sur origin/main.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+`$modifications = @(git -C `$repo status --porcelain --untracked-files=no)
+if (`$modifications.Count -gt 0) {
+    `$message = 'sauvegarde avant synchronisation ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')
+    git -C `$repo stash push -m `$message
+    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+    Write-Output ('Modifications locales mises de cote : ' + (git -C `$repo stash list -1))
+}
+git -C `$repo fetch -q origin
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+# Fichiers non suivis qui portent le nom d'un fichier publie : deplaces dans un
+# dossier de sauvegarde a cote du depot (jamais supprimes) pour laisser passer la mise a jour.
+`$publies = @(git -C `$repo ls-tree -r --name-only origin/main)
+`$conflits = @(git -C `$repo ls-files --others --exclude-standard | Where-Object { `$publies -contains `$_ })
+if (`$conflits.Count -gt 0) {
+    `$sauvegarde = Join-Path (Split-Path -Parent `$repo) ('jarvis-sauvegarde-' + (Get-Date -Format 'yyyyMMdd-HHmm'))
+    foreach (`$fichier in `$conflits) {
+        `$cible = Join-Path `$sauvegarde `$fichier
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent `$cible) | Out-Null
+        Move-Item -LiteralPath (Join-Path `$repo `$fichier) -Destination `$cible
+    }
+    Write-Output ('Fichiers non suivis sauvegardes dans ' + `$sauvegarde + ' : ' + (`$conflits -join ', '))
+}
+git -C `$repo checkout -q main
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+git -C `$repo pull -q --ff-only origin main
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+Write-Output ('Serveur synchronise sur ' + (git -C `$repo rev-parse --short HEAD))
+"@
+    exit 0
+}
+
+if ($Action -eq 'verifier_rendu') {
+    # Sans reseau ni impression : remet en page la derniere edition du serveur
+    # dans un PDF temporaire, puis le supprime. Valide Python, Chromium et la pagination.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+`$py = @'
+import sys, tempfile
+from pathlib import Path
+from pypdf import PdfReader
+from core.signal_matin.normalizer import charger_edition
+from core.signal_matin.pdf import generer_pdf
+derniere = sorted(Path("output/data").glob("????-??-??-signal-matin.json"))[-1]
+edition = charger_edition(derniere, mode="auto")
+with tempfile.TemporaryDirectory() as dossier:
+    pdf = generer_pdf(edition, Path(dossier) / "verification.pdf")
+    print("edition=" + derniere.name[:10] + " densite=" + edition.edition.density.value
+          + " pages=" + str(len(PdfReader(str(pdf)).pages)))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_verifier_rendu.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+`$env:PYTHONPATH = `$repo
+Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+`$code = `$LASTEXITCODE
+Remove-Item -LiteralPath `$fichier -Force
+exit `$code
+"@
+    exit 0
+}
+
+if ($Action -eq 'lignes_uniques') {
+    # Lecture seule : lignes presentes sur le serveur mais absentes de origin/main,
+    # pour verifier qu'aucun travail propre au serveur ne serait perdu.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+foreach (`$ligne in @(git -C `$repo status --porcelain --untracked-files=no)) {
+    `$fichier = `$ligne.Substring(3)
+    git -C `$repo diff --quiet origin/main -- `$fichier
+    if (`$LASTEXITCODE -eq 0) { continue }
+    `$uniques = @(git -C `$repo diff --unified=0 origin/main -- `$fichier |
+        Where-Object { `$_ -match '^\+' -and `$_ -notmatch '^\+\+\+' })
+    Write-Output ('== ' + `$fichier + ' : ' + `$uniques.Count + ' ligne(s) propre(s) au serveur')
+    `$uniques | Select-Object -First 60
+}
 "@
     exit 0
 }
