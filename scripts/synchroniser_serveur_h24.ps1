@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -180,6 +180,38 @@ if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 git -C `$repo pull -q --ff-only origin main
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 Write-Output ('Serveur synchronise sur ' + (git -C `$repo rev-parse --short HEAD))
+"@
+    exit 0
+}
+
+if ($Action -eq 'derniere_edition') {
+    # Lecture seule : ce que contient la derniere edition (brief ou cahier classique)
+    # et les dernieres lignes utiles du journal d'execution de la tache.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+Set-Location `$repo
+`$py = @'
+import json
+from pathlib import Path
+chemin = sorted(Path("output/data").glob("????-??-??-signal-matin.json"))[-1]
+donnees = json.loads(chemin.read_text(encoding="utf-8"))
+brief = donnees.get("tech_brief")
+statut = next((s for s in donnees.get("sources", []) if s.get("name") == "Brief Tech & IA"), {})
+print("edition=" + chemin.name[:10] + " generee=" + str(donnees.get("generated_at", ""))[:19])
+print("brief_present=" + str(bool(brief)) + " infos=" + str(len(brief["facts"]) if brief else 0)
+      + " analyses=" + str(len(brief["analyses"]) if brief else 0))
+print("statut_brief=" + str(statut.get("state")) + " | " + str(statut.get("detail")))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_derniere_edition.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
+`$log = Get-ChildItem (Join-Path `$repo 'output\logs') -Filter 'signal-matin-*.log' | Sort-Object LastWriteTime | Select-Object -Last 1
+if (`$log) {
+    Write-Output ('journal=' + `$log.Name)
+    Get-Content -LiteralPath `$log.FullName | Where-Object { `$_ -match '(?i)debut|fin signal|imprim|erreur|error|pdf' } | Select-Object -Last 8
+}
 "@
     exit 0
 }
