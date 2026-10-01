@@ -37,8 +37,11 @@ logs/
 
 # Editions personnelles generees (JSON, HTML, PDF et rendus QA)
 output/
-tmp/pdfs/
+tmp/
 .uv-cache/
+
+# Consignes locales d'agents IA (non versionnees)
+AGENTS.md
 
 # Profil navigateur persistant des reservations (cookies, sessions connectees)
 .profil_reservation/
