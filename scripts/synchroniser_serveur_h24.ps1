@@ -1,13 +1,17 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
 
     # Utilise uniquement par definir_heure : nouvelle heure quotidienne HH:mm.
     [ValidatePattern('^([01]\d|2[0-3]):[0-5]\d$')]
-    [string]$Heure = ''
+    [string]$Heure = '',
+
+    # Facultatif avec definir_heure : duree maximale d'execution de la tache.
+    [ValidateRange(0, 120)]
+    [int]$DureeMinutes = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -180,6 +184,180 @@ Write-Output ('Serveur synchronise sur ' + (git -C `$repo rev-parse --short HEAD
     exit 0
 }
 
+if ($Action -eq 'tester_brief') {
+    # Repetition generale SANS impression ni historique : brief reel, PDF temporaire,
+    # puis lecture du JSON par la liseuse installee. Fichiers temporaires supprimes.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+`$json = Join-Path `$env:TEMP 'jarvis_test_brief_edition.json'
+`$py = @'
+import datetime as dt, json, sys, tempfile, time
+from pathlib import Path
+from pypdf import PdfReader
+from core.signal_matin import sources, tech_brief
+from core.signal_matin.normalizer import charger_edition
+from core.signal_matin.pdf import generer_pdf
+
+maintenant = dt.datetime.now().astimezone()
+debut = time.time()
+candidats, statut = sources.TechRssSource().collect(maintenant, limit=72, max_age=72)
+rapport = {}
+brief = tech_brief.construire_brief(candidats, maintenant, allow_proxy=True,
+                                    enregistrer_historique=False, rapport=rapport)
+print("duree_brief_s=" + str(round(time.time() - debut)) + " candidats=" + str(len(candidats)))
+resume = {k: v for k, v in rapport.items() if k not in ("relecture", "retraits_mecaniques")}
+print("rapport=" + json.dumps(resume, ensure_ascii=False, default=str)[:900])
+print("corrections_relecture=" + str(len(rapport.get("relecture", []))) +
+      " retraits_verification=" + str(len(rapport.get("retraits_mecaniques", []))))
+if brief is None:
+    sys.exit(3)
+print("verification=" + brief.verification)
+derniere = sorted(Path("output/data").glob("????-??-??-signal-matin.json"))[-1]
+edition = charger_edition(derniere, mode="auto").model_copy(update={"tech_brief": brief})
+with tempfile.TemporaryDirectory() as dossier:
+    pdf = generer_pdf(edition, Path(dossier) / "test.pdf")
+    print("pdf_pages=" + str(len(PdfReader(str(pdf)).pages)))
+Path(sys.argv[1]).write_text(edition.model_dump_json(exclude_none=True), encoding="utf-8")
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_tester_brief.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+`$env:PYTHONPATH = `$repo
+Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier `$json
+`$code = `$LASTEXITCODE
+Remove-Item -LiteralPath `$fichier -Force
+if (`$code -ne 0) { exit `$code }
+
+`$liseuse = [string]@((Get-ScheduledTask -TaskName 'Signal Matin - liseuse').Actions)[0].WorkingDirectory
+`$pyLiseuse = Join-Path `$liseuse '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath `$pyLiseuse)) { `$pyLiseuse = (Get-Command python).Source }
+Set-Location `$liseuse
+& `$pyLiseuse -c "import sys; sys.path.insert(0, 'src'); from pathlib import Path; from signal_matin.normalizer import charger_edition; e = charger_edition(Path(sys.argv[1])); print('liseuse_accepte=True brief_infos=' + str(len(e.tech_brief.facts)))" `$json
+`$code = `$LASTEXITCODE
+Remove-Item -LiteralPath `$json -Force
+exit `$code
+"@
+    exit 0
+}
+
+if ($Action -eq 'activer_brief') {
+    # Modification chirurgicale de config.yaml (jamais affiche) : seules les cles
+    # signal_matin.brief_tech et signal_matin.modele_brief changent ; le resultat est
+    # relu et compare a l'ancienne configuration avant ecriture ; copie de sauvegarde
+    # hors du depot.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+`$py = @'
+import copy, datetime, shutil, sys
+from pathlib import Path
+import yaml
+
+VALEURS = {"brief_tech": True, "modele_brief": "gpt-5.6-terra"}
+chemin = Path("config.yaml")
+texte = chemin.read_text(encoding="utf-8")
+nl = "\r\n" if "\r\n" in texte else "\n"
+avant = yaml.safe_load(texte) or {}
+lignes = texte.splitlines(keepends=True)
+
+def haut_niveau(ligne):
+    return ligne.strip() and not ligne[:1].isspace() and not ligne.lstrip().startswith("#")
+
+debut = next((i for i, l in enumerate(lignes)
+              if haut_niveau(l) and l.lstrip("﻿").split("#")[0].strip() == "signal_matin:"), None)
+if debut is None:
+    if "signal_matin" in avant:
+        sys.exit("section signal_matin dans un format inattendu : rien n'a ete modifie")
+    # Aucune section : Signal Matin tournait avec ses valeurs par defaut. On l'ajoute a la fin.
+    if lignes and not lignes[-1].endswith(("\n", "\r")):
+        lignes[-1] += nl
+    lignes += [nl, "signal_matin:" + nl]
+    debut = len(lignes) - 1
+fin = next((i for i in range(debut + 1, len(lignes)) if haut_niveau(lignes[i])), len(lignes))
+enfants = [l for l in lignes[debut + 1:fin] if l.strip() and not l.lstrip().startswith("#")]
+retrait = enfants[0][:len(enfants[0]) - len(enfants[0].lstrip())] if enfants else "  "
+for cle, valeur in VALEURS.items():
+    rendu = retrait + cle + ": " + ("true" if valeur is True else '"' + str(valeur) + '"') + nl
+    trouve = next((i for i in range(debut + 1, fin) if lignes[i].startswith(retrait + cle + ":")), None)
+    if trouve is None:
+        lignes.insert(debut + 1, rendu)
+        fin += 1
+    else:
+        lignes[trouve] = rendu
+nouveau = "".join(lignes)
+attendu = copy.deepcopy(avant)
+attendu.setdefault("signal_matin", {}).update(VALEURS)
+if yaml.safe_load(nouveau) != attendu:
+    sys.exit("verification echouee : rien n'a ete modifie")
+sauvegarde = Path("..") / ("jarvis-sauvegarde-config-" + datetime.datetime.now().strftime("%Y%m%d-%H%M")) / "config.yaml"
+sauvegarde.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy2(chemin, sauvegarde)
+chemin.write_text(nouveau, encoding="utf-8", newline="")
+print("config.yaml mis a jour (brief_tech=true, modele_brief=gpt-5.6-terra), reste identique ; copie de sauvegarde hors du depot")
+from core import cloud
+print("fournisseur=" + cloud.fournisseur() + " cle_disponible=" + str(cloud.disponible()))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_activer_brief.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+`$env:PYTHONPATH = `$repo
+Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+`$code = `$LASTEXITCODE
+Remove-Item -LiteralPath `$fichier -Force
+exit `$code
+"@
+    exit 0
+}
+
+if ($Action -eq 'etat_liseuse' -or $Action -eq 'mettre_a_jour_liseuse') {
+    # Le serveur liseuse est une installation separee du depot autonome Signal Matin,
+    # retrouvee via sa tache planifiee. etat_liseuse est en lecture seule.
+    $mettreAJour = if ($Action -eq 'mettre_a_jour_liseuse') { '$true' } else { '$false' }
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$mettreAJour = $mettreAJour
+`$tache = Get-ScheduledTask -TaskName 'Signal Matin - liseuse' -ErrorAction SilentlyContinue
+if (-not `$tache) { throw 'Tache Signal Matin - liseuse absente.' }
+`$racine = [string]@(`$tache.Actions)[0].WorkingDirectory
+Write-Output ('tache=' + `$tache.State + ' depot_git=' + (Test-Path -LiteralPath (Join-Path `$racine '.git')))
+Write-Output ('commit=' + (git -C `$racine rev-parse --short HEAD) + ' branche=' + (git -C `$racine branch --show-current))
+git -C `$racine fetch -q origin
+Write-Output ('origin_main=' + (git -C `$racine rev-parse --short origin/main))
+`$modifs = @(git -C `$racine status --porcelain --untracked-files=no)
+Write-Output ('modifications=' + `$modifs.Count)
+`$modifs
+if (-not `$mettreAJour) { exit 0 }
+
+if (`$modifs.Count -gt 0) {
+    git -C `$racine stash push -m ('sauvegarde avant synchronisation ' + (Get-Date -Format 'yyyy-MM-dd HH:mm'))
+    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+}
+`$publies = @(git -C `$racine ls-tree -r --name-only origin/main)
+`$conflits = @(git -C `$racine ls-files --others --exclude-standard | Where-Object { `$publies -contains `$_ })
+if (`$conflits.Count -gt 0) {
+    `$sauvegarde = Join-Path (Split-Path -Parent `$racine) ('signal-matin-sauvegarde-' + (Get-Date -Format 'yyyyMMdd-HHmm'))
+    foreach (`$fichier in `$conflits) {
+        `$cible = Join-Path `$sauvegarde `$fichier
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent `$cible) | Out-Null
+        Move-Item -LiteralPath (Join-Path `$racine `$fichier) -Destination `$cible
+    }
+    Write-Output ('Fichiers non suivis sauvegardes : ' + (`$conflits -join ', '))
+}
+git -C `$racine checkout -q main
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+git -C `$racine pull -q --ff-only origin main
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+Write-Output ('Liseuse synchronisee sur ' + (git -C `$racine rev-parse --short HEAD))
+Stop-ScheduledTask -TaskName 'Signal Matin - liseuse' -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-ScheduledTask -TaskName 'Signal Matin - liseuse'
+Start-Sleep -Seconds 6
+Write-Output ('tache_apres_redemarrage=' + (Get-ScheduledTask -TaskName 'Signal Matin - liseuse').State)
+"@
+    exit 0
+}
+
 if ($Action -eq 'verifier_rendu') {
     # Sans reseau ni impression : remet en page la derniere edition du serveur
     # dans un PDF temporaire, puis le supprime. Valide Python, Chromium et la pagination.
@@ -302,11 +480,19 @@ if ($Action -eq 'definir_heure') {
     Invoke-ServeurH24 @"
 `$ErrorActionPreference = 'Stop'
 `$taskName = 'Jarvis - Signal Matin'
-`$null = Get-ScheduledTask -TaskName `$taskName
+`$tache = Get-ScheduledTask -TaskName `$taskName
 `$declencheur = New-ScheduledTaskTrigger -Daily -At $heureLitterale
-Set-ScheduledTask -TaskName `$taskName -Trigger `$declencheur | Out-Null
+if ($DureeMinutes -gt 0) {
+    `$reglages = `$tache.Settings
+    `$reglages.ExecutionTimeLimit = 'PT$($DureeMinutes)M'
+    Set-ScheduledTask -TaskName `$taskName -Trigger `$declencheur -Settings `$reglages | Out-Null
+} else {
+    Set-ScheduledTask -TaskName `$taskName -Trigger `$declencheur | Out-Null
+}
 `$info = Get-ScheduledTaskInfo -TaskName `$taskName
 Write-Output ('prochaine_execution=' + `$info.NextRunTime.ToString('s'))
+Write-Output ('duree_maximale=' + (Get-ScheduledTask -TaskName `$taskName).Settings.ExecutionTimeLimit)
+Write-Output ('action_imprime=' + ([string]@((Get-ScheduledTask -TaskName `$taskName).Actions)[0].Arguments -match '-Imprimer'))
 "@
     exit 0
 }
