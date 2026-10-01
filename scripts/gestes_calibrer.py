@@ -39,8 +39,8 @@ def main():
         "model_path": str(RACINE / "gestes" / "models" / "hand_landmarker.task"),
     }
     env = dict(os.environ, GESTES_CONF=json.dumps(conf))
-    print("Calibration : t/T maintien, c/C cooldown, w/W swipe horizontal, "
-          "v/V swipe vertical, z/Z zoom avant, r/R zoom arrière, x/X tenue zoom, "
+    print("Calibration : t/T maintien, c/C cooldown, w/W pas horizontal, "
+          "v/V pas vertical, z/Z zoom avant, r/R zoom arrière, x/X tenue zoom, "
           "p clic souris, k/K seuil pincement, i inverser vertical, s sauver, q quitter")
     subprocess.run([str(PY), str(RACINE / "gestes" / "tracker.py"), "--calibrate"],
                    env=env, cwd=str(RACINE))

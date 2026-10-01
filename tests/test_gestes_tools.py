@@ -1,7 +1,7 @@
 """Tests des commandes vocales de gestes, sans ouvrir la webcam."""
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from core import gestes as gestes_core
 from tools.gestes import (demande_calibration_gestes, demande_demo_gestes,
@@ -91,6 +91,29 @@ class GestesToolsTests(unittest.TestCase):
                    return_value="Démo active.") as lancer:
             self.assertEqual(lancer_demo_gestes(), "Démo active.")
         lancer.assert_called_once_with()
+
+    def test_mode_visio_prepare_application_camera_avant_tracker(self):
+        appels = Mock()
+        appels.camera.return_value = (True, "")
+        appels.tracker.return_value = "Démo active."
+        with (patch.object(gestes_core, "actif", side_effect=[False, True]),
+              patch.object(gestes_core, "_demarrer_application_camera",
+                           new=appels.camera),
+              patch.object(gestes_core, "_demarrer_tracker",
+                           new=appels.tracker)):
+            reponse = gestes_core.demarrer_demo()
+        self.assertEqual(reponse, "Démo active.")
+        self.assertEqual(appels.mock_calls,
+                         [call.camera(), call.tracker(demo=True)])
+
+    def test_mode_visio_ne_lance_pas_tracker_si_camera_absente(self):
+        with (patch.object(gestes_core, "actif", return_value=False),
+              patch.object(gestes_core, "_demarrer_application_camera",
+                           return_value=(False, "Caméra absente.")),
+              patch.object(gestes_core, "_demarrer_tracker") as tracker):
+            reponse = gestes_core.demarrer_demo()
+        self.assertEqual(reponse, "Caméra absente.")
+        tracker.assert_not_called()
 
     def test_mode_regard_lance_le_regard(self):
         with patch("core.gestes.demarrer_regard",

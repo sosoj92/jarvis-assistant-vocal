@@ -30,10 +30,16 @@ _PROC = None           # sous-process tracker
 _MODE_DEMO = False     # tracker visible + actions réelles (pour démonstration locale)
 _PROC_CALIBRATION = None  # fenêtre de calibration locale, lancée à la voix
 _PROC_REGARD = None    # contrôle local du pointeur par les yeux
+_PROC_CAMERA_APP = None  # application qui fournit éventuellement la caméra virtuelle
+_CAMERA_APP_LANCEE_PAR_JARVIS = False
 _COUPER_TTS = None     # callback fourni par jarvis14 (couper_parole)
 _FEEDBACK = None       # callback fourni par jarvis14 (bip + flash HUD)
 _CURSEUR_LUM = {}      # compatibilité des anciens mappings par pincement
 _DERNIER = 0.0         # anti-rebond côté Jarvis (en plus du cooldown du tracker)
+_GESTES_CONTINUS = {
+    "fenetre_droite", "fenetre_gauche", "defilement_haut", "defilement_bas",
+    "volume_haut", "volume_bas", "piste_suivante", "piste_precedente",
+}
 
 # Mapping par défaut geste -> action (surchargé par config.yaml gestes.mapping).
 # TOUTES les actions ici sont N1/N2 par construction.
@@ -74,6 +80,82 @@ def _python_tracker():
     p = reglage("gestes.python", "") or "gestes/.venv-tracker/Scripts/python.exe"
     p = Path(p)
     return p if p.is_absolute() else (_RACINE / p)
+
+
+def _trouver_application_camera():
+    """Résout l'application caméra facultative sans imposer Logitech au projet."""
+    configure = str(reglage("gestes.camera_app.executable", "") or "").strip()
+    if configure:
+        chemin = Path(os.path.expandvars(configure)).expanduser()
+        return chemin if chemin.exists() else None
+    if os.name != "nt":
+        return None
+    candidats = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "Logitech" / "LogiCapture" / "bin" / "LogiCapture.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        / "Logitech" / "LogiCapture" / "bin" / "LogiCapture.exe",
+    )
+    return next((chemin for chemin in candidats if chemin.exists()), None)
+
+
+def _application_camera_deja_active():
+    """Évite d'ouvrir une seconde instance de Logitech Capture sous Windows."""
+    if (_PROC_CAMERA_APP is not None
+            and _PROC_CAMERA_APP.poll() is None):
+        return True
+    if os.name != "nt":
+        return False
+    try:
+        resultat = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq LogiCapture.exe", "/NH"],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        return "logicapture.exe" in (resultat.stdout or "").lower()
+    except Exception:
+        return False
+
+
+def _demarrer_application_camera():
+    """Prépare la caméra virtuelle configurée avant d'ouvrir le tracker visible."""
+    global _PROC_CAMERA_APP, _CAMERA_APP_LANCEE_PAR_JARVIS
+    if not bool(reglage("gestes.camera_app.actif", False)):
+        return True, ""
+    if _application_camera_deja_active():
+        return True, ""
+    executable = _trouver_application_camera()
+    if executable is None:
+        return False, (
+            "Je n'ai pas trouvé l'application caméra configurée. "
+            "Vérifie gestes.camera_app.executable dans config.yaml."
+        )
+    try:
+        _PROC_CAMERA_APP = subprocess.Popen(
+            [str(executable)], cwd=str(executable.parent),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        _CAMERA_APP_LANCEE_PAR_JARVIS = True
+        attente = max(0.0, min(
+            10.0, float(reglage("gestes.camera_app.attente_s", 3.0))))
+        if attente:
+            time.sleep(attente)
+        LOG.info("gestes: application caméra lancée (%s)", executable.name)
+        return True, ""
+    except Exception as exc:
+        _PROC_CAMERA_APP = None
+        _CAMERA_APP_LANCEE_PAR_JARVIS = False
+        LOG.exception("gestes: démarrage application caméra")
+        return False, f"Je n'ai pas pu ouvrir l'application caméra ({exc})."
+
+
+def _arreter_application_camera():
+    """Ferme uniquement l'instance démarrée par Jarvis, jamais celle de l'utilisateur."""
+    global _PROC_CAMERA_APP, _CAMERA_APP_LANCEE_PAR_JARVIS
+    if (_CAMERA_APP_LANCEE_PAR_JARVIS
+            and bool(reglage("gestes.camera_app.fermer_avec_mode", True))):
+        _terminer_processus(_PROC_CAMERA_APP)
+    _PROC_CAMERA_APP = None
+    _CAMERA_APP_LANCEE_PAR_JARVIS = False
 
 
 def _seuils():
@@ -182,7 +264,13 @@ def demarrer_demo():
     """Remplace le tracker courant par une fenêtre visible qui agit vraiment."""
     if actif():
         arreter()
-    return _demarrer_tracker(demo=True)
+    pret, erreur = _demarrer_application_camera()
+    if not pret:
+        return erreur
+    reponse = _demarrer_tracker(demo=True)
+    if not actif():
+        _arreter_application_camera()
+    return reponse
 
 
 def arreter():
@@ -192,6 +280,7 @@ def arreter():
         _terminer_processus(_PROC)
         _PROC = None
     _MODE_DEMO = False
+    _arreter_application_camera()
     return "Contrôle par gestes coupé. La webcam est éteinte."
 
 
@@ -294,7 +383,10 @@ def _traiter(geste):
         return  # simple fenêtre "Jarvis regarde" : pas d'action, juste le feedback
 
     now = time.time()
-    if now - _DERNIER < 0.4:      # anti-rebond côté Jarvis
+    # Le tracker cadence déjà les mouvements continus. Leur appliquer les
+    # 400 ms historiques faisait perdre une partie des petits pas successifs.
+    delai = 0.10 if geste in _GESTES_CONTINUS else 0.4
+    if now - _DERNIER < delai:      # anti-rebond côté Jarvis
         return
     _DERNIER = now
 

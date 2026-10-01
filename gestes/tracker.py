@@ -8,9 +8,10 @@ un token). MediaPipe (nouvelle API Tasks) tourne en CPU (XNNPACK).
 Lance par core/gestes.py (Jarvis 3.13). Config passee via l'env GESTES_CONF (JSON).
 Mode calibration : `--calibrate` (affiche la camera + landmarks + seuils reglables).
 
-Vocabulaire v2 (gestes FIABLES, tenus) :
+Vocabulaire v3 (poses tenues + mouvements continus) :
   main ouverte immobile -> pause ; pouce leve -> lecture ; poing -> couper Jarvis
-  2 doigts -> mode fenetres, puis main ouverte + swipe horizontal/vertical
+  2 doigts -> mode fenetres, puis main ouverte + petits pas horizontal/vertical
+  dans un mode continu, le poing repositionne la main sans action
   3 doigts -> mode audio, puis main ouverte + swipe horizontal/vertical
   index seul tenu -> mode souris, puis ce meme index pilote le pointeur
   2 mains ouvertes -> ecarter pour zoomer, rapprocher pour dezoomer
@@ -189,8 +190,16 @@ class MachineGestes:
         self.tenue_s = float(s.get("tenue_s", 1.4))
         self.tenue_mode_s = float(s.get("tenue_mode_s", 0.9))
         self.cooldown_s = float(s.get("cooldown_s", 0.8))
-        self.swipe_seuil = float(s.get("swipe_seuil", 0.20))
-        self.swipe_vertical_seuil = float(s.get("swipe_vertical_seuil", 0.18))
+        # Depuis la V3, le mouvement est continu : chaque petit déplacement
+        # depuis la dernière position déclenche un cran. Les anciennes valeurs
+        # de calibration (pensées pour un grand swipe) sont plafonnées afin de
+        # migrer automatiquement sans rendre le nouveau mode insensible.
+        ancien_h = float(s.get("swipe_seuil", 0.20))
+        ancien_v = float(s.get("swipe_vertical_seuil", 0.18))
+        self.swipe_seuil = float(
+            s.get("swipe_pas_horizontal", min(ancien_h, 0.09)))
+        self.swipe_vertical_seuil = float(
+            s.get("swipe_pas_vertical", min(ancien_v, 0.075)))
         self.swipe_fenetre_s = float(s.get("swipe_fenetre_s", 1.0))
         self.swipe_dominance = float(s.get("swipe_dominance", 1.20))
         self.swipe_pret_s = float(s.get("swipe_pret_s", 0.35))
@@ -218,13 +227,12 @@ class MachineGestes:
         self._mode_jusqu = 0.0
         self._attend_relachement = False
         self._absence_depuis = None     # fermeture après une vraie sortie du cadre
-        self._hist_xy = []              # (t, x, y) après sélection d'un mode
+        self._hist_xy = []              # compat diagnostic anciennes calibrations
         self._pret_depuis = 0.0         # début de l'immobilité avant un swipe
         self._pret_position = None      # position de référence pendant l'immobilité
-        self._pret_confirme = False     # le trajet de retour n'est jamais un swipe
-        self._swipe_verrou_axe = None   # fin du dernier geste : "h" | "v"
-        self._swipe_pause_position = None
-        self._swipe_pause_depuis = 0.0
+        self._pret_confirme = False
+        self._swipe_origine = None      # origine du prochain cran continu
+        self._repositionnement_poing = False
         self._zoom_reference = None     # distance des paumes après stabilisation
         self._zoom_depuis = 0.0         # début de la stabilisation à deux mains
         self._zoom_pret = False
@@ -251,67 +259,8 @@ class MachineGestes:
         self._pret_depuis = 0.0
         self._pret_position = None
         self._pret_confirme = False
-        self._swipe_verrou_axe = None
-        self._swipe_pause_position = None
-        self._swipe_pause_depuis = 0.0
-
-    def _suivre_fin_swipe(self, t, x, y):
-        """Évite les doublons puis réarme sur pause ou changement d'axe.
-
-        Un swipe est souvent reconnu avant que la main ait fini sa course. La
-        fin du mouvement ne doit pas compter comme un second geste, mais un
-        virage horizontal/vertical volontaire doit pouvoir partir tout de suite.
-        """
-        if self._swipe_verrou_axe is None:
-            return True
-
-        self._hist_xy.append((t, x, y))
-        fenetre = min(self.swipe_fenetre_s,
-                      max(0.22, self.swipe_pause_s * 2.0))
-        self._hist_xy = [p for p in self._hist_xy if t - p[0] <= fenetre]
-        debut = self._hist_xy[0]
-        dx = x - debut[1]
-        dy = y - debut[2]
-        seuil = max(0.025, self.swipe_tourne_seuil)
-
-        tourne = ((self._swipe_verrou_axe == "h"
-                   and abs(dy) >= seuil
-                   and abs(dy) >= abs(dx) * 1.15)
-                  or (self._swipe_verrou_axe == "v"
-                      and abs(dx) >= seuil
-                      and abs(dx) >= abs(dy) * 1.15))
-        if tourne:
-            # Élimine de l'historique la queue du geste précédent, mais garde
-            # le début utile du nouveau trajet perpendiculaire.
-            coord = 1 if self._swipe_verrou_axe == "h" else 2
-            tolerance = max(0.018, seuil * 0.55)
-            indice = 0
-            for i in range(len(self._hist_xy) - 2, -1, -1):
-                if abs(self._hist_xy[i][coord] - self._hist_xy[-1][coord]) > tolerance:
-                    indice = min(i + 1, len(self._hist_xy) - 1)
-                    break
-            self._hist_xy = self._hist_xy[indice:]
-            self._swipe_verrou_axe = None
-            self._swipe_pause_position = (x, y)
-            self._swipe_pause_depuis = t
-            return True
-
-        position = self._swipe_pause_position
-        if position is None:
-            self._swipe_pause_position = (x, y)
-            self._swipe_pause_depuis = t
-            return False
-        mouvement = ((x - position[0]) ** 2 + (y - position[1]) ** 2) ** 0.5
-        if mouvement > max(0.018, self.stabilite_seuil * 0.40):
-            self._swipe_pause_position = (x, y)
-            self._swipe_pause_depuis = t
-            return False
-        if (t - self._swipe_pause_depuis) >= self.swipe_pause_s:
-            self._swipe_verrou_axe = None
-            self._hist_xy = [(t, x, y)]
-            self._swipe_pause_position = (x, y)
-            self._swipe_pause_depuis = t
-        return False
+        self._swipe_origine = None
+        self._repositionnement_poing = False
 
     def _fermer_mode(self):
         self.mode = None
@@ -364,11 +313,11 @@ class MachineGestes:
             return "-"
         if self._attend_relachement:
             return "ouvre la main"
+        if self._repositionnement_poing:
+            return "POING - repositionne sans action"
         if not self._pret_confirme:
             return "stabilise la main ouverte"
-        if self._swipe_verrou_axe is not None:
-            return "change d'axe ou marque une pause"
-        return "PRET - swipe maintenant"
+        return "PAUME ACTIVE - bouge par petits pas"
 
     @property
     def etat_zoom(self):
@@ -476,6 +425,7 @@ class MachineGestes:
                 # devenues discontinues, puis la première image revenue sert de
                 # nouvelle origine sûre.
                 self._hist_xy.clear()
+                self._swipe_origine = None
                 self._pret_position = None
                 self._pret_depuis = t
                 if self._absence_depuis is None:
@@ -501,7 +451,19 @@ class MachineGestes:
         if instant != "mode_souris":
             self._reinitialiser_selection_souris()
 
-        # Le poing reste un arrêt d'urgence, même lorsqu'un mode est armé.
+        # Dans les modes continus, le poing est un embrayage neutre : on peut
+        # ramener la main ailleurs sans produire l'action opposée ni fermer le
+        # mode. Hors de ces modes, il conserve son rôle d'arrêt immédiat.
+        if self.mode in {"fenetres", "audio"} and instant == "poing":
+            if not self._repositionnement_poing:
+                self.debug_evenement = "poing_repositionnement"
+            self._repositionnement_poing = True
+            self._swipe_origine = centre_main(lm)
+            self._pret_confirme = True
+            self._attend_relachement = False
+            self._reinitialiser_tenue()
+            return None
+
         if instant == "poing" and self._tenir("poing", t):
             self._fermer_mode()
             return "poing"
@@ -528,18 +490,21 @@ class MachineGestes:
                 self._attend_relachement = False
                 self._reinitialiser_pret()
 
+            # Après avoir ramené la main fermée, la première paume ouverte ne
+            # commande rien : elle devient simplement la nouvelle origine.
+            if self._repositionnement_poing:
+                if not est_main_deployee(lm):
+                    return None
+                self._repositionnement_poing = False
+                self._pret_confirme = True
+                self._swipe_origine = centre_main(lm)
+                self.debug_evenement = "repositionnement_termine"
+                return None
+
             # Une action de mode exige une main entière ouverte en mouvement.
             if not est_main_deployee(lm):
-                # Une paume ouverte peut être lue comme partielle pendant un
-                # changement de direction. Le mode reste prêt ; seule l'origine
-                # du prochain swipe doit être recalée.
-                self._hist_xy.clear()
-                self._pret_position = None
-                self._pret_depuis = t
-                self._pret_confirme = True
-                # Si un swipe vient d'être reconnu, conserver son verrou même
-                # quand MediaPipe perd brièvement des doigts. Sinon le retour
-                # naturel vers le centre serait pris pour le geste opposé.
+                # Une lecture partielle ne désarme pas le mode et ne change pas
+                # son origine. Une vraie perte de main, elle, la recalera.
                 self._reinitialiser_tenue()
                 return None
             x, y = centre_main(lm)
@@ -564,24 +529,20 @@ class MachineGestes:
                 if (t - self._pret_depuis) < self.swipe_pret_s:
                     return None
                 self._pret_confirme = True
-                self._hist_xy = [(t, x, y)]
+                self._swipe_origine = (x, y)
                 return None
 
-            if self._swipe_verrou_axe is not None:
-                if not self._suivre_fin_swipe(t, x, y):
-                    return None
-            else:
-                self._hist_xy.append((t, x, y))
-            self._hist_xy = [p for p in self._hist_xy if t - p[0] <= self.swipe_fenetre_s]
-            if (len(self._hist_xy) < 3
-                    or (t - self._dernier_envoi) < self.swipe_cooldown_s):
+            if self._swipe_origine is None:
+                self._swipe_origine = (x, y)
                 return None
-            dx = self._hist_xy[-1][1] - self._hist_xy[0][1]
-            dy = self._hist_xy[-1][2] - self._hist_xy[0][2]
+            dx = x - self._swipe_origine[0]
+            dy = y - self._swipe_origine[1]
             horizontal = abs(dx) >= self.swipe_seuil and abs(dx) >= abs(dy) * self.swipe_dominance
             vertical = (abs(dy) >= self.swipe_vertical_seuil
                         and abs(dy) >= abs(dx) * self.swipe_dominance)
             if not horizontal and not vertical:
+                return None
+            if (t - self._dernier_envoi) < self.swipe_cooldown_s:
                 return None
 
             vers_bas = dy > 0
@@ -599,15 +560,13 @@ class MachineGestes:
                 else:
                     resultat = "volume_bas" if vers_bas else "volume_haut"
             self._dernier_envoi = t
-            # Verrouille seulement la fin de ce mouvement. Une pause ou un
-            # virage franc sur l'autre axe réarme automatiquement le suivant.
-            self._hist_xy = [(t, x, y)]
+            # La position qui vient de produire une action devient l'origine du
+            # cran suivant. Une pause n'émet rien ; continuer ou inverser le
+            # mouvement produit naturellement les actions suivantes.
+            self._swipe_origine = (x, y)
             self._pret_position = (x, y)
             self._pret_depuis = t
             self._pret_confirme = True
-            self._swipe_verrou_axe = "h" if horizontal else "v"
-            self._swipe_pause_position = (x, y)
-            self._swipe_pause_depuis = t
             self._mode_jusqu = t + self.mode_duree_s
             return resultat
 
@@ -833,12 +792,12 @@ def _afficher_calibration(frame, mains, fsm, historique_gestes, maintenant,
               f"zoom:{fsm.etat_zoom}  distance:{distance_zoom}",
               f"tenue:{fsm.tenue_s:.2f}  mode tenue:{fsm.tenue_mode_s:.2f} "
               f"pret:{fsm.swipe_pret_s:.2f}",
-              f"cooldown:{fsm.cooldown_s:.2f}  swipe H:{fsm.swipe_seuil:.2f} "
+              f"cooldown:{fsm.cooldown_s:.2f}  pas H:{fsm.swipe_seuil:.3f} "
               f"V:{fsm.swipe_vertical_seuil:.2f}  axe V:{'inverse' if fsm.inverser_vertical else 'normal'}",
               f"zoom avant:{fsm.zoom_seuil:.2f}  arriere:{fsm.zoom_reduire_seuil:.2f} "
               f"tenue:{fsm.zoom_tenue_s:.2f}",
-              "[t/T] tenue -/+  [c/C] cooldown -/+  [w/W] swipe H -/+",
-              "[v/V] swipe V -/+  [z/Z] zoom avant -/+  [r/R] zoom arriere -/+",
+              "[t/T] tenue -/+  [c/C] cooldown -/+  [w/W] pas H -/+",
+              "[v/V] pas V -/+  [z/Z] zoom avant -/+  [r/R] zoom arriere -/+",
               "[x/X] tenue zoom -/+  [p] clic pincement on/off  [k/K] pincement -/+",
               "[i] inverser V  [s] sauver  [q] quitter"]
     if demo:
@@ -871,13 +830,13 @@ def _touches_calibration(k, fsm):
     elif k == ord("C"):
         fsm.cooldown_s = min(5.0, fsm.cooldown_s + 0.1)
     elif k == ord("w"):
-        fsm.swipe_seuil = max(0.10, fsm.swipe_seuil - 0.01)
+        fsm.swipe_seuil = max(0.035, fsm.swipe_seuil - 0.005)
     elif k == ord("W"):
-        fsm.swipe_seuil = min(0.60, fsm.swipe_seuil + 0.01)
+        fsm.swipe_seuil = min(0.25, fsm.swipe_seuil + 0.005)
     elif k == ord("v"):
-        fsm.swipe_vertical_seuil = max(0.10, fsm.swipe_vertical_seuil - 0.01)
+        fsm.swipe_vertical_seuil = max(0.030, fsm.swipe_vertical_seuil - 0.005)
     elif k == ord("V"):
-        fsm.swipe_vertical_seuil = min(0.60, fsm.swipe_vertical_seuil + 0.01)
+        fsm.swipe_vertical_seuil = min(0.25, fsm.swipe_vertical_seuil + 0.005)
     elif k == ord("z"):
         fsm.zoom_seuil = max(0.05, fsm.zoom_seuil - 0.01)
     elif k == ord("Z"):
@@ -905,6 +864,8 @@ def _touches_calibration(k, fsm):
             "cooldown_s": round(fsm.cooldown_s, 2),
             "swipe_seuil": round(fsm.swipe_seuil, 3),
             "swipe_vertical_seuil": round(fsm.swipe_vertical_seuil, 3),
+            "swipe_pas_horizontal": round(fsm.swipe_seuil, 3),
+            "swipe_pas_vertical": round(fsm.swipe_vertical_seuil, 3),
             "swipe_fenetre_s": round(fsm.swipe_fenetre_s, 2),
             "swipe_dominance": round(fsm.swipe_dominance, 2),
             "swipe_pret_s": round(fsm.swipe_pret_s, 2),

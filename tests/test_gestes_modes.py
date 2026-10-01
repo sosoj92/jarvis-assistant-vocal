@@ -75,8 +75,8 @@ def _fsm():
         "tenue_s": 1.0,
         "tenue_mode_s": 0.5,
         "cooldown_s": 0.1,
-        "swipe_seuil": 0.20,
-        "swipe_vertical_seuil": 0.20,
+        "swipe_pas_horizontal": 0.08,
+        "swipe_pas_vertical": 0.07,
         "swipe_fenetre_s": 1.0,
         "swipe_dominance": 1.1,
         "swipe_pret_s": 0.3,
@@ -122,6 +122,16 @@ class ClassifieursTests(unittest.TestCase):
 
 
 class ModesTests(unittest.TestCase):
+    def test_ancienne_calibration_est_migree_vers_des_petits_pas(self):
+        fsm = MachineGestes({
+            "seuils": {
+                "swipe_seuil": 0.14,
+                "swipe_vertical_seuil": 0.12,
+            }
+        })
+        self.assertAlmostEqual(fsm.swipe_seuil, 0.09)
+        self.assertAlmostEqual(fsm.swipe_vertical_seuil, 0.075)
+
     def test_index_seul_arme_la_souris_et_deplace_le_pointeur(self):
         fsm = _fsm()
         index = _main(1, x=0.45, y=0.55)
@@ -166,8 +176,8 @@ class ModesTests(unittest.TestCase):
         self.assertEqual(fsm.alimenter(_main(2), 0.6), "mode_fenetres")
         self.assertIsNone(fsm.alimenter(_main(3, x=0.2), 0.7))
         self.assertIsNone(fsm.alimenter(_main(3, x=0.2), 1.05))
-        self.assertIsNone(fsm.alimenter(_main(3, x=0.3), 1.15))
-        self.assertEqual(fsm.alimenter(_main(3, x=0.55), 1.25), "fenetre_droite")
+        self.assertEqual(fsm.alimenter(_main(3, x=0.3), 1.15), "fenetre_droite")
+        self.assertIsNone(fsm.alimenter(_main(3, x=0.3), 1.25))
 
     def test_deux_mains_ouvertes_ecartees_zoom_avant(self):
         fsm = _fsm()
@@ -241,37 +251,30 @@ class ModesTests(unittest.TestCase):
         self.assertIsNone(fsm.alimenter(_main(0, pouce=True), 3.0))
         self.assertEqual(fsm.alimenter(_main(0, pouce=True), 4.1), "pouce_leve")
 
-    def test_mode_fenetres_accepte_plusieurs_swipes(self):
+    def test_mode_fenetres_accepte_des_petits_pas_continus(self):
         fsm = _fsm()
         self.assertIsNone(fsm.alimenter(_main(2), 0.0))
         self.assertEqual(fsm.alimenter(_main(2), 0.6), "mode_fenetres")
         # On peut passer directement de 2 doigts à la paume ouverte.
         self.assertIsNone(fsm.alimenter(_paume(x=0.2), 0.7))
         self.assertIsNone(fsm.alimenter(_paume(x=0.2), 1.05))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.3), 1.15))
-        self.assertEqual(fsm.alimenter(_paume(x=0.55), 1.25), "fenetre_droite")
+        self.assertEqual(fsm.alimenter(_paume(x=0.30), 1.15), "fenetre_droite")
         self.assertEqual(fsm.mode, "fenetres")
-        self.assertEqual(fsm.etat_swipe, "change d'axe ou marque une pause")
+        self.assertEqual(fsm.etat_swipe, "PAUME ACTIVE - bouge par petits pas")
 
-        # Une courte pause au point d'arrivée réarme directement le swipe.
-        self.assertIsNone(fsm.alimenter(_paume(x=0.55), 1.35))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.55), 1.70))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.45), 1.80))
-        self.assertEqual(fsm.alimenter(_paume(x=0.20), 1.90), "fenetre_gauche")
+        # Continuer doucement dans le même sens produit un deuxième cran.
+        self.assertEqual(fsm.alimenter(_paume(x=0.39), 1.35), "fenetre_droite")
+
+        # Une pause, même longue, ne produit rien et ne ferme pas le mode.
+        self.assertIsNone(fsm.alimenter(_paume(x=0.39), 1.70))
+        self.assertIsNone(fsm.alimenter(_paume(x=0.39), 2.10))
         self.assertEqual(fsm.mode, "fenetres")
 
-        # Le même mode change immédiatement d'axe sans réarmer ni stabiliser.
-        self.assertIsNone(fsm.alimenter(_paume(x=0.20, y=0.40), 2.00))
-        self.assertEqual(fsm.alimenter(_paume(x=0.20, y=0.20), 2.10),
+        # Le même mode change d'axe sans refaire les deux doigts.
+        self.assertEqual(fsm.alimenter(_paume(x=0.39, y=0.40), 2.30),
                          "defilement_haut")
-
-        # Une lecture partielle de la paume entre les deux axes ne doit pas
-        # obliger à refaire la pose de sélection à deux doigts.
-        self.assertIsNone(fsm.alimenter(_main(2, x=0.20, y=0.20), 2.15))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.20, y=0.20), 2.20))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.35, y=0.20), 2.30))
-        self.assertEqual(fsm.alimenter(_paume(x=0.55, y=0.20), 2.40),
-                         "fenetre_droite")
+        self.assertEqual(fsm.alimenter(_paume(x=0.39, y=0.31), 2.50),
+                         "defilement_haut")
 
     def test_mode_audio_vertical_regle_le_volume(self):
         fsm = _fsm()
@@ -279,28 +282,29 @@ class ModesTests(unittest.TestCase):
         self.assertEqual(fsm.alimenter(_main(3), 0.6), "mode_audio")
         self.assertIsNone(fsm.alimenter(_paume(y=0.65), 0.7))
         self.assertIsNone(fsm.alimenter(_paume(y=0.65), 1.05))
-        self.assertIsNone(fsm.alimenter(_paume(y=0.55), 1.15))
-        self.assertEqual(fsm.alimenter(_paume(y=0.30), 1.25), "volume_haut")
+        self.assertEqual(fsm.alimenter(_paume(y=0.55), 1.15), "volume_haut")
+        self.assertEqual(fsm.alimenter(_paume(y=0.47), 1.35), "volume_haut")
 
-    def test_retour_au_centre_ne_declenche_pas_le_swipe_oppose(self):
+    def test_poing_repositionne_sans_action_opposee(self):
         fsm = _fsm()
         fsm.alimenter(_main(2), 0.0)
         self.assertEqual(fsm.alimenter(_main(2), 0.6), "mode_fenetres")
         self.assertIsNone(fsm.alimenter(_paume(x=0.55), 0.7))
         self.assertIsNone(fsm.alimenter(_paume(x=0.55), 1.05))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.45), 1.15))
-        self.assertEqual(fsm.alimenter(_paume(x=0.20), 1.25),
+        self.assertEqual(fsm.alimenter(_paume(x=0.45), 1.15),
                          "fenetre_gauche")
 
-        # Même avec une lecture partielle pendant le demi-tour, le trajet de
-        # retour vers le centre ne devient jamais « fenêtre droite ».
-        self.assertIsNone(fsm.alimenter(_main(2, x=0.25), 1.30))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.35), 1.38))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.55), 1.48))
-        self.assertEqual(fsm.etat_swipe,
-                         "change d'axe ou marque une pause")
-        self.assertIsNone(fsm.alimenter(_paume(x=0.55), 1.80))
-        self.assertEqual(fsm.etat_swipe, "PRET - swipe maintenant")
+        # Le poing ramène la main à droite sans action et sans couper le mode.
+        self.assertIsNone(fsm.alimenter(_main(0, x=0.50), 1.25))
+        self.assertIsNone(fsm.alimenter(_main(0, x=0.65), 1.45))
+        self.assertEqual(fsm.mode, "fenetres")
+        self.assertEqual(fsm.etat_swipe, "POING - repositionne sans action")
+        self.assertIsNone(fsm.alimenter(_paume(x=0.65), 1.55))
+        self.assertEqual(fsm.etat_swipe, "PAUME ACTIVE - bouge par petits pas")
+
+        # Après réouverture, un nouveau petit pas agit depuis la nouvelle origine.
+        self.assertEqual(fsm.alimenter(_paume(x=0.55), 1.80),
+                         "fenetre_gauche")
 
     def test_perte_camera_courte_ne_desarme_pas_le_mode(self):
         fsm = _fsm()
@@ -308,16 +312,14 @@ class ModesTests(unittest.TestCase):
         self.assertEqual(fsm.alimenter(_main(2), 0.6), "mode_fenetres")
         self.assertIsNone(fsm.alimenter(_paume(x=0.20), 0.7))
         self.assertIsNone(fsm.alimenter(_paume(x=0.20), 1.05))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.30), 1.15))
-        self.assertEqual(fsm.alimenter(_paume(x=0.55), 1.25),
+        self.assertEqual(fsm.alimenter(_paume(x=0.30), 1.15),
                          "fenetre_droite")
 
         self.assertIsNone(fsm.alimenter(None, 1.30))
         self.assertIsNone(fsm.alimenter(None, 2.00))
         self.assertEqual(fsm.mode, "fenetres")
         self.assertIsNone(fsm.alimenter(_paume(x=0.55, y=0.50), 2.10))
-        self.assertIsNone(fsm.alimenter(_paume(x=0.55, y=0.40), 2.20))
-        self.assertEqual(fsm.alimenter(_paume(x=0.55, y=0.20), 2.30),
+        self.assertEqual(fsm.alimenter(_paume(x=0.55, y=0.40), 2.20),
                          "defilement_haut")
 
     def test_axe_vertical_peut_etre_inverse_par_calibration(self):
@@ -327,8 +329,7 @@ class ModesTests(unittest.TestCase):
         self.assertEqual(fsm.alimenter(_main(3), 0.6), "mode_audio")
         self.assertIsNone(fsm.alimenter(_paume(y=0.65), 0.7))
         self.assertIsNone(fsm.alimenter(_paume(y=0.65), 1.05))
-        self.assertIsNone(fsm.alimenter(_paume(y=0.55), 1.15))
-        self.assertEqual(fsm.alimenter(_paume(y=0.30), 1.25), "volume_bas")
+        self.assertEqual(fsm.alimenter(_paume(y=0.55), 1.15), "volume_bas")
 
     def test_mode_arme_tolere_un_pouce_mal_vu_sans_armer_la_souris(self):
         fsm = _fsm()
@@ -336,8 +337,7 @@ class ModesTests(unittest.TestCase):
         self.assertEqual(fsm.alimenter(_main(2), 0.6), "mode_fenetres")
         self.assertIsNone(fsm.alimenter(_main(4, x=0.2), 0.7))
         self.assertIsNone(fsm.alimenter(_main(4, x=0.2), 1.05))
-        self.assertIsNone(fsm.alimenter(_main(4, x=0.3), 1.12))
-        self.assertEqual(fsm.alimenter(_main(4, x=0.5), 1.20), "fenetre_droite")
+        self.assertEqual(fsm.alimenter(_main(4, x=0.3), 1.12), "fenetre_droite")
         self.assertEqual(fsm.mode, "fenetres")
 
     def test_zoom_tolere_un_pouce_mal_vu_sur_chaque_main(self):
@@ -357,9 +357,8 @@ class ModesTests(unittest.TestCase):
         # Grand mouvement pendant la phase de stabilisation : aucun geste.
         self.assertIsNone(fsm.alimenter(_paume(x=0.6), 0.9))
         self.assertIsNone(fsm.alimenter(_paume(x=0.6), 1.25))
-        self.assertEqual(fsm.etat_swipe, "PRET - swipe maintenant")
-        self.assertIsNone(fsm.alimenter(_paume(x=0.5), 1.35))
-        self.assertEqual(fsm.alimenter(_paume(x=0.25), 1.45), "fenetre_gauche")
+        self.assertEqual(fsm.etat_swipe, "PAUME ACTIVE - bouge par petits pas")
+        self.assertEqual(fsm.alimenter(_paume(x=0.5), 1.35), "fenetre_gauche")
 
     def test_derive_lente_n_empeche_pas_l_etat_pret(self):
         fsm = _fsm()
@@ -369,7 +368,7 @@ class ModesTests(unittest.TestCase):
         self.assertIsNone(fsm.alimenter(_paume(x=0.24), 0.82))
         self.assertIsNone(fsm.alimenter(_paume(x=0.28), 0.94))
         self.assertIsNone(fsm.alimenter(_paume(x=0.32), 1.06))
-        self.assertEqual(fsm.etat_swipe, "PRET - swipe maintenant")
+        self.assertEqual(fsm.etat_swipe, "PAUME ACTIVE - bouge par petits pas")
 
     def test_swipe_sans_mode_ne_declenche_rien(self):
         fsm = _fsm()

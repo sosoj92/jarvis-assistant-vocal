@@ -351,22 +351,24 @@ gestes:                        # controle par gestes de la main (webcam USB) ; v
   raccourci: "ctrl+alt+g"      # raccourci clavier pour basculer les gestes ("" = desactive)
   raccourci_demo: "ctrl+alt+d" # repères visibles + actions réelles, pour une démonstration
   raccourci_regard: "ctrl+alt+r" # bascule le contrôle local du pointeur par les yeux
+  camera_app:                   # facultatif : prépare une caméra virtuelle avant le mode visio
+    actif: false                # true si Logitech Capture (ou équivalent) doit être lancé d'abord
+    executable: ""             # vide = détection automatique de Logitech Capture sous Windows
+    attente_s: 3.0              # délai pour laisser la caméra virtuelle devenir disponible
+    fermer_avec_mode: true      # ne ferme que l'instance ouverte par Jarvis
   navigation_horizontale: onglets # onglets/vues de l'app active ; "applications" restaure Alt+Tab
   souris_moniteur: 1           # écran piloté par l'index : 1=principal, 2=second écran
   pause_pendant_live: true     # compat anciens mappings OBS ; sans effet sur les modes v2
   python: ""                   # python du venv tracker ; vide = gestes/.venv-tracker/Scripts/python.exe
   seuils:                      # ajustables en calibration (gestes/calibration.json prime)
-    tenue_s: 1.4               # maintien main ouverte / pouce / poing
+    tenue_s: 1.4               # maintien des poses statiques hors mode continu
     tenue_mode_s: 0.9          # maintien des 2 ou 3 doigts pour choisir un mode
     cooldown_s: 0.8            # delai mini entre deux commandes
-    swipe_seuil: 0.20          # déplacement horizontal minimal de la paume
-    swipe_vertical_seuil: 0.18 # déplacement vertical minimal de la paume
-    swipe_fenetre_s: 1.0       # le mouvement doit tenir dans cette fenêtre
+    swipe_pas_horizontal: 0.09 # petit déplacement = un onglet/une piste
+    swipe_pas_vertical: 0.075  # petit déplacement = un cran de défilement/volume
     swipe_dominance: 1.2       # axe principal >= autre axe * cette valeur
-    swipe_pret_s: 0.35         # main immobile avant de commencer à mesurer
-    swipe_cooldown_s: 0.18     # délai court entre deux axes, sans doubler un même geste
-    swipe_pause_s: 0.28        # pause qui termine un swipe ; son retour au centre reste ignoré
-    swipe_tourne_seuil: 0.05   # virage perpendiculaire minimal pour changer d'axe directement
+    swipe_pret_s: 0.35         # stabilité initiale avant le contrôle continu
+    swipe_cooldown_s: 0.18     # cadence minimale entre deux petits pas
     stabilite_seuil: 0.06      # mouvement max pendant cette stabilisation
     inverser_vertical: false   # activer si haut/bas sont inversés par la caméra
     mode_duree_s: 30.0         # horizon affiché, rafraîchi tant que la main reste visible
