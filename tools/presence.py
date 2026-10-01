@@ -17,6 +17,7 @@ LOG = obtenir()
 
 # Etat runtime du service.
 _ETAT = {"actif": True, "present": None, "absent_depuis": None}
+_THREAD = None
 
 
 def _joignable(ip):
@@ -74,11 +75,17 @@ def _boucle():
 
 def demarrer_presence():
     """Lance le service de detection en tache de fond (si configure)."""
+    global _THREAD
     ip = reglage("presence.ip", "")
     if not ip:
         return
     _ETAT["actif"] = bool(reglage("presence.actif", True))
-    threading.Thread(target=_boucle, daemon=True).start()
+    if not _ETAT["actif"]:
+        print("Detection de presence desactivee.")
+        return
+    if _THREAD is None or not _THREAD.is_alive():
+        _THREAD = threading.Thread(target=_boucle, daemon=True)
+        _THREAD.start()
     etat = "active" if _ETAT["actif"] else "en pause"
     print(f"Detection de presence {etat} (iPhone {ip}).")
 
@@ -99,4 +106,6 @@ def demarrer_presence():
 def detection_presence(actif: bool = True) -> str:
     _ETAT["actif"] = bool(actif)
     definir("presence.actif", bool(actif))
+    if actif:
+        demarrer_presence()
     return "Detection de presence " + ("activee." if actif else "desactivee.")

@@ -12,6 +12,7 @@ Donnees perso -> mcp_expose=False.
 import datetime as dt
 import json
 import logging
+import re
 from pathlib import Path
 
 from core.config import reglage
@@ -20,6 +21,15 @@ from core.registre import outil
 LOG = logging.getLogger("jarvis")
 _RACINE = Path(__file__).resolve().parent.parent
 _HOTE = None   # hote qui fonctionne (graph.facebook.com ou graph.instagram.com)
+
+
+def _erreur_sans_secret(erreur):
+    """Retire les jetons places dans les URL avant toute ecriture dans les logs."""
+    return re.sub(
+        r"(?i)(access_token=)[^&\s)]+",
+        r"\1<masque>",
+        str(erreur),
+    )
 
 
 def _comptes():
@@ -152,7 +162,7 @@ def _rafraichir_un(token):
         d = _get("refresh_access_token", token, grant_type="ig_refresh_token")
         return d.get("access_token")
     except Exception as e:
-        LOG.info("instagram: refresh impossible (%s)", e)
+        LOG.info("instagram: refresh impossible (%s)", _erreur_sans_secret(e))
         return None
 
 
