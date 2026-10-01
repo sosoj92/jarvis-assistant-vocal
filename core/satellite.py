@@ -473,15 +473,15 @@ def traiter_texte(session, phrase):
 def _resoudre_confirmation(session, phrase):
     """L'utilisateur répond oui/non à une action sensible en attente."""
     from core import registre
-    from core.util import sans_accents
+    from core.confirmation_vocale import NON, TOUJOURS, interpreter_confirmation
     nom, args = session.en_attente
     session.en_attente = None
-    p = sans_accents(phrase.lower())
-    oui = any(m in p for m in ("oui", "ok", "vas-y", "vas y", "confirme", "d'accord", "daccord", "fais"))
-    if not oui:
+    # Meme regle stricte que le PC : accord en mot entier, toute negation annule.
+    decision = interpreter_confirmation(phrase)
+    if decision == NON:
         return "D'accord, j'annule."
     resultat = _executer_outil(nom, args)
-    if "toujours" in p:
+    if decision == TOUJOURS:
         if registre.autoriser_toujours(nom):
             resultat += " Je ne te le redemanderai plus pour cette action."
         else:

@@ -37,6 +37,7 @@ from faster_whisper import WhisperModel
 from openwakeword.model import Model as WakeModel
 
 from core import config, journal, memoire, personnalite, registre, voix
+from core.confirmation_vocale import NON, TOUJOURS, interpreter_confirmation
 from core.util import nettoyer_reponse_vocale, sans_accents
 from tools.lumieres import allumer_si_nuit, charger_pieces_hue
 
@@ -413,14 +414,6 @@ MOTS_FIN = (
     "c'est bon", "ok merci", "d'accord merci", "laisse tomber",
 )
 
-# Mots d'accord pour une confirmation vocale.
-MOTS_OUI = (
-    "oui", "ouais", "ouep", "vas-y", "vas y", "confirme", "confirmer",
-    "d'accord", "daccord", "ok", "okay", "envoie", "envoi", "fais",
-    "yes", "carrement", "bien sur", "parfait", "valide", "valider",
-)
-
-
 def type_arret(texte):
     """Renvoie 'relance', 'fin' ou None selon l'ordre d'arret detecte."""
     plat = sans_accents(texte.replace("’", "'").replace("‘", "'"))
@@ -433,17 +426,13 @@ def type_arret(texte):
 
 
 def _est_oui(texte):
-    """Vrai si la transcription exprime un accord (oui/vas-y/confirme...)."""
-    if not texte:
-        return False
-    plat = sans_accents(texte.replace("’", "'").replace("‘", "'"))
-    plat = "".join(c if c.isalnum() or c in " '-" else " " for c in plat)
-    return any(m in plat for m in MOTS_OUI)
+    """Accord explicite en mot entier, sans negation ni hesitation (voir confirmation_vocale)."""
+    return interpreter_confirmation(texte) != NON
 
 
 def _est_toujours(texte):
-    """Vrai si l'utilisateur ajoute 'toujours' (memoriser l'autorisation, N2)."""
-    return bool(texte) and "toujours" in sans_accents(texte)
+    """Accord avec 'toujours' (memoriser l'autorisation, N2) ; 'toujours pas' est un refus."""
+    return interpreter_confirmation(texte) == TOUJOURS
 
 
 def nettoyer(texte):
