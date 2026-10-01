@@ -162,9 +162,11 @@ class ChaineCompleteTest(unittest.TestCase):
             )
         ]
 
-    def _cloud(self, appels: list[str]):
-        def repondre(systeme, historique, max_tokens=500, nom_modele="", qualite=False):
+    def _cloud(self, appels: list[str], delais: list | None = None):
+        def repondre(systeme, historique, max_tokens=500, nom_modele="", qualite=False, timeout=None):
             appels.append(nom_modele)
+            if delais is not None:
+                delais.append(timeout)
             if "chef d'édition" in systeme:
                 return json.dumps({"articles": [0, 1, 2], "approfondir": [{"sujet": "Gemini 4", "recherche": "accès restreint"}]})
             return json.dumps(_brief_json(), ensure_ascii=False)
@@ -174,12 +176,13 @@ class ChaineCompleteTest(unittest.TestCase):
         textes = {"https://www.theverge.com/a": VERGE, "https://techcrunch.com/b": TECHCRUNCH,
                   "https://www.numerama.com/c": NUMERAMA}
         appels: list[str] = []
+        delais: list = []
         reglages = {"signal_matin.brief_tech": True, "signal_matin.brief_contexte": "aucun",
                     "signal_matin.modele_brief": "gpt-5.6-terra"}
         with tempfile.TemporaryDirectory() as dossier, \
                 patch.object(tech_brief, "reglage", _reglages(reglages)), \
                 patch.object(tech_brief.cloud, "disponible", return_value=True), \
-                patch.object(tech_brief.cloud, "repondre_texte", side_effect=self._cloud(appels)), \
+                patch.object(tech_brief.cloud, "repondre_texte", side_effect=self._cloud(appels, delais)), \
                 patch.object(tech_brief, "_article_text", side_effect=lambda url, **_: textes.get(url, "")):
             chemin = Path(dossier) / "historique.json"
             rapport: dict = {}
@@ -189,6 +192,8 @@ class ChaineCompleteTest(unittest.TestCase):
             self.assertEqual(rapport["etat"], "ok")
             self.assertEqual(len(brief.facts), 3)
             self.assertIn("gpt-5.6-terra", appels)  # redaction et relecture
+            # Tri sans delai particulier ; redaction et relecture : 5 minutes chacune.
+            self.assertEqual(delais, [None, 300.0, 300.0])
             self.assertIn("3 citations retrouvées", brief.verification)
             historique = json.loads(chemin.read_text(encoding="utf-8"))
             self.assertIn("2026-10-01", historique["jours"])
@@ -269,6 +274,26 @@ class ContexteWebTest(unittest.TestCase):
         with patch.dict("sys.modules", {"ddgs": type("M", (), {"DDGS": EnPanne})}):
             self.assertEqual(tech_brief._pistes_web([{"sujet": "x"}], set(), rapport), [])
         self.assertIn("indisponible", rapport["contexte"])
+
+
+class DelaiCloudTest(unittest.TestCase):
+    def test_le_delai_par_appel_est_transmis_sans_changer_le_delai_global(self):
+        from core import cloud
+        recus: list[dict] = []
+
+        class Reponses:
+            def create(self, **kwargs):
+                recus.append(kwargs)
+                return type("R", (), {"output_text": "ok", "usage": None})()
+
+        client = type("C", (), {"responses": Reponses()})()
+        with patch.object(cloud, "fournisseur", return_value="openai"), \
+                patch.object(cloud, "client_openai", return_value=client), \
+                patch.object(cloud, "modele", return_value="gpt-5.6-terra"):
+            cloud.repondre_texte("s", [], timeout=300)
+            cloud.repondre_texte("s", [])
+        self.assertEqual(recus[0]["timeout"], 300.0)
+        self.assertNotIn("timeout", recus[1])
 
 
 class RSSTest(unittest.TestCase):

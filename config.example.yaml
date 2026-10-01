@@ -305,6 +305,7 @@ signal_matin:                   # quotidien personnel A4 ; voir docs/signal_mati
   brief_fenetre_heures: 72      # 24 h privilegiees ; au-dela, seulement un sujet pas encore traite
   brief_historique_jours: 14    # anti-repetition locale (notes/, jamais versionne)
   brief_budget_secondes: 780    # au-dela, le cahier tech classique est imprime a la place
+  brief_delai_redaction_secondes: 300 # delai par appel de redaction / relecture (le delai vocal reste openai.timeout)
   modele_apprentissage: ""      # vide = local d'abord, puis modele cloud economique si la reserve de mots est epuisee
   extracteur_public: false      # proxy de lecture interdit pour les flux personnels sauf opt-in
   flux: []                      # ex. [{nom: "Media", categorie: "Monde", url: "https://.../rss.xml"}]

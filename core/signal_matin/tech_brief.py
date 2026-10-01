@@ -184,12 +184,19 @@ def date_fr(jour: dt.date) -> str:
     return f"{'1er' if jour.day == 1 else jour.day} {MOIS[jour.month - 1]} {jour.year}"
 
 
-def _cloud(systeme: str, contenu: str, max_tokens: int, cle_modele: str) -> str:
+def _cloud(systeme: str, contenu: str, max_tokens: int, cle_modele: str,
+           timeout: float | None = None) -> str:
     return cloud.repondre_texte(
         systeme, [{"role": "user", "content": contenu}],
         max_tokens=max_tokens,
         nom_modele=str(reglage(cle_modele, "") or ""),
+        timeout=timeout,
     )
+
+
+def _delai_redaction() -> float:
+    """La redaction et la relecture produisent des milliers de mots : plusieurs minutes."""
+    return float(reglage("signal_matin.brief_delai_redaction_secondes", 300) or 300)
 
 
 # ------------------------------------------------------------------ historique
@@ -615,7 +622,7 @@ def construire_brief(
     brouillon = _json_objet(_cloud(
         "Tu rédiges le brief décrit par l'utilisatrice, uniquement à partir des textes fournis. "
         "Réponds uniquement par l'objet JSON demandé.",
-        contenu, max_tokens, "signal_matin.modele_brief",
+        contenu, max_tokens, "signal_matin.modele_brief", timeout=_delai_redaction(),
     ))
     if not brouillon:
         rapport["etat"] = "reponse de redaction illisible"
@@ -628,7 +635,7 @@ def construire_brief(
             "Tu es relecteur-vérificateur. Tu ne rajoutes rien. Réponds uniquement par l'objet JSON demandé.",
             RELECTURE + "\n\nBRIEF\n" + json.dumps(brouillon, ensure_ascii=False)
             + "\n\nTEXTES SOURCES\n" + json.dumps(textes_sources, ensure_ascii=False),
-            max_tokens, "signal_matin.modele_brief",
+            max_tokens, "signal_matin.modele_brief", timeout=_delai_redaction(),
         ))
         if corrige.get("informations"):
             relu = corrige

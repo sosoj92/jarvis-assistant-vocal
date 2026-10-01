@@ -134,10 +134,16 @@ def _raisonnement(nom_modele: str, qualite: bool = False):
 
 
 def repondre_texte(systeme: str, historique: list, max_tokens: int = 500,
-                   nom_modele: str = "", qualite: bool = False) -> str:
-    """Reponse texte cloud, pour les sous-pipelines sans appels d'outils."""
+                   nom_modele: str = "", qualite: bool = False,
+                   timeout: float | None = None) -> str:
+    """Reponse texte cloud, pour les sous-pipelines sans appels d'outils.
+
+    `timeout` remplace, pour cet appel seulement, le delai global du client : une
+    longue redaction de fond ne doit pas etre coupee par le delai prevu pour la voix.
+    """
     provider = fournisseur()
     cible = modele(qualite=qualite, surcharge=nom_modele)
+    par_appel = {"timeout": float(timeout)} if timeout else {}
     if provider == "openai":
         client = client_openai()
         if client is None:
@@ -154,7 +160,7 @@ def repondre_texte(systeme: str, historique: list, max_tokens: int = 500,
         raisonnement = _raisonnement(cible, qualite)
         if raisonnement:
             kwargs["reasoning"] = raisonnement
-        rep = client.responses.create(**kwargs)
+        rep = client.responses.create(**kwargs, **par_appel)
         enregistrer_usage(rep, "OpenAI (Jarvis)", cible)
         return (rep.output_text or "").strip()
 
@@ -162,7 +168,7 @@ def repondre_texte(systeme: str, historique: list, max_tokens: int = 500,
     if client is None:
         raise RuntimeError("cle Anthropic absente (anthropic.cle)")
     rep = client.messages.create(model=cible, max_tokens=max_tokens,
-                                 system=systeme, messages=historique)
+                                 system=systeme, messages=historique, **par_appel)
     enregistrer_usage(rep, "Claude (Jarvis)", cible)
     return "".join(b.text for b in rep.content
                    if getattr(b, "type", None) == "text").strip()
