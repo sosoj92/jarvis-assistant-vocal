@@ -141,7 +141,10 @@ def _ouvrir_tunnel():
         ngrok.set_auth_token(tok)
         domaine = reglage("serveur.ngrok_domaine", "")
         options = {"domain": domaine} if domaine else {}
-        _URL = ngrok.connect(_port(), "http", **options).public_url
+        # Adresse explicite : un port seul devient « localhost:port », que Windows
+        # peut resoudre en IPv6 (::1) alors que le serveur n'ecoute qu'en 127.0.0.1
+        # (ngrok repond alors ERR_NGROK_8012 / HTTP 502).
+        _URL = ngrok.connect(f"127.0.0.1:{_port()}", "http", **options).public_url
         LOG.info("tunnel ngrok ouvert : %s", _URL)
         print(f"Tunnel ngrok ouvert : {_URL}")
     except Exception as e:
