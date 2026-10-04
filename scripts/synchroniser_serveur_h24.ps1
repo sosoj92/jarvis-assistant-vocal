@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -180,6 +180,30 @@ if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 git -C `$repo pull -q --ff-only origin main
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 Write-Output ('Serveur synchronise sur ' + (git -C `$repo rev-parse --short HEAD))
+"@
+    exit 0
+}
+
+if ($Action -eq 'etat_tunnel') {
+    # Lecture seule : vers ou le tunnel ngrok renvoie (API locale de ngrok), sur quelle
+    # adresse le serveur ecoute, et les dernieres lignes du journal sur le tunnel.
+    # L'adresse publique n'est jamais affichee.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Continue'
+`$repo = $projetLitteral
+Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" | ForEach-Object {
+    `$parent = Get-CimInstance Win32_Process -Filter ('ProcessId=' + `$_.ParentProcessId) -ErrorAction SilentlyContinue
+    Write-Output ('ngrok=' + `$_.ProcessId + ' lance=' + `$_.CreationDate.ToString('s') + ' parent=' + `$(if (`$parent) { `$parent.Name } else { '(termine)' }))
+}
+try {
+    `$api = Invoke-RestMethod -Uri 'http://127.0.0.1:4040/api/tunnels' -TimeoutSec 5
+    foreach (`$t in `$api.tunnels) { Write-Output ('tunnel vers=' + `$t.config.addr + ' proto=' + `$t.proto) }
+} catch { Write-Output ('api ngrok 4040 indisponible : ' + `$_.Exception.Message) }
+Get-NetTCPConnection -State Listen -LocalPort 8790 -ErrorAction SilentlyContinue | ForEach-Object { Write-Output ('ecoute 8790 sur ' + `$_.LocalAddress) }
+try { Write-Output ('ping local 127.0.0.1:8790 -> HTTP ' + (Invoke-WebRequest -Uri 'http://127.0.0.1:8790/api/ping' -UseBasicParsing -TimeoutSec 5).StatusCode) } catch { Write-Output ('ping local -> ' + `$_.Exception.Message) }
+`$journal = Join-Path `$repo 'logs\jarvis.log'
+Get-Content -LiteralPath `$journal -Tail 3000 -Encoding UTF8 | Where-Object { `$_ -match '(?i)ngrok|tunnel' } |
+    ForEach-Object { `$_ -replace 'https://[^\s]+', 'https://<adresse-publique>' } | Select-Object -Last 6
 "@
     exit 0
 }
