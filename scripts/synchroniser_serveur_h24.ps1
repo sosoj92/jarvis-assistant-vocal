@@ -243,6 +243,12 @@ if (-not (Test-Path -LiteralPath `$wrapper)) { throw 'Wrapper de demarrage intro
     Where-Object { [string]`$_.CommandLine -match 'jarvis14\.py|jarvis\.mcp_server' })
 foreach (`$p in `$anciens) { Stop-Process -Id `$p.ProcessId -Force -ErrorAction SilentlyContinue }
 Write-Output ('processus arretes=' + `$anciens.Count)
+# Le ngrok lance par pyngrok survit a Jarvis et garde l'adresse publique : le
+# nouveau Jarvis ne pourrait plus ouvrir son tunnel (ERR_NGROK_334).
+`$tunnels = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" |
+    Where-Object { [string]`$_.ExecutablePath -match '(?i)pyngrok|\\ngrok\\' })
+foreach (`$p in `$tunnels) { Stop-Process -Id `$p.ProcessId -Force -ErrorAction SilentlyContinue }
+Write-Output ('tunnels ngrok de Jarvis arretes=' + `$tunnels.Count)
 Start-Sleep -Seconds 3
 
 `$modele = Get-ScheduledTask -TaskName 'Jarvis - Signal Matin'
@@ -344,6 +350,10 @@ Get-CimInstance Win32_Process -Filter "Name like 'python%' or Name like 'pythonw
     }
 }
 if (-not `$trouve) { Write-Output 'processus=aucun' }
+Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" | ForEach-Object {
+    `$parent = Get-CimInstance Win32_Process -Filter ('ProcessId=' + `$_.ParentProcessId) -ErrorAction SilentlyContinue
+    Write-Output ('ngrok=' + `$_.ProcessId + ' lance=' + `$_.CreationDate.ToString('s') + ' parent=' + `$(if (`$parent) { `$parent.Name + ' ' + `$parent.ProcessId } else { '(termine)' }) + ' pyngrok=' + ([string]`$_.ExecutablePath -match '(?i)pyngrok|\\ngrok\\'))
+}
 Write-Output ('port_hud_8770=' + [bool](Get-NetTCPConnection -State Listen -LocalPort 8770 -ErrorAction SilentlyContinue))
 Write-Output ('port_serveur_8790=' + [bool](Get-NetTCPConnection -State Listen -LocalPort 8790 -ErrorAction SilentlyContinue))
 Write-Output ('session_utilisateur_active=' + [bool](Get-Process explorer -ErrorAction SilentlyContinue))
