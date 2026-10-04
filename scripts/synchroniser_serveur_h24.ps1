@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -391,6 +391,37 @@ print("hud_premier_plan=" + str((conf.get("hud") or {}).get("premier_plan_au_rev
 `$fichier = Join-Path `$env:TEMP 'jarvis_processus.py'
 Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
 Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
+"@
+    exit 0
+}
+
+if ($Action -eq 'tester_colis') {
+    # Lecture seule : la messagerie est-elle configuree sur le serveur, et que dirait
+    # le brief sur les colis (en-tetes des mails lus sans les marquer lus).
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+Set-Location `$repo
+`$py = @'
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.path.insert(0, ".")
+from tools import colis, mail
+print("messagerie_configuree=" + str(bool(mail._mail_configure())))
+if mail._mail_configure():
+    entetes = colis._lire_entetes(10)
+    from core.util import sans_accents
+    candidats = [e for e in entetes if colis._INDICE_COLIS.search(sans_accents(e["sujet"] or ""))]
+    print("mails_10_jours=" + str(len(entetes)) + " parlant_de_commande=" + str(len(candidats))
+          + " reconnus=" + str(sum(1 for e in candidats if colis._etape(e["sujet"]))))
+    trouves = colis.colis_en_cours()
+    print("colis_en_cours=" + str(len(trouves)))
+    print("phrase_du_brief=" + (colis.colis_du_brief() or "(rien a signaler)"))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_tester_colis.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
 & (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
 Remove-Item -LiteralPath `$fichier -Force
 "@
