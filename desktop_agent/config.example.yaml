@@ -22,6 +22,13 @@ overlay:
   exclure_obs: true
   muet_visuel: false
 
+# Fenêtre Jarvis (HUD) sur ce PC, alimentée par le micro et le serveur.
+hud:
+  actif: true
+  fenetre: "app"               # app = fenêtre dédiée Edge/Chrome ; navigateur = onglet
+  ouvrir_au_demarrage: false   # sinon elle s'ouvre au premier « Hey Jarvis »
+  premier_plan_au_reveil: true # passe devant (sans prendre le clavier ni couvrir un plein écran)
+
 gestes:
   souris_moniteur: 1           # les gestes pilotent l'écran principal par défaut
 

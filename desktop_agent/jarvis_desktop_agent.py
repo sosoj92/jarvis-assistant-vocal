@@ -251,6 +251,50 @@ class ActionsLocales:
         return True, f"Ma voix sort maintenant sur {label}."
 
 
+def brancher_affichage(audio, reglages, hud_module=None):
+    """Fenetre Jarvis locale (HUD) alimentee par le micro et le serveur.
+
+    Au « Hey Jarvis » accepte, elle s'ouvre si besoin et passe au premier plan
+    sans prendre le clavier ni couvrir un plein ecran. Renvoie le module utilise.
+    """
+    reglages = dict(reglages or {})
+    if not bool(reglages.get("actif", True)):
+        return None
+    if hud_module is None:
+        try:
+            import hud as hud_module
+        except Exception as exc:
+            print("[hud] indisponible:", exc)
+            return None
+    hud_module.demarrer(ouvrir=bool(reglages.get("ouvrir_au_demarrage", False)),
+                        fenetre=str(reglages.get("fenetre", "app")))
+    hud_module.config("Jarvis · serveur", "micro de ce PC")
+    premier_plan = bool(reglages.get("premier_plan_au_reveil", True))
+    etats = {"veille", "ecoute", "reflexion", "parole"}
+
+    def evenement(nom, valeur=None):
+        if nom == "reveil":
+            hud_module.etat("ecoute")
+            if premier_plan:
+                threading.Thread(target=hud_module.mettre_au_premier_plan, daemon=True).start()
+        elif nom == "niveau":
+            hud_module.niveau(min(1.0, float(valeur or 0.0) / 0.2))
+        elif nom == "etat" and valeur in etats:
+            hud_module.etat(valeur)
+        elif nom == "transcription" and valeur:
+            hud_module.dire_vous(str(valeur))
+            hud_module.etat("reflexion")
+        elif nom == "reponse" and valeur:
+            hud_module.dire_jarvis(str(valeur))
+        elif nom == "parole_debut":
+            hud_module.etat("parole")
+        elif nom == "parole_fin":
+            hud_module.etat("veille")
+
+    audio["_evenement_callback"] = evenement
+    return hud_module
+
+
 def demarrer_audio(conf, actions):
     audio = dict(conf.get("audio", {}) or {})
     if not bool(audio.get("actif", False)):
@@ -282,6 +326,10 @@ def demarrer_audio(conf, actions):
             audio["_muet_callback"] = overlay.est_muet
     except Exception as exc:
         print("[overlay] indisponible:", exc)
+    try:
+        brancher_affichage(audio, conf.get("hud", {}))
+    except Exception as exc:
+        print("[hud] indisponible:", exc)
     satellite.CONF = audio
     audio["_poste_pret_event"] = actions.agent_pret
     file_audio = queue.Queue()

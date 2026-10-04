@@ -43,6 +43,17 @@ def _conf():
     return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
 
+def _evenement(nom, valeur=None):
+    """Point d'accroche facultatif pour un affichage local (fenetre Jarvis du poste
+    Windows). Sans recepteur configure, comme sur un Raspberry Pi, rien ne se passe."""
+    rappel = CONF.get("_evenement_callback")
+    if callable(rappel):
+        try:
+            rappel(nom, valeur)
+        except Exception as exc:
+            print("  [affichage] evenement ignore:", exc)
+
+
 class Micro:
     """Capture micro + wake word (openWakeWord) + capture d'énoncé (VAD simple).
     Tourne dans un thread ; pousse chaque énoncé complet (PCM int16 bytes) dans une
@@ -213,9 +224,13 @@ class Micro:
                 f"seuil {self.seuil_reveil:g}"
             )
         print("Satellite prêt. Dites « Hey Jarvis ».")
+        blocs_lus = 0
         try:
             while not self.stop.is_set():
                 bloc = self._lire_bloc(flux)
+                blocs_lus += 1
+                if blocs_lus % 4 == 0 and "_evenement_callback" in CONF:
+                    _evenement("niveau", self._niveau(bloc))
                 if self.occupe.is_set():
                     reveil.reset()
                     continue
@@ -241,6 +256,7 @@ class Micro:
                     print("  [wake] ignoré — un micro plus proche a répondu")
                     continue
                 print("  [wake] Hey Jarvis — j'écoute")
+                _evenement("reveil")
                 # Le serveur joue normalement « Oui ? » avant d'autoriser la
                 # capture. Un bip local reste le repli si le TTS est indisponible.
                 if not accuse_vocal:
@@ -382,6 +398,7 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                 t = d.get("type")
                 if t == "etat":
                     print(f"  [état] {d.get('etat')}")
+                    _evenement("etat", d.get("etat"))
                     if d.get("etat") == "veille":
                         occupe.clear()
                 elif t in ("reveil_accepte", "reveil_refuse"):
@@ -392,6 +409,7 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                     )
                 elif t == "transcription":
                     print(f"  [entendu] {d.get('texte')}")
+                    _evenement("transcription", d.get("texte"))
                 elif t == "progression":
                     print(f"  [progression] {d.get('texte')}")
                     notifier = CONF.get("_texte_callback")
@@ -399,13 +417,16 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                         notifier(d.get("texte"), "progression")
                 elif t == "texte":
                     print(f"  [réponse] {d.get('texte')}")
+                    _evenement("reponse", d.get("texte"))
                     notifier = CONF.get("_texte_callback")
                     if callable(notifier):
                         notifier(d.get("texte"), "reponse")
                 elif t == "audio_debut":
                     audio, freq = bytearray(), int(d.get("freq", TAUX))
                 elif t == "audio_fin":
+                    _evenement("parole_debut")
                     _jouer(bytes(audio), freq); audio = bytearray()
+                    _evenement("parole_fin")
                 elif t == "relance":
                     micro.ouvrir_relance(d.get("secondes"))
                     occupe.clear()
