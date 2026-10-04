@@ -4,7 +4,9 @@ Le client initie lui-meme la connexion WebSocket : aucun port entrant n'est
 necessaire sur le poste pilote.  Le serveur n'accepte qu'une petite liste
 d'actions locales, jamais une commande shell ni un chemin arbitraire.
 """
-from __future__ import annotations
+# Pas de « from __future__ import annotations » ici : FastAPI doit lire le vrai
+# type WebSocket de la route /desktop-agent (importe dans monter_routes). Avec des
+# annotations differees, il ne le resout pas et refuse toute connexion (HTTP 403).
 
 import asyncio
 import json
