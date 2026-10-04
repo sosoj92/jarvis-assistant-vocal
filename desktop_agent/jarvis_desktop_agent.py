@@ -267,7 +267,8 @@ def brancher_affichage(audio, reglages, hud_module=None):
             print("[hud] indisponible:", exc)
             return None
     hud_module.demarrer(ouvrir=bool(reglages.get("ouvrir_au_demarrage", False)),
-                        fenetre=str(reglages.get("fenetre", "app")))
+                        fenetre=str(reglages.get("fenetre", "app")),
+                        ecran=reglages.get("ecran"))
     hud_module.config("Jarvis · serveur", "micro de ce PC")
     premier_plan = bool(reglages.get("premier_plan_au_reveil", True))
     etats = {"veille", "ecoute", "reflexion", "parole"}

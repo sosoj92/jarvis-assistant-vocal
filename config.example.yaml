@@ -278,6 +278,7 @@ suivi:                         # suivi de contenus (pipeline video) ; voir docs/
 
 hud:                            # interface visuelle locale (http://127.0.0.1:8770)
   fenetre: "app"                # app = fenetre dediee Edge/Chrome sans onglets ; navigateur = onglet classique
+  ecran: null                   # ecran ou l'ouvrir (0 = principal, puis de gauche a droite, comme l'overlay) ; null = libre
   premier_plan_au_reveil: true  # « Hey Jarvis » fait passer la fenetre du HUD devant (sans prendre le clavier ni couvrir un plein ecran)
 
 signal_matin:                   # quotidien personnel A4 ; voir docs/signal_matin.md

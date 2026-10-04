@@ -56,13 +56,17 @@ class AffichageAgentTest(unittest.TestCase):
 
     def test_hey_jarvis_ouvre_et_met_la_fenetre_devant(self):
         hud, _ = self._brancher()
-        hud.demarrer.assert_called_once_with(ouvrir=False, fenetre="app")
+        hud.demarrer.assert_called_once_with(ouvrir=False, fenetre="app", ecran=None)
         hud.mettre_au_premier_plan.assert_called_once()
         hud.niveau.assert_called_once_with(0.5)
         hud.dire_vous.assert_called_once_with("quelle heure est-il")
         hud.dire_jarvis.assert_called_once_with("Il est midi.")
         etats = [appel.args[0] for appel in hud.etat.call_args_list]
         self.assertEqual(etats, ["ecoute", "reflexion", "parole", "veille"])  # « inconnu » ignore
+
+    def test_ecran_transmis_au_hud(self):
+        hud, _ = self._brancher({"ecran": 2})
+        self.assertEqual(hud.demarrer.call_args.kwargs["ecran"], 2)
 
     def test_premier_plan_desactivable(self):
         hud, _ = self._brancher({"premier_plan_au_reveil": False})

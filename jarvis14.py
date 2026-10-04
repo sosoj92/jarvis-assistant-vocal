@@ -1316,7 +1316,8 @@ def main():
                   "L'assistant ne pourra pas repondre.")
 
     if not serveur_sans_peripheriques:
-        _hud("demarrer", True, str(config.reglage("hud.fenetre", "app") or "app"))
+        _hud("demarrer", True, str(config.reglage("hud.fenetre", "app") or "app"),
+             config.reglage("hud.ecran", None))
         _modele_hud = getattr(_fournisseur, "modele", "")
         _hud("config", f"{_fournisseur.nom} · {_modele_hud}" if _modele_hud
              else _fournisseur.nom, f"whisper {MODELE_WHISPER}")

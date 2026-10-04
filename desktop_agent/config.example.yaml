@@ -27,6 +27,7 @@ hud:
   actif: true
   fenetre: "app"               # app = fenêtre dédiée Edge/Chrome ; navigateur = onglet
   ouvrir_au_demarrage: false   # sinon elle s'ouvre au premier « Hey Jarvis »
+  ecran: null                  # écran où l'ouvrir (0 = principal, puis de gauche à droite, comme l'overlay) ; null = libre
   premier_plan_au_reveil: true # passe devant (sans prendre le clavier ni couvrir un plein écran)
 
 gestes:

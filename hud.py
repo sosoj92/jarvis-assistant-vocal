@@ -44,6 +44,8 @@ TITRE_FENETRE = "JARVIS · Reacteur arc"
 _DELAI_REOUVERTURE = 60.0
 _MODE_FENETRE = "navigateur"
 _DERNIERE_OUVERTURE = 0.0
+# Ecran ou ouvrir la fenetre (meme numerotation que l'overlay) ; None = laisser faire.
+_ECRAN = None
 
 # Etats possibles, envoyes tels quels a la page.
 VEILLE = "veille"
@@ -466,18 +468,23 @@ class _Serveur(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def demarrer(ouvrir=True, fenetre="navigateur"):
+def demarrer(ouvrir=True, fenetre="navigateur", ecran=None):
     """Lance le serveur dans un thread daemon et ouvre l'affichage.
 
     fenetre="app" ouvre une fenetre dediee (Edge ou Chrome en mode application,
     sans onglets), que mettre_au_premier_plan() retrouve a coup sur ;
-    "navigateur" ouvre un onglet classique. Sans effet si le serveur tourne deja.
-    Renvoie l'instance du serveur.
+    "navigateur" ouvre un onglet classique. ecran (mode app) : index de l'ecran
+    ou placer la fenetre, 0 = principal puis de gauche a droite, comme l'overlay.
+    Sans effet si le serveur tourne deja. Renvoie l'instance du serveur.
     """
-    global _SERVEUR, _MODE_FENETRE
+    global _SERVEUR, _MODE_FENETRE, _ECRAN
     if _SERVEUR is not None:
         return _SERVEUR
     _MODE_FENETRE = "app" if str(fenetre).lower() == "app" else "navigateur"
+    try:
+        _ECRAN = int(ecran) if ecran is not None and str(ecran).strip() != "" else None
+    except (TypeError, ValueError):
+        _ECRAN = None
 
     _SERVEUR = _Serveur(("127.0.0.1", PORT), _Poignee)
     _SERVEUR.daemon_threads = True
@@ -521,6 +528,8 @@ def ouvrir_fenetre():
         if executable:
             try:
                 subprocess.Popen(commande_fenetre_app(executable), close_fds=True)
+                if _ECRAN is not None:
+                    threading.Thread(target=_placer_apres_ouverture, daemon=True).start()
                 return
             except OSError:
                 pass
@@ -573,6 +582,64 @@ def trouver_fenetres(titre=TITRE_FENETRE):
 
     user32.EnumWindows(examiner, 0)
     return trouvees
+
+
+def zones_ecrans():
+    """Zones utiles (sans barre des taches) des ecrans, dans l'ordre de l'overlay :
+    l'ecran principal d'abord, puis les autres de gauche a droite."""
+    if sys.platform != "win32":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    class InfosEcran(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+    user32 = _user32()
+    ecrans = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HANDLE, wintypes.HDC,
+                        ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+    def examiner(hmon, _hdc, _rect, _donnee):
+        infos = InfosEcran()
+        infos.cbSize = ctypes.sizeof(InfosEcran)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(infos)):
+            m, w = infos.rcMonitor, infos.rcWork
+            ecrans.append(((m.left, m.top), (w.left, w.top, w.right, w.bottom)))
+        return True
+
+    user32.EnumDisplayMonitors(None, None, examiner, 0)
+    ecrans.sort(key=lambda e: (e[0] != (0, 0), e[0][0], e[0][1]))
+    return [zone for _, zone in ecrans]
+
+
+def placer_sur_ecran(hwnd, index):
+    """Place la fenetre sur toute la zone utile de l'ecran demande, sans l'activer."""
+    zones = zones_ecrans()
+    if not 0 <= index < len(zones):
+        return False
+    gauche, haut, droite, bas = zones[index]
+    user32 = _user32()
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 4)                       # SW_SHOWNOACTIVATE
+    sans_bouger_l_ordre = 0x0004 | 0x0010 | 0x0040       # NOZORDER|NOACTIVATE|SHOWWINDOW
+    return bool(user32.SetWindowPos(hwnd, None, gauche, haut, droite - gauche,
+                                    bas - haut, sans_bouger_l_ordre))
+
+
+def _placer_apres_ouverture(delai_max=15.0):
+    """Attend la fenetre qui vient d'etre ouverte puis la place sur l'ecran choisi.
+
+    Le navigateur restaure parfois sa derniere position juste apres l'ouverture :
+    le placement est refait une fois, deux secondes plus tard."""
+    fin = time.monotonic() + delai_max
+    while time.monotonic() < fin and not trouver_fenetres():
+        time.sleep(0.25)
+    for attente in (0.5, 2.0):
+        time.sleep(attente)
+        for hwnd in trouver_fenetres():
+            placer_sur_ecran(hwnd, _ECRAN)
 
 
 def _plein_ecran_au_premier_plan(user32):

@@ -81,6 +81,28 @@ class FenetreTest(unittest.TestCase):
         self.assertEqual([p[1] for p in positions], [-1, -2])      # devant, puis non epinglee
         self.assertTrue(all(p[6] & 0x0010 for p in positions))     # SWP_NOACTIVATE
 
+    def test_placement_sur_la_zone_utile_de_l_ecran_demande(self):
+        user32 = MagicMock()
+        user32.IsIconic.return_value = False
+        zones = [(0, 0, 3440, 1400), (-1080, 0, 0, 1880), (875, -1080, 2795, -40)]
+        with patch.object(hud, "zones_ecrans", return_value=zones), \
+                patch.object(hud, "_user32", return_value=user32):
+            self.assertTrue(hud.placer_sur_ecran(1234, 2))
+            self.assertFalse(hud.placer_sur_ecran(1234, 7))      # ecran inexistant : rien
+        args = user32.SetWindowPos.call_args.args
+        self.assertEqual(args[2:6], (875, -1080, 1920, 1040))
+        self.assertTrue(args[6] & 0x0010)                         # SWP_NOACTIVATE
+
+    def test_ecran_memorise_au_demarrage(self):
+        ancien_serveur, ancien_ecran = hud._SERVEUR, hud._ECRAN
+        try:
+            hud._SERVEUR = None
+            with patch.object(hud, "_Serveur"), patch.object(hud.threading, "Thread"):
+                hud.demarrer(ouvrir=False, fenetre="app", ecran="2")
+            self.assertEqual(hud._ECRAN, 2)
+        finally:
+            hud._SERVEUR, hud._ECRAN = ancien_serveur, ancien_ecran
+
     @unittest.skipUnless(sys.platform == "win32", "API des fenetres Windows")
     def test_recherche_reelle_en_lecture_seule(self):
         self.assertEqual(hud.trouver_fenetres("titre-improbable-signal-xyz-0001"), [])
