@@ -15,7 +15,6 @@ import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 
@@ -151,7 +150,8 @@ class ActionsLocales:
                     url = "https://www.google.com/search?q=" + quote_plus(recherche)
                 if not self._url_sure(url):
                     return False, "Adresse web refusée."
-                if not webbrowser.open_new_tab(url):
+                from core.ouvrir_web import ouvrir_url
+                if not ouvrir_url(url):
                     return False, "Le navigateur n'a pas accepté la demande."
                 return True, "J'ai ouvert la page sur le poste principal."
             if action in {"spotify_open", "spotify_search"}:

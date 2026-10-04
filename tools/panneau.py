@@ -7,9 +7,8 @@ locale) : lance le navigateur par défaut sur http://localhost:<port>/panneau.
 N1 (sans danger) et **non exposé au MCP** : ouvrir une fenêtre sur la machine est
 une action physique locale — jamais à distance ni via Hermes.
 """
-import webbrowser
-
 from core import serveur
+from core.ouvrir_web import ouvrir_url
 from core.registre import outil
 
 
@@ -29,7 +28,7 @@ def ouvrir_panneau() -> str:
                 "panneau. Active « serveur.actif » (ou le pont iPhone / les gestes) "
                 "dans config.yaml, puis redémarre-moi.")
     try:
-        webbrowser.open(url)
+        ouvrir_url(url)
     except Exception as e:
         return f"Je n'ai pas réussi à ouvrir le navigateur ({str(e)[:80]}). Va sur {url}."
     return f"J'ouvre le panneau de configuration dans ton navigateur ({url})."

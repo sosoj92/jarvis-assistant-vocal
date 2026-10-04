@@ -34,6 +34,13 @@ _BROWSER = None   # navigateur Chrome connecte via CDP
 _MSG_ABSENT = ("Je n'ai pas reussi a lancer Chrome connecte. Verifie que Google "
                "Chrome est installe (ou renseigne navigateur.chrome_exe dans "
                "config.yaml), ou lance le raccourci \"Chrome + Jarvis\".")
+_MSG_FIREFOX = ("Je ne peux pas lire ni piloter Firefox. Pour que je lise ou agisse sur "
+                "une page, ouvre-la dans le raccourci \"Chrome + Jarvis\".")
+
+
+def _absent():
+    from core.ouvrir_web import navigateur_prefere
+    return _MSG_FIREFOX if navigateur_prefere() == "firefox" else _MSG_ABSENT
 
 # Les noms usuels sont normalises ici, pas laisses au jugement du LLM. Cela rend
 # « ouvre Netflix » aussi fiable avec un petit modele local qu'avec le cloud.
@@ -179,7 +186,9 @@ def _connexion(auto=True):
     if b is not None:
         return b
     # 2) Sinon, auto-lancer le Chrome dedie et attendre qu'il reponde (~8 s).
-    if auto and _lancer_chrome(port):
+    # Quand Firefox est le navigateur choisi, Jarvis n'ouvre jamais Chrome de lui-meme.
+    from core.ouvrir_web import navigateur_prefere
+    if auto and navigateur_prefere() != "firefox" and _lancer_chrome(port):
         for _ in range(16):
             time.sleep(0.5)
             if _port_ouvert(port):
@@ -227,7 +236,7 @@ def _protege(url):
 
 @outil(
     nom="browser_open",
-    description="Ouvre un SITE WEB ou lance une RECHERCHE dans Chrome. C'est le "
+    description="Ouvre un SITE WEB ou lance une RECHERCHE dans le navigateur. C'est le "
                 "SEUL outil a utiliser pour 'ouvre Netflix/YouTube', 'va sur le "
                 "site X', une adresse en .com/.fr ou 'cherche X'. Ne jamais utiliser "
                 "ouvrir_application pour un site. Donne soit une URL, soit recherche.",
@@ -249,9 +258,15 @@ def browser_open(url: str = "", recherche: str = "") -> str:
     if distant is not None:
         return distant
 
+    from core.ouvrir_web import navigateur_prefere, nom_navigateur, ouvrir_url
+    if navigateur_prefere() == "firefox":
+        if ouvrir_url(cible):
+            return f"C'est ouvert dans {nom_navigateur()}."
+        return f"Je n'ai pas pu ouvrir le navigateur. L'adresse : {cible}"
+
     browser = _connexion()
     if browser is None:
-        return _MSG_ABSENT
+        return _absent()
     try:
         page = _contexte(browser).new_page()
         page.goto(cible, wait_until="domcontentloaded", timeout=15000)
@@ -277,7 +292,7 @@ def browser_open(url: str = "", recherche: str = "") -> str:
 def browser_current_page() -> str:
     browser = _connexion()
     if browser is None:
-        return _MSG_ABSENT
+        return _absent()
     page = _page_active(browser)
     if page is None:
         return "Aucun onglet ouvert dans Chrome."
@@ -313,7 +328,7 @@ def browser_current_page() -> str:
 def browser_tabs(action: str = "lister", filtre: str = "") -> str:
     browser = _connexion()
     if browser is None:
-        return _MSG_ABSENT
+        return _absent()
     pages = _pages(browser)
     if not pages:
         return "Aucun onglet ouvert."
@@ -378,7 +393,7 @@ def _annonce_fermeture(args):
 def browser_close_tabs(filtre: str = "") -> str:
     browser = _connexion()
     if browser is None:
-        return _MSG_ABSENT
+        return _absent()
     f = (filtre or "").lower()
     fermes = 0
     if not f:
@@ -420,7 +435,7 @@ def browser_close_tabs(filtre: str = "") -> str:
 def browser_interact(instruction: str) -> str:
     browser = _connexion()
     if browser is None:
-        return _MSG_ABSENT
+        return _absent()
     page = _page_active(browser)
     if page is None:
         return "Aucun onglet actif."

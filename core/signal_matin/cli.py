@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
-import webbrowser
 from pathlib import Path
 
 from .mock_data import construire_demo
@@ -98,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     edition, pdf_path, html_path, data_path = _generate(args, pdf=args.command != "preview")
     if args.command == "preview":
         if not args.no_open:
-            webbrowser.open(html_path.resolve().as_uri())
+            from core.ouvrir_web import ouvrir_url
+            ouvrir_url(html_path.resolve().as_uri())
         print(f"Preview generee : {html_path}")
         print(f"JSON valide : {data_path}")
         return 0

@@ -188,6 +188,10 @@ pont_iphone:                   # notes/commandes depuis l'iPhone (Raccourcis) ; 
   token: ""                    # SECRET : en-tete X-Jarvis-Token (genere une longue chaine aleatoire)
 
 navigateur:                    # assistance sur TON Chrome (voir docs/navigateur.md)
+  prefere: "firefox"           # pages ouvertes par Jarvis : firefox (si installe) | systeme (navigateur par defaut)
+                               # avec firefox, Jarvis ne lance jamais Chrome lui-meme : lire ou agir sur
+                               # une page reste possible dans le raccourci "Chrome + Jarvis" deja ouvert
+  firefox_exe: ""              # chemin de firefox.exe si installe hors des emplacements standards
   cdp_port: 9222               # port de debug (raccourci "Chrome + Jarvis")
   domaines_proteges:           # sites ou Jarvis LIT mais n'AGIT jamais (fais-le toi-meme)
     - "impots.gouv.fr"

@@ -59,8 +59,8 @@ def ouvrir_fenetre():
     url = f"http://localhost:{_port()}/cockpit"
     exe = _navigateur()
     if not exe:
-        import webbrowser
-        webbrowser.open(url)
+        from core.ouvrir_web import ouvrir_url
+        ouvrir_url(url)
         return
     args = [exe, f"--app={url}", "--new-window"]
     try:
