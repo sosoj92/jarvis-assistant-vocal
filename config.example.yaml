@@ -276,6 +276,10 @@ hub:                           # indexeur/pipeline du hub de contenu
 suivi:                         # suivi de contenus (pipeline video) ; voir docs/suivi_contenu.md
   fichier: "contenus.yaml"     # liste des contenus (non versionnee) ; chemin relatif = racine du projet
 
+hud:                            # interface visuelle locale (http://127.0.0.1:8770)
+  fenetre: "app"                # app = fenetre dediee Edge/Chrome sans onglets ; navigateur = onglet classique
+  premier_plan_au_reveil: true  # « Hey Jarvis » fait passer la fenetre du HUD devant (sans prendre le clavier ni couvrir un plein ecran)
+
 signal_matin:                   # quotidien personnel A4 ; voir docs/signal_matin.md
   actif: false                  # activer seulement apres validation de la preview et de l'impression
   declenchement: "desactive"    # desactive | horaire | premier_demarrage

@@ -1320,7 +1320,7 @@ def main():
                   "L'assistant ne pourra pas repondre.")
 
     if not serveur_sans_peripheriques:
-        _hud("demarrer")
+        _hud("demarrer", True, str(config.reglage("hud.fenetre", "app") or "app"))
         _modele_hud = getattr(_fournisseur, "modele", "")
         _hud("config", f"{_fournisseur.nom} · {_modele_hud}" if _modele_hud
              else _fournisseur.nom, f"whisper {MODELE_WHISPER}")
@@ -1470,6 +1470,11 @@ def main():
             _hud("etat", "ecoute")
             if not suite:
                 print("  [micro] Oui ?")
+                if config.reglage("hud.premier_plan_au_reveil", True):
+                    # Accuse visuel du mot d'activation : la fenetre du HUD passe
+                    # devant, en fond pour ne retarder ni le bip ni l'ecoute.
+                    threading.Thread(target=_hud, args=("mettre_au_premier_plan",),
+                                     daemon=True).start()
                 bip()
 
             audio = capturer(flux, tampon)

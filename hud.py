@@ -22,7 +22,11 @@ voir le rendu sans le reste de l'assistant.
 """
 
 import json
+import os
 import queue
+import shutil
+import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -34,6 +38,12 @@ from pathlib import Path
 
 PORT = 8770
 _FICHIER_HTML = Path(__file__).parent / "hud.html"
+# <title> de hud.html : sert a retrouver la fenetre du HUD parmi les autres.
+TITRE_FENETRE = "JARVIS · Reacteur arc"
+# Une fenetre fermee n'est rouverte qu'une fois par minute au plus.
+_DELAI_REOUVERTURE = 60.0
+_MODE_FENETRE = "navigateur"
+_DERNIERE_OUVERTURE = 0.0
 
 # Etats possibles, envoyes tels quels a la page.
 VEILLE = "veille"
@@ -456,14 +466,18 @@ class _Serveur(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def demarrer(ouvrir=True):
-    """Lance le serveur dans un thread daemon et ouvre le navigateur.
+def demarrer(ouvrir=True, fenetre="navigateur"):
+    """Lance le serveur dans un thread daemon et ouvre l'affichage.
 
-    Sans effet si le serveur tourne deja. Renvoie l'instance du serveur.
+    fenetre="app" ouvre une fenetre dediee (Edge ou Chrome en mode application,
+    sans onglets), que mettre_au_premier_plan() retrouve a coup sur ;
+    "navigateur" ouvre un onglet classique. Sans effet si le serveur tourne deja.
+    Renvoie l'instance du serveur.
     """
-    global _SERVEUR
+    global _SERVEUR, _MODE_FENETRE
     if _SERVEUR is not None:
         return _SERVEUR
+    _MODE_FENETRE = "app" if str(fenetre).lower() == "app" else "navigateur"
 
     _SERVEUR = _Serveur(("127.0.0.1", PORT), _Poignee)
     _SERVEUR.daemon_threads = True
@@ -473,11 +487,145 @@ def demarrer(ouvrir=True):
 
     print(f"HUD sur http://127.0.0.1:{PORT}/")
     if ouvrir:
-        try:
-            webbrowser.open(f"http://127.0.0.1:{PORT}/")
-        except Exception:
-            pass
+        ouvrir_fenetre()
     return _SERVEUR
+
+
+# ---------------------------------------------------------------- fenetre
+
+
+def _navigateur_application():
+    """Edge (present sur Windows 11) ou Chrome, capables d'une fenetre --app."""
+    candidats = [
+        shutil.which("msedge"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+        shutil.which("chrome"),
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+    ]
+    return next((c for c in candidats if c and os.path.isfile(c)), None)
+
+
+def commande_fenetre_app(executable):
+    """Ligne de commande d'une fenetre dediee, sans onglets ni barre d'adresse."""
+    return [executable, f"--app=http://127.0.0.1:{PORT}/"]
+
+
+def ouvrir_fenetre():
+    """Ouvre l'affichage du HUD selon le mode choisi au demarrage."""
+    global _DERNIERE_OUVERTURE
+    _DERNIERE_OUVERTURE = time.monotonic()
+    if _MODE_FENETRE == "app" and sys.platform == "win32":
+        executable = _navigateur_application()
+        if executable:
+            try:
+                subprocess.Popen(commande_fenetre_app(executable), close_fds=True)
+                return
+            except OSError:
+                pass
+    try:
+        webbrowser.open(f"http://127.0.0.1:{PORT}/")
+    except Exception:
+        pass
+
+
+def _user32():
+    """API Windows des fenetres, avec des signatures 64 bits explicites."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    user32.MonitorFromWindow.restype = wintypes.HANDLE
+    user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    return user32
+
+
+def trouver_fenetres(titre=TITRE_FENETRE):
+    """Fenetres visibles (y compris reduites) dont le titre contient `titre`. Lecture seule."""
+    if sys.platform != "win32":
+        return []
+    import ctypes
+    from ctypes import wintypes
+    user32 = _user32()
+    trouvees = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def examiner(hwnd, _):
+        if user32.IsWindowVisible(hwnd):
+            longueur = user32.GetWindowTextLengthW(hwnd)
+            if longueur:
+                tampon = ctypes.create_unicode_buffer(longueur + 1)
+                user32.GetWindowTextW(hwnd, tampon, longueur + 1)
+                if titre in tampon.value:
+                    trouvees.append(hwnd)
+        return True
+
+    user32.EnumWindows(examiner, 0)
+    return trouvees
+
+
+def _plein_ecran_au_premier_plan(user32):
+    """Vrai si la fenetre active occupe tout son ecran (jeu, video, presentation)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class InfosEcran(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+    active = user32.GetForegroundWindow()
+    if not active:
+        return False
+    classe = ctypes.create_unicode_buffer(64)
+    user32.GetClassNameW(active, classe, 64)
+    if classe.value in ("Progman", "WorkerW"):   # le bureau n'est pas du plein ecran
+        return False
+    cadre = wintypes.RECT()
+    user32.GetWindowRect(active, ctypes.byref(cadre))
+    infos = InfosEcran()
+    infos.cbSize = ctypes.sizeof(InfosEcran)
+    user32.GetMonitorInfoW(user32.MonitorFromWindow(active, 2), ctypes.byref(infos))
+    ecran = infos.rcMonitor
+    return (cadre.left <= ecran.left and cadre.top <= ecran.top
+            and cadre.right >= ecran.right and cadre.bottom >= ecran.bottom)
+
+
+def mettre_au_premier_plan():
+    """Fait passer la fenetre du HUD devant les autres, sans lui donner le clavier.
+
+    Sert d'accuse visuel au mot d'activation. Ne s'affiche jamais par-dessus une
+    application en plein ecran ; une fenetre fermee est rouverte (mode app, une
+    fois par minute au plus). Renvoie True si une fenetre a ete mise devant.
+    """
+    if sys.platform != "win32":
+        return False
+    fenetres = trouver_fenetres()
+    if not fenetres:
+        if (_MODE_FENETRE == "app"
+                and time.monotonic() - _DERNIERE_OUVERTURE > _DELAI_REOUVERTURE):
+            ouvrir_fenetre()
+        return False
+    user32 = _user32()
+    if _plein_ecran_au_premier_plan(user32):
+        return False
+    sans_activer = 0x0001 | 0x0002 | 0x0010 | 0x0040   # NOSIZE|NOMOVE|NOACTIVATE|SHOWWINDOW
+    for hwnd in fenetres:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 4)                   # SW_SHOWNOACTIVATE : restaure sans activer
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, sans_activer)   # au-dessus de tout...
+        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, sans_activer)   # ...sans rester epinglee
+    return True
 
 
 # ---------------------------------------------------------------- demonstration
