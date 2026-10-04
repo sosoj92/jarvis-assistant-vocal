@@ -152,6 +152,24 @@ def _lire_entetes(jours):
     return entetes
 
 
+# « Ou en sont mes colis », « je veux suivre mes colis », « ma commande arrive quand ? ».
+# Une phrase sur l'envoi d'un colis ou sur une commande d'appareil n'est pas un suivi.
+_DEMANDE_SUIVI = re.compile(
+    r"\b(colis|paquets?)\b"
+    r"|\b(mes|ma) livraisons?\b"
+    r"|\b(mes|ma) commandes?\b.*\b(arrive\w*|livr\w*|en route|expedi\w*|suivi|ou en)\b"
+    r"|\b(suivi|suivre|ou en (est|sont)|quand arrive\w*)\b.*\b(mes|ma) commandes?\b")
+_ENVOI = re.compile(r"\b(envoie|envoyer|expedie|expedier|poste|poster|depose|deposer)\b")
+
+
+def router_suivi(phrase, piece=""):
+    """Route deterministe vers suivi_colis (lecture seule, N1), sinon None."""
+    p = " ".join(re.sub(r"[^a-z0-9]+", " ", sans_accents(str(phrase or ""))).split())
+    if _DEMANDE_SUIVI.search(p) and not _ENVOI.search(p):
+        return "suivi_colis", {}
+    return None
+
+
 def colis_en_cours(jours=None):
     jours = int(jours or reglage("colis.jours", 10) or 10)
     return analyser(_lire_entetes(max(1, min(jours, 30))))

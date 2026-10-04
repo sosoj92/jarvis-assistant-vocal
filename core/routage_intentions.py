@@ -72,6 +72,7 @@ def decider_prioritaire(phrase: str, piece: str = "") -> Decision | None:
         ("tools.alexa", "router_commande"),
         ("tools.media", "router_commande_media"),
         ("tools.apps", "router_ouverture_simple"),
+        ("tools.colis", "router_suivi"),
     ):
         try:
             mod = __import__(module, fromlist=[fonction])
@@ -128,6 +129,8 @@ _DOMAINES = (
     (("meteo", "temperature", "pleut", "pluie", "temps fait"), {"meteo"}),
     (("mail", "mails", "email", "emails", "courriel", "gmail"),
      {"mail", "factures", "brief"}),
+    (("colis", "paquet", "livraison", "livraisons", "mes commandes", "ma commande"),
+     {"colis", "mail"}),
     (("agenda", "calendrier", "rendez vous", "evenement", "deadline"),
      {"agenda", "loopstr", "suivi"}),
     (("spotify", "playlist", "musique", "chanson", "morceau", "netflix",
@@ -175,7 +178,12 @@ _VERBES_ACTION_GENERIQUES = {
     "mettre", "modifie", "modifier", "montre", "montrer", "note", "noter",
     "ouvre", "ouvrir", "planifie", "planifier", "prepare", "preparer",
     "programme", "programmer", "cherche", "chercher", "supprime", "supprimer",
+    "suivre", "verifie", "verifier", "trouve", "trouver",
 }
+_MARQUES_DEMANDE = (
+    "je veux", "je voudrais", "j aimerais", "tu peux", "peux tu", "tu pourrais",
+    "pourrais tu", "est ce que tu peux",
+)
 
 
 def modules_pour_phrase(phrase: str) -> set[str] | None:
@@ -200,5 +208,9 @@ def modules_pour_phrase(phrase: str) -> set[str] | None:
 
     mots = set(normalise.split())
     if mots & _VERBES_ACTION_GENERIQUES:
+        return None
+    # « je veux… », « tu peux… » annoncent une demande : mieux vaut tout le catalogue
+    # qu'une reponse sans outil qui improvise.
+    if any(f" {marque} " in enveloppe for marque in _MARQUES_DEMANDE):
         return None
     return set()

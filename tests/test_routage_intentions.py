@@ -44,6 +44,25 @@ class SelectionDomainesTests(unittest.TestCase):
             modules_pour_phrase("Passe en mode qualité")))
         self.assertIn("systeme", modules_pour_phrase("Change la sortie audio"))
 
+    def test_demande_sans_verbe_connu_garde_tous_les_outils(self):
+        # Cas reel : « je veux suivre... » partait sans aucun outil et le modele improvisait.
+        self.assertIsNone(modules_pour_phrase("Je veux que tu t'occupes de mon truc"))
+        self.assertIsNone(modules_pour_phrase("Tu peux regarder ça pour moi ?"))
+        self.assertEqual(modules_pour_phrase("Je suis fatiguée ce soir"), set())
+
+    def test_colis_routes_directement_vers_le_suivi(self):
+        for phrase in ("Je veux suivre juste mes colis, tout mes colis.",
+                       "Où en sont mes colis ?", "Ma commande arrive quand ?",
+                       "J'ai des livraisons aujourd'hui ? mes livraisons"):
+            with self.subTest(phrase=phrase):
+                decision = decider_prioritaire(phrase)
+                self.assertEqual((decision.type, decision.outil), ("outil", "suivi_colis"))
+        for phrase in ("Envoie un colis à ma mère", "Allume la lumière du bureau"):
+            with self.subTest(phrase=phrase):
+                decision = decider_prioritaire(phrase)
+                self.assertFalse(decision and decision.outil == "suivi_colis")
+        self.assertIn("colis", modules_pour_phrase("Un paquet doit arriver ?"))
+
     def test_question_de_fond_expose_hermes_et_le_web(self):
         modules = modules_pour_phrase("Fais une recherche de fond et compare ces micros")
         self.assertTrue({"deleguer_a_hermes", "web"}.issubset(modules))
