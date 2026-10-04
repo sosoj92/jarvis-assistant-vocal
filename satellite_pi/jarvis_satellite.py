@@ -54,6 +54,14 @@ def _evenement(nom, valeur=None):
             print("  [affichage] evenement ignore:", exc)
 
 
+def _etat_affiche(etat, micro):
+    """Etat a afficher. Le serveur ouvre la conversation suivie PUIS annonce la
+    veille : tant que le micro ecoute encore, l'affichage dit « ecoute »."""
+    if etat == "veille" and micro._relance_restante() > 0:
+        return "ecoute"
+    return etat
+
+
 class Micro:
     """Capture micro + wake word (openWakeWord) + capture d'énoncé (VAD simple).
     Tourne dans un thread ; pousse chaque énoncé complet (PCM int16 bytes) dans une
@@ -244,6 +252,9 @@ class Micro:
                     if pcm:
                         self.occupe.set()
                         self.file.put(pcm)
+                        _evenement("etat", "reflexion")
+                    else:
+                        _evenement("etat", "veille")
                     continue
                 bloc_reveil = np.clip(bloc * self.gain_reveil, -1, 1)
                 scores = reveil.predict((bloc_reveil * 32767).astype(np.int16))
@@ -398,9 +409,9 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                 t = d.get("type")
                 if t == "etat":
                     print(f"  [état] {d.get('etat')}")
-                    _evenement("etat", d.get("etat"))
                     if d.get("etat") == "veille":
                         occupe.clear()
+                    _evenement("etat", _etat_affiche(d.get("etat"), micro))
                 elif t in ("reveil_accepte", "reveil_refuse"):
                     micro.resoudre_reveil(
                         d.get("id"),
@@ -430,9 +441,13 @@ async def _session(url, satellite, token, file_audio, occupe, micro):
                 elif t == "relance":
                     micro.ouvrir_relance(d.get("secondes"))
                     occupe.clear()
+                    _evenement("etat", "ecoute")
                 elif t == "veille_forcee":
                     micro.fermer_relance()
                     occupe.clear()
+                    _evenement("etat", "veille")
+                elif t == "statut":
+                    _evenement("statut", d)
                     print("  [conversation] veille forcée — dites « Hey Jarvis » pour me réveiller")
                 elif t == "erreur":
                     print("  [erreur]", d.get("message"))

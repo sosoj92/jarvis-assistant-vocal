@@ -36,6 +36,23 @@ class EvenementSatelliteTest(unittest.TestCase):
         satellite.CONF = {"_evenement_callback": MagicMock(side_effect=RuntimeError("affichage"))}
         satellite._evenement("reveil")  # l'audio ne doit jamais tomber a cause de l'affichage
 
+    def test_veille_annoncee_pendant_la_conversation_suivie_reste_ecoute(self):
+        # Bug reel : « VEILLE » affiche alors que le micro ecoutait encore la suite.
+        micro = MagicMock()
+        micro._relance_restante.return_value = 7.5
+        self.assertEqual(satellite._etat_affiche("veille", micro), "ecoute")
+        micro._relance_restante.return_value = 0.0
+        self.assertEqual(satellite._etat_affiche("veille", micro), "veille")
+        self.assertEqual(satellite._etat_affiche("parole", micro), "parole")
+
+    def test_le_client_signale_ouverture_et_fin_de_l_ecoute_suivie(self):
+        source = (ROOT / "satellite_pi" / "jarvis_satellite.py").read_text(encoding="utf-8")
+        self.assertIn('micro.ouvrir_relance(d.get("secondes"))\n'
+                      '                    occupe.clear()\n'
+                      '                    _evenement("etat", "ecoute")', source)
+        self.assertIn('_evenement("etat", "veille")', source)
+        self.assertIn('_evenement("statut", d)', source)
+
 
 class AffichageAgentTest(unittest.TestCase):
     def _brancher(self, reglages=None):
@@ -72,6 +89,24 @@ class AffichageAgentTest(unittest.TestCase):
         hud, _ = self._brancher({"premier_plan_au_reveil": False})
         hud.mettre_au_premier_plan.assert_not_called()
         hud.etat.assert_any_call("ecoute")
+
+    def test_releve_du_serveur_affiche_modele_routage_budget_hermes(self):
+        hud, audio = self._brancher()
+        audio["_evenement_callback"]("statut", {
+            "type": "statut", "modele": "OpenAI · gpt-5.6-terra", "routage": "hybride",
+            "budget": {"cout": 0.42, "plafond": 3.0, "pct": 0.14},
+            "hermes": {"taches": 1, "tokens": 1200}})
+        hud.config.assert_called_with("OpenAI · gpt-5.6-terra", "micro de ce PC")
+        hud.routage.assert_called_once_with("hybride")
+        hud.budget.assert_called_once_with(0.42, 3.0, 0.14)
+        hud.hermes.assert_called_once_with(1, 1200)
+
+    def test_releve_partiel_n_efface_rien(self):
+        hud, audio = self._brancher()
+        audio["_evenement_callback"]("statut", {"routage": "local"})
+        hud.routage.assert_called_once_with("local")
+        hud.budget.assert_not_called()
+        hud.hermes.assert_not_called()
 
     def test_fenetre_desactivable(self):
         hud, audio = self._brancher({"actif": False})

@@ -198,6 +198,35 @@ def _incompris(sess, apres_reveil):
     return "Je n'ai rien entendu." if apres_reveil else ""
 
 
+def statut_affichage():
+    """Releve non sensible pour la fenetre Jarvis d'un poste : modele, routage,
+    budget du jour et activite Hermes. Chaque partie est facultative."""
+    statut = {}
+    try:
+        import hud
+        statut["modele"] = hud._libelle_modele_actif()
+    except Exception:
+        pass
+    try:
+        from core.routage import mode_actuel
+        statut["routage"] = mode_actuel()
+    except Exception:
+        pass
+    try:
+        from core import budget
+        e = budget.etat()
+        statut["budget"] = {"cout": round(e["total_jour"], 2), "plafond": e["plafond_jour"],
+                            "pct": round(e["pct_jour"], 3)}
+    except Exception:
+        pass
+    try:
+        from tools import deleguer_a_hermes as hermes
+        statut["hermes"] = {"taches": hermes.taches_en_cours(), "tokens": hermes._TOKENS}
+    except Exception:
+        pass
+    return statut
+
+
 _WHISPER = None
 
 
@@ -542,6 +571,11 @@ def monter_routes(app):
 
         async def etat(e):
             await envoyer({"type": "etat", "etat": e})
+            if e == "veille" and sess.satellite:
+                # Releve affiche par la fenetre Jarvis du poste (ignore par les Pi).
+                statut = await asyncio.to_thread(statut_affichage)
+                if statut:
+                    await envoyer({"type": "statut", **statut})
 
         async def envoyer_audio(texte, court=False):
             synthese = _tts_pcm_court if court else _tts_pcm

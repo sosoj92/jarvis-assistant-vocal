@@ -291,6 +291,18 @@ def brancher_affichage(audio, reglages, hud_module=None):
             hud_module.etat("parole")
         elif nom == "parole_fin":
             hud_module.etat("veille")
+        elif nom == "statut" and isinstance(valeur, dict):
+            if valeur.get("modele"):
+                hud_module.config(str(valeur["modele"]), "micro de ce PC")
+            if valeur.get("routage"):
+                hud_module.routage(str(valeur["routage"]))
+            budget = valeur.get("budget")
+            if isinstance(budget, dict):
+                hud_module.budget(budget.get("cout", 0.0), budget.get("plafond"),
+                                  budget.get("pct", 0.0))
+            activite = valeur.get("hermes")
+            if isinstance(activite, dict):
+                hud_module.hermes(activite.get("taches", 0), activite.get("tokens"))
 
     audio["_evenement_callback"] = evenement
     return hud_module
