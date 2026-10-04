@@ -7,7 +7,7 @@ from tools.temps import heure_et_date
 
 @outil(
     nom="faire_brief",
-    description="Fait un brief : l'heure, la meteo et un apercu des derniers mails. "
+    description="Fait un brief : l'heure, la meteo, les colis attendus et un apercu des derniers mails. "
                 "A utiliser quand l'utilisateur dit 'fais-moi un brief', 'quoi de "
                 "neuf', 'ma journee'. Apres le brief, propose de lire, repondre ou "
                 "jeter un mail.",
@@ -22,6 +22,13 @@ def faire_brief() -> str:
         deadlines = deadlines_brief()
         if deadlines:
             morceaux.append(deadlines)
+    except Exception:
+        pass
+    try:
+        from tools.colis import colis_du_brief
+        colis = colis_du_brief()
+        if colis:
+            morceaux.append(colis)
     except Exception:
         pass
     try:

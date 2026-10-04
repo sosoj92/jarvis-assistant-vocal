@@ -69,6 +69,10 @@ mail:                          # Gmail via IMAP/SMTP (facultatif)
   adresse: "ton.adresse@gmail.com"
   mot_de_passe_app: ""         # mot de passe d'application Google (2FA requise)
 
+colis:                          # suivi de colis lu dans les objets des mails (local, lecture seule)
+  dans_brief: true              # ajoute « Côté colis : ... » au brief s'il y a un envoi en cours
+  jours: 10                     # profondeur de recherche dans la boite (1 a 30 jours)
+
 audio:
   micro: null                  # null = micro par défaut du système (portable). Mets l'index de TON micro (voir sounddevice.query_devices()) si le wake word n'écoute pas le bon.
   taux: null                   # taux de capture Hz ; null = auto (16 kHz si le micro le supporte, sinon son
