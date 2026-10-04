@@ -395,12 +395,8 @@ RESIDUS = (
     "la vis", "et vis", "ervice", "servi", "sers vis",
 )
 
-# Ce que Whisper invente quand il n'entend que du silence.
-HALLUCINATIONS = (
-    "amara.org", "sous-titres", "sous titres", "merci d'avoir regarde",
-    "abonnez-vous", "abonnez vous", "a la prochaine video",
-    "n'oubliez pas de vous abonner", "sous-titrage",
-)
+# Ce que Whisper invente quand il n'entend que du silence (liste partagee avec les satellites).
+from core.hallucinations import HALLUCINATIONS  # noqa: E402
 
 # Mots qui coupent la parole PUIS relancent l'ecoute (tu veux redire quelque chose).
 MOTS_RELANCE = (

@@ -132,6 +132,7 @@ class _Session:
         self.historique = []
         self.en_attente = None     # (Outil, args) N3 à confirmer, ou None
         self.relances_restantes = 0
+        self.apres_reveil = False  # la prochaine phrase suit un « Hey Jarvis » (pas une relance)
 
     def nouveau_reveil(self, maximum):
         """Ouvre un nombre borné de fenêtres sans nouveau wake word."""
@@ -140,6 +141,7 @@ class _Session:
         except (TypeError, ValueError):
             maximum = 2
         self.relances_restantes = max(0, min(maximum, 10))
+        self.apres_reveil = True
 
     def autoriser_relance(self, obligatoire=False):
         """Consomme une relance normale ; les confirmations N3 restent possibles."""
@@ -155,16 +157,45 @@ class _Session:
 
 
 def _transcrire(pcm_bytes):
-    """PCM 16-bit LE mono 16 kHz -> texte (faster-whisper, modèle partagé lazy)."""
+    """PCM 16-bit LE mono 16 kHz -> texte (faster-whisper, modèle partagé lazy).
+
+    Le silence et le bruit de fond ne deviennent jamais une phrase : détection de
+    voix intégrée à faster-whisper, segments que Whisper juge lui-même sans parole
+    écartés, hallucinations connues (« Sous-titres… Amara.org ») rejetées.
+    """
     import numpy as np
+    from core.hallucinations import est_hallucination
     audio = (np.frombuffer(bytes(pcm_bytes), dtype=np.int16).astype(np.float32) / 32768.0)
     if audio.size < TAUX * 0.3:
         return ""
     modele = _whisper()
     if modele is None:
         return ""
-    segments, _ = modele.transcribe(audio, language="fr", beam_size=1)
-    return " ".join(s.text for s in segments).strip()
+    segments, _ = modele.transcribe(
+        audio, language="fr", beam_size=1,
+        vad_filter=bool(reglage("satellite_lan.detection_voix", True)),
+        vad_parameters={"min_silence_duration_ms": 500},
+    )
+    gardes = [
+        s.text for s in segments
+        if not (getattr(s, "no_speech_prob", 0.0) > 0.6
+                and getattr(s, "avg_logprob", 0.0) < -1.0)
+    ]
+    texte = " ".join(gardes).strip()
+    return "" if est_hallucination(texte) else texte
+
+
+def _incompris(sess, apres_reveil):
+    """Ce que Jarvis dit quand rien d'intelligible n'a été capté.
+
+    Jamais de relance ensuite : rouvrir l'écoute sur du bruit entretient une
+    boucle. Une action N3 en attente est annulée, pour qu'aucune phrase ultérieure
+    ne puisse la confirmer par erreur.
+    """
+    if sess.en_attente:
+        sess.en_attente = None
+        return "Je n'ai rien entendu, j'annule."
+    return "Je n'ai rien entendu." if apres_reveil else ""
 
 
 _WHISPER = None
@@ -651,10 +682,17 @@ def monter_routes(app):
                     # phrase d'attente ici serait nécessairement générique et peut
                     # parasiter une simple salutation. La progression ne commence
                     # qu'après transcription, lorsque la demande le justifie.
+                    apres_reveil, sess.apres_reveil = sess.apres_reveil, False
                     phrase = await asyncio.to_thread(_transcrire, audio)
                     if not phrase:
-                        await parler("Je n'ai rien entendu.")
-                        await proposer_relance()
+                        # Rien d'intelligible : un seul « je n'ai rien entendu » après
+                        # un wake word, le silence pendant une suite de conversation,
+                        # puis veille — jamais de relance qui bouclerait sur du bruit.
+                        message = _incompris(sess, apres_reveil)
+                        sess.mettre_en_veille()
+                        if message:
+                            await parler(message)
+                        await envoyer({"type": "veille_forcee"})
                         await etat("veille")
                         continue
                     await envoyer({"type": "transcription", "texte": phrase})
