@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -180,6 +180,185 @@ if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 git -C `$repo pull -q --ff-only origin main
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 Write-Output ('Serveur synchronise sur ' + (git -C `$repo rev-parse --short HEAD))
+"@
+    exit 0
+}
+
+if ($Action -eq 'routes_lan') {
+    # Lecture seule : quelles routes WebSocket repondent sur le port LAN, en local,
+    # et quel processus ecoute ce port.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Continue'
+`$repo = $projetLitteral
+Get-NetTCPConnection -State Listen -LocalPort 8791 -ErrorAction SilentlyContinue | ForEach-Object {
+    `$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + `$_.OwningProcess)
+    Write-Output ('ecoute 8791 : PID ' + `$_.OwningProcess + ' ' + `$p.Name + ' lance=' + `$p.CreationDate.ToString('s') + ' adresse=' + `$_.LocalAddress)
+}
+`$py = @'
+import asyncio, websockets
+async def essai(chemin):
+    try:
+        async with websockets.connect("ws://127.0.0.1:8791" + chemin, open_timeout=8):
+            print(chemin.ljust(18), "-> ACCEPTEE")
+    except Exception as e:
+        print(chemin.ljust(18), "->", str(e)[:70])
+async def main():
+    for c in ("/satellite", "/desktop-agent", "/chemin-bidon"):
+        await essai(c)
+asyncio.run(main())
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_routes_lan.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
+"@
+    exit 0
+}
+
+if ($Action -eq 'journal_postes') {
+    # Lecture seule : dernieres lignes du journal Jarvis sur les satellites et l'agent Windows.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Continue'
+`$repo = $projetLitteral
+`$journal = Join-Path `$repo 'logs\jarvis.log'
+if (-not (Test-Path -LiteralPath `$journal)) { Write-Output 'journal absent'; exit 0 }
+Get-Content -LiteralPath `$journal -Tail 4000 -Encoding UTF8 |
+    Where-Object { `$_ -match '(?i)poste distant|desktop-agent|satellite|LAN' } |
+    Select-Object -Last 25
+"@
+    exit 0
+}
+
+if ($Action -eq 'redemarrer_jarvis') {
+    # Arrete Jarvis vocal et le serveur MCP (ancien code en memoire), puis relance le
+    # wrapper habituel DANS la session Windows de l'utilisatrice via une tache ponctuelle
+    # (meme compte que la tache Signal Matin), supprimee aussitot apres.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+`$wrapper = Join-Path `$repo 'scripts\demarrer_jarvis_complet.ps1'
+if (-not (Test-Path -LiteralPath `$wrapper)) { throw 'Wrapper de demarrage introuvable.' }
+`$anciens = @(Get-CimInstance Win32_Process -Filter "Name like 'python%' or Name like 'uv%'" |
+    Where-Object { [string]`$_.CommandLine -match 'jarvis14\.py|jarvis\.mcp_server' })
+foreach (`$p in `$anciens) { Stop-Process -Id `$p.ProcessId -Force -ErrorAction SilentlyContinue }
+Write-Output ('processus arretes=' + `$anciens.Count)
+Start-Sleep -Seconds 3
+
+`$modele = Get-ScheduledTask -TaskName 'Jarvis - Signal Matin'
+`$nom = 'Jarvis - redemarrage ponctuel'
+`$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + `$wrapper + '"') -WorkingDirectory `$repo
+`$reglages = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+Register-ScheduledTask -TaskName `$nom -Action `$action -Settings `$reglages -Principal `$modele.Principal -Force | Out-Null
+Start-ScheduledTask -TaskName `$nom
+`$lance = `$false
+for (`$i = 0; `$i -lt 90 -and -not `$lance; `$i++) {
+    Start-Sleep -Seconds 2
+    `$lance = [bool](Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { [string]`$_.CommandLine -match 'jarvis14\.py' })
+}
+Start-Sleep -Seconds 20
+Unregister-ScheduledTask -TaskName `$nom -Confirm:`$false
+Write-Output ('jarvis_relance=' + `$lance)
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { [string]`$_.CommandLine -match 'jarvis14\.py' } |
+    ForEach-Object { Write-Output ('processus=' + `$_.ProcessId + ' lance=' + `$_.CreationDate.ToString('s') + ' session=' + `$_.SessionId) }
+foreach (`$port in 8765, 8790, 8791) {
+    Write-Output ('port_' + `$port + '=' + [bool](Get-NetTCPConnection -State Listen -LocalPort `$port -ErrorAction SilentlyContinue))
+}
+"@
+    exit 0
+}
+
+if ($Action -eq 'etat_agent_bureau') {
+    # Lecture seule : ce que le serveur prevoit pour un poste « bureau ». Seuls des
+    # identifiants et des oui/non sont affiches, jamais un jeton.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Continue'
+`$repo = $projetLitteral
+`$py = @'
+import yaml
+conf = yaml.safe_load(open("config.yaml", encoding="utf-8")) or {}
+poste = conf.get("poste_principal") or {}
+agents = conf.get("desktop_agents") or []
+sats = conf.get("satellites") or []
+lan = conf.get("satellite_lan") or {}
+def ids(liste):
+    return [str(e.get("id")) + ("(jeton)" if e.get("token") else "(SANS jeton)") for e in liste if isinstance(e, dict)]
+print("poste_principal.actif=" + str(poste.get("actif")) + " agent=" + str(poste.get("agent")))
+print("desktop_agents=" + str(ids(agents)))
+print("satellites=" + str(ids(sats)))
+print("satellite_lan=" + str({k: v for k, v in lan.items() if "token" not in str(k).lower()}))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_etat_agent.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
+foreach (`$port in 8790, 8791) {
+    Write-Output ('port_' + `$port + '_ecoute=' + [bool](Get-NetTCPConnection -State Listen -LocalPort `$port -ErrorAction SilentlyContinue))
+}
+Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { `$_.DisplayName -match '(?i)jarvis|satellite|8791' -and `$_.Enabled -eq 'True' } |
+    ForEach-Object { Write-Output ('pare_feu=' + `$_.DisplayName) }
+"@
+    exit 0
+}
+
+if ($Action -eq 'lancement_jarvis') {
+    # Lecture seule : comment Jarvis demarre sur le serveur (taches, dossier Demarrage,
+    # arbre des processus), pour le relancer exactement de la meme facon.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Continue'
+Get-ScheduledTask | Where-Object { `$_.TaskName -match '(?i)jarvis|hermes' } | ForEach-Object {
+    `$a = @(`$_.Actions)[0]
+    Write-Output ('tache=' + `$_.TaskName + ' | etat=' + `$_.State + ' | declencheurs=' +
+        ((@(`$_.Triggers) | ForEach-Object { `$_.CimClass.CimClassName -replace 'MSFT_Task', '' }) -join ',') +
+        ' | execute=' + [IO.Path]::GetFileName([string]`$a.Execute) + ' ' + ([string]`$a.Arguments -replace '[A-Za-z]:\\[^\s\"]*\\', '...\'))
+}
+`$demarrage = [Environment]::GetFolderPath('Startup')
+Get-ChildItem -LiteralPath `$demarrage -ErrorAction SilentlyContinue | Where-Object { `$_.Name -match '(?i)jarvis|hermes' } | ForEach-Object {
+    Write-Output ('demarrage=' + `$_.Name)
+}
+Get-CimInstance Win32_Process -Filter "Name like 'python%' or Name like 'uv%' or Name like 'pythonw%'" |
+    Where-Object { [string]`$_.CommandLine -like '*jarvis14.py*' } | ForEach-Object {
+    `$parent = Get-CimInstance Win32_Process -Filter ('ProcessId=' + `$_.ParentProcessId) -ErrorAction SilentlyContinue
+    Write-Output ('processus=' + `$_.ProcessId + ' ' + `$_.Name + ' parent=' + `$_.ParentProcessId + ' ' + `$(if (`$parent) { `$parent.Name } else { '(termine)' }) + ' session=' + `$_.SessionId)
+}
+"@
+    exit 0
+}
+
+if ($Action -eq 'processus') {
+    # Lecture seule : quels programmes Jarvis tournent, depuis quand, dans quel mode.
+    # Seuls deux reglages booleens/courts sont lus dans config.yaml, jamais affiche en entier.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Continue'
+`$repo = $projetLitteral
+`$trouve = `$false
+Get-CimInstance Win32_Process -Filter "Name like 'python%' or Name like 'pythonw%' or Name like 'uv%'" | ForEach-Object {
+    `$ligne = [string]`$_.CommandLine
+    foreach (`$motif in 'jarvis14.py', 'jarvis_desktop_agent.py', 'main.py\" serve', 'generate-morning-paper') {
+        if (`$ligne -like ('*' + `$motif.Replace('\"', '') + '*')) {
+            `$trouve = `$true
+            Write-Output ('processus=' + `$_.ProcessId + ' ' + `$motif.Replace('\"', '') + ' lance=' + `$_.CreationDate.ToString('s'))
+            break
+        }
+    }
+}
+if (-not `$trouve) { Write-Output 'processus=aucun' }
+Write-Output ('port_hud_8770=' + [bool](Get-NetTCPConnection -State Listen -LocalPort 8770 -ErrorAction SilentlyContinue))
+Write-Output ('port_serveur_8790=' + [bool](Get-NetTCPConnection -State Listen -LocalPort 8790 -ErrorAction SilentlyContinue))
+Write-Output ('session_utilisateur_active=' + [bool](Get-Process explorer -ErrorAction SilentlyContinue))
+`$py = @'
+import yaml
+conf = yaml.safe_load(open("config.yaml", encoding="utf-8")) or {}
+poste = conf.get("poste_principal") or {}
+print("serveur_sans_peripheriques=" + str(bool(poste.get("serveur_sans_peripheriques", False))))
+print("hud_premier_plan=" + str((conf.get("hud") or {}).get("premier_plan_au_reveil", "defaut")))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_processus.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+Set-Location `$repo
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
 "@
     exit 0
 }
