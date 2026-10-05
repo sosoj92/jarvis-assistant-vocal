@@ -237,7 +237,8 @@ def main():
     test_micro_et_bienvenue()
 
     dire_titre("Termine !")
-    print("Lance Jarvis :  uv run python jarvis14.py   (puis dis « Hey Jarvis »)")
+    print("Lance Jarvis :  double-clic sur lancer_jarvis.bat, ou  uv run python jarvis14.py")
+    print("               (puis dis « Hey Jarvis »)")
     print("Un souci ? Diagnostic :  python scripts/doctor.py")
 
 

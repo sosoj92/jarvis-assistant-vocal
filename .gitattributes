@@ -1,0 +1,4 @@
+# Les scripts batch Windows doivent garder des fins de ligne CRLF, y compris dans
+# l'archive ZIP de GitHub : avec des LF seuls, cmd.exe saute parfois les etiquettes.
+*.bat text eol=crlf
+*.cmd text eol=crlf

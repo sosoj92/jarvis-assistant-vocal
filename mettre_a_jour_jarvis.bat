@@ -11,13 +11,19 @@ echo   Mise a jour des dependances de Jarvis
 echo ============================================
 echo.
 
+call "%~dp0scripts\trouver_uv.bat"
+if not defined UV (
+    echo uv est introuvable : lance d'abord INSTALLER_JARVIS.bat.
+    goto erreur
+)
+
 echo [1/2] Recherche des dernieres versions...
-"%USERPROFILE%\.local\bin\uv.exe" lock --upgrade
+"%UV%" lock --upgrade
 if errorlevel 1 goto erreur
 
 echo.
 echo [2/2] Installation...
-"%USERPROFILE%\.local\bin\uv.exe" sync
+"%UV%" sync
 if errorlevel 1 goto erreur
 
 echo.

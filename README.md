@@ -144,7 +144,19 @@ une carte **6 Go** (RTX 2060/3060) fait tourner les deux confortablement. Le `qw
 (~6 Go) demande plus de marge. Piper est temps réel sur CPU. `python scripts/doctor.py`
 conseille le modèle selon ta VRAM.
 
-## 🚀 Démarrage rapide
+## 🚀 Installation Windows en un clic
+
+Sur **Windows 11**, télécharge le dépôt puis double-clique sur
+**`INSTALLER_JARVIS.bat`**. Il installe [uv](https://docs.astral.sh/uv/) et Git avec
+`winget` s'ils manquent, puis Python 3.13 et les dépendances aux versions exactes de
+`uv.lock`, Chromium, et lance l'assistant de configuration (`scripts/setup.py`). Ton
+`config.yaml` existant est conservé. Ensuite, lance Jarvis avec **`lancer_jarvis.bat`**.
+Sur un PC à processeur ARM (Snapdragon), Whisper local n'existe pas : Jarvis
+transcrit alors la voix avec OpenAI (clé `openai.cle`, jamais en mode local), et la
+voix Piper comme la recherche DuckDuckGo y sont indisponibles
+([#14](https://github.com/sosoj92/jarvis-assistant-vocal/issues/14)).
+
+## 🚀 Démarrage rapide (installation manuelle)
 
 Prérequis : **Python 3.13**, [uv](https://docs.astral.sh/uv/), Windows 11, un micro.
 
