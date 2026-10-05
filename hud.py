@@ -329,7 +329,18 @@ class _Poignee(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass  # pas de bruit dans la console
 
+    def _locale(self):
+        """Poste local, Host local (anti DNS rebinding) : sinon 403. Vaut aussi pour
+        le flux /flux, qui diffuse les phrases et reponses de Jarvis."""
+        from core.http_local import requete_locale
+        if requete_locale(self.client_address[0], self.headers):
+            return True
+        self._json({"ok": False, "message": "Acces local uniquement."}, 403)
+        return False
+
     def do_GET(self):
+        if not self._locale():
+            return
         chemin = self.path.split("?", 1)[0]
         if chemin == "/flux":
             self._flux()
@@ -345,8 +356,7 @@ class _Poignee(BaseHTTPRequestHandler):
         if chemin != "/api/controle":
             self.send_error(404)
             return
-        if self.client_address[0] not in {"127.0.0.1", "::1"}:
-            self._json({"ok": False, "message": "Acces local uniquement."}, 403)
+        if not self._locale():
             return
         # L'en-tete custom provoque un preflight pour toute page tierce : sans
         # reponse CORS, un site visite dans le navigateur ne peut pas modifier Jarvis.
@@ -397,6 +407,7 @@ class _Poignee(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(corps)))
+        self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(corps)
 

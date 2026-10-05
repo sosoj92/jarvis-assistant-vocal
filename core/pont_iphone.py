@@ -44,6 +44,9 @@ if not _LOGI.handlers:
     _LOGI.propagate = False
 
 
+_TAILLE_MAX_INBOX = 64 * 1024     # une note ou une commande tient largement dedans
+
+
 def _token_ok(fourni):
     attendu = reglage("pont_iphone.token", "")
     return bool(attendu) and secrets.compare_digest(str(fourni or ""), str(attendu))
@@ -161,17 +164,24 @@ def monter_routes(app):
 
     @app.post("/api/inbox")
     async def inbox(request: Request):
-        try:
-            raw = await request.body()
-        except Exception:
-            raw = b""
         ct = request.headers.get("content-type", "")
         ua = request.headers.get("user-agent", "")
-        _LOGI.info("POST /api/inbox | ct=%r | len=%d | ua=%r", ct, len(raw or b""), ua[:60])
-
+        # Route publique (tunnel) : jeton verifie AVANT de lire le corps, et corps
+        # borne, pour qu'un inconnu ne puisse pas saturer la memoire.
         if not _token_ok(request.headers.get("x-jarvis-token", "")):
-            _LOGI.warning("  -> token invalide")
+            _LOGI.warning("POST /api/inbox | token invalide | ua=%r", ua[:60])
             return JSONResponse({"ok": False, "message": "Token invalide."}, status_code=401)
+        raw = bytearray()
+        try:
+            async for morceau in request.stream():
+                raw.extend(morceau)
+                if len(raw) > _TAILLE_MAX_INBOX:
+                    return JSONResponse({"ok": False, "message": "Requete trop grosse."},
+                                        status_code=413)
+        except Exception:
+            raw = bytearray()
+        raw = bytes(raw)
+        _LOGI.info("POST /api/inbox | ct=%r | len=%d | ua=%r", ct, len(raw), ua[:60])
 
         # Parsing tolerant : JSON quel que soit le content-type, sinon form-urlencoded.
         data, texte = {}, (raw or b"").decode("utf-8", "ignore").strip()

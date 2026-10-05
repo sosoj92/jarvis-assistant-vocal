@@ -140,8 +140,12 @@ def noms_lents():
 
 
 def exposes_mcp():
-    """Liste des outils autorises a etre exposes via le serveur MCP externe."""
-    return [o for o in _REGISTRE.values() if o.mcp_expose]
+    """Liste des outils autorises a etre exposes via le serveur MCP externe.
+
+    Jamais un outil a confirmation ni un N3, meme marque mcp_expose : un client
+    MCP ne peut pas confirmer a la place de l'utilisatrice."""
+    return [o for o in _REGISTRE.values()
+            if o.mcp_expose and not o.confirmation and o.nom not in _N3]
 
 
 # ---------------------------------------------------- niveaux de permission (N8)
@@ -159,6 +163,9 @@ _N3 = frozenset({
     "delete_event",
     "eteindre_pc",
     "controle_pc_astra",
+    "start_stream",
+    # Ajouter un executable lance ensuite sans question : jamais « toujours ».
+    "ajouter_app",
 })
 
 

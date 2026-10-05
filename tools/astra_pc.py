@@ -283,8 +283,9 @@ def executer_controle(tache: str) -> str:
 
 
 def _annonce(args):
-    return ("Cette tache necessite que je voie et pilote ton ecran avec Astra. "
-            "Je vais prendre le controle du PC ; Echap permet de m'arreter.")
+    tache = " ".join(str((args or {}).get("tache", "")).split())[:160]
+    return (f"Je vais prendre le controle du PC avec Astra pour : {tache or 'cette tache'}. "
+            "Echap permet de m'arreter.")
 
 
 @outil(

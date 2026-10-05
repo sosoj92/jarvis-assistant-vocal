@@ -643,12 +643,10 @@ _HOTES_LOCAUX = {"localhost", "127.0.0.1", "::1", "[::1]", ""}
 
 
 def _local(request):
-    # IP réelle de la socket (non falsifiable par en-tête) + pas de X-Forwarded
-    # (ngrok les ajoute). Cf. panneau._local_seulement.
-    if request.headers.get("x-forwarded-for") or request.headers.get("x-forwarded-host"):
-        return False
-    hote = (getattr(request.client, "host", "") or "").strip().lower()
-    return hote in {"127.0.0.1", "::1", "localhost"}
+    # IP réelle de la socket, pas de X-Forwarded (ngrok) et Host local (anti
+    # DNS rebinding) : cf. core/http_local.
+    from core.http_local import requete_locale
+    return requete_locale(getattr(request.client, "host", ""), request.headers)
 
 
 def monter_routes(app):

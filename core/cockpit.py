@@ -220,7 +220,8 @@ def monter_routes(app):
             return refus
         if not _HTML.exists():
             return HTMLResponse("<h1>Cockpit</h1><p>web/cockpit.html manquant.</p>", 500)
-        return HTMLResponse(_HTML.read_text(encoding="utf-8"))
+        return HTMLResponse(_HTML.read_text(encoding="utf-8"),
+                            headers={"X-Frame-Options": "DENY"})
 
     @app.get("/api/cockpit/finances")
     def api_finances(request: Request):

@@ -207,7 +207,9 @@ def launch_app(nom: str) -> str:
 
 
 def _annonce_ajout(args):
-    return f"Je vais ajouter {args.get('nom', 'cette application')} a tes applications."
+    # Le chemin exact est annonce : c'est lui qui sera lance ensuite par launch_app.
+    return (f"Je vais ajouter {args.get('nom', 'cette application')} a tes applications, "
+            f"avec le chemin {str(args.get('chemin', '?'))[:200]}.")
 
 
 @outil(
@@ -232,6 +234,8 @@ def ajouter_app(nom: str, chemin: str) -> str:
     chemin = (chemin or "").strip()
     if not nom or not chemin:
         return "Il me faut un nom et un chemin."
+    if chemin.replace("/", "\\").startswith("\\\\"):
+        return "Je n'ajoute pas un programme situe sur un partage reseau."
     apps = _apps()
     apps[nom.lower()] = chemin
     definir("apps", apps)

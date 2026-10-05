@@ -211,8 +211,9 @@ def demarrer_refresh_instagram():
     def run():
         try:
             rafraichir_tokens()
-        except Exception:
-            LOG.exception("instagram: auto-refresh")
+        except Exception as e:
+            # Pas de trace complete : l'URL de l'erreur contient le jeton.
+            LOG.warning("instagram: auto-refresh (%s)", _erreur_sans_secret(e))
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -295,8 +296,11 @@ def instagram_resume(compte: str = "") -> str:
         try:
             snap = _instantane(c)
         except Exception as e:
-            LOG.exception("instagram_resume %s", c["nom"])
-            phrases.append(f"{c['nom']} : lecture impossible ({e}).")
+            # Ni trace complete ni message brut : l'URL de l'erreur contient le jeton,
+            # et ce texte part dans les journaux, le HUD et le modele cloud.
+            erreur = _erreur_sans_secret(e)
+            LOG.warning("instagram_resume %s : %s", c["nom"], erreur)
+            phrases.append(f"{c['nom']} : lecture impossible ({erreur}).")
             continue
         par_jour = hist.get(c["nom"], {})
         veille = _veille(par_jour, aujourd)
@@ -322,5 +326,5 @@ def rafraichir_instagram() -> str:
     try:
         rafraichir_tokens()
     except Exception as e:
-        return f"Souci pendant le renouvellement ({e})."
+        return f"Souci pendant le renouvellement ({_erreur_sans_secret(e)})."
     return "Tokens Instagram verifies et prolonges si necessaire."

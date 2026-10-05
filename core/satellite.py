@@ -388,7 +388,16 @@ def _adresse_a_alexa(phrase):
     return p == "alexa" or p.startswith("alexa ") or p.startswith("hey alexa ")
 
 
+# Prendre la souris et le clavier du PC depuis une autre piece : personne n'est
+# devant l'ecran pour surveiller ou appuyer sur Echap. Refuse depuis un satellite.
+_INTERDITS_SATELLITE = frozenset({"controle_pc_astra"})
+_MESSAGE_ASTRA_SATELLITE = ("Astra ne prend le contrôle du PC que si tu le demandes "
+                            "devant l'ordinateur.")
+
+
 def _executer_outil(nom, args):
+    if nom in _INTERDITS_SATELLITE:
+        return _MESSAGE_ASTRA_SATELLITE
     """Exécute un outil après application de la politique de confirmation."""
     from core import registre
     outil = registre.get(nom)
@@ -406,9 +415,7 @@ def _executer_decision_prioritaire(session, decision):
     from core import registre
 
     if decision.type == "astra":
-        from tools.astra_pc import executer_controle
-        texte = (executer_controle(decision.tache) if decision.tache else
-                 "Dis-moi quelle tâche tu veux que je fasse sur le PC avec Astra.")
+        texte = _MESSAGE_ASTRA_SATELLITE
     elif decision.type == "vision":
         from tools.ecran import analyser_ecran
         texte = analyser_ecran(decision.tache)
@@ -511,6 +518,10 @@ def traiter_texte(session, phrase):
             # Toute action marquée sensible suit la même politique qu'au bureau.
             # N2 mémorisé peut passer ; N3 ne l'est jamais.
             o = registre.get(b.name)
+            if b.name in _INTERDITS_SATELLITE:
+                resultats.append({"type": "tool_result", "tool_use_id": b.id,
+                                  "content": _MESSAGE_ASTRA_SATELLITE})
+                continue
             if o is not None and o.confirmation and not registre.est_autorise(b.name):
                 session.en_attente = (b.name, b.input or {})
                 q = None

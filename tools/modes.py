@@ -69,7 +69,7 @@ def activer(nom):
 
 @outil(
     nom="activer_mode",
-    mcp_expose=True,
+    mcp_expose=False,
     description="Active une ambiance lumineuse : off (tout eteindre / je m'en vais), "
                 "retour (lumieres douces), film (salon tamise), stream. A utiliser "
                 "pour 'mode film', 'mode stream', 'tout eteindre', 'je m'en vais'. "

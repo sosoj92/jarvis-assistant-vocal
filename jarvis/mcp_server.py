@@ -12,9 +12,9 @@ Tourne independamment de l'assistant vocal (les deux peuvent coexister) :
 Transport stdio par defaut (standard des clients desktop) ; HTTP/SSE possible via
 config.yaml (mcp.transport: http). Tous les appels externes vont dans logs/mcp.log.
 
-Securite : seuls les outils domotique/PC sont exposes par defaut. Les outils a
-confirmation exigent un argument confirm=true, sinon ils renvoient une demande de
-confirmation au lieu d'agir (pas d'action irreversible silencieuse).
+Securite : seuls des outils N1 explicitement marques sont exposes (lectures sures,
+minuteur...). Aucun outil a confirmation ni N3 ne l'est jamais, et ni lumieres, ni
+camera, ni micro, ni OBS (doctrine de CLAUDE.md).
 """
 import functools
 import inspect
@@ -76,28 +76,17 @@ def _executer(outil, kwargs):
 
 
 def _enregistrer(outil):
+    # registre.exposes_mcp() ne renvoie jamais d'outil a confirmation : un client
+    # MCP ne peut pas confirmer a la place de l'utilisatrice (plus de confirm=true).
+    if outil.confirmation or registre.est_n3(outil.nom):
+        raise ValueError(f"{outil.nom} demande une confirmation : jamais expose au MCP")
     fonction = outil.fonction
     sig = inspect.signature(fonction)
 
-    if outil.confirmation:
-        @functools.wraps(fonction)
-        def wrapper(*a, **k):
-            confirm = k.pop("confirm", False)
-            if not confirm:
-                annonce = outil.annonce(k) if outil.annonce else f"Confirmer {outil.nom} ?"
-                LOG.info("confirmation requise : %s args=%s", outil.nom, k)
-                return (f"{annonce} Rappelle cet outil avec confirm=true "
-                        "pour executer.")
-            return _executer(outil, k)
-
-        params = list(sig.parameters.values()) + [inspect.Parameter(
-            "confirm", inspect.Parameter.KEYWORD_ONLY, default=False, annotation=bool)]
-        wrapper.__signature__ = sig.replace(parameters=params)
-    else:
-        @functools.wraps(fonction)
-        def wrapper(*a, **k):
-            return _executer(outil, {**dict(zip(
-                [p.name for p in sig.parameters.values()], a)), **k})
+    @functools.wraps(fonction)
+    def wrapper(*a, **k):
+        return _executer(outil, {**dict(zip(
+            [p.name for p in sig.parameters.values()], a)), **k})
 
     server.add_tool(wrapper, name=outil.nom, description=outil.description)
 

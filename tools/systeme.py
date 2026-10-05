@@ -79,7 +79,13 @@ def ouvrir_application(nom: str) -> str:
             return "Discord lance."
         return "Discord introuvable."
 
-    cible = raccourcis.get(nom_min, nom)
+    # Liste fermee : un nom inconnu n'est JAMAIS passe a os.startfile (sinon un
+    # chemin .exe, un partage reseau \\hote\x.exe ou un protocole Windows choisi
+    # par le LLM, eventuellement sous l'effet d'un texte piege, serait lance).
+    cible = raccourcis.get(nom_min)
+    if cible is None:
+        from tools.apps import launch_app
+        return launch_app(nom)            # applis configurees par l'utilisatrice
 
     try:
         # os.startfile (pas de shell) -> évite l'injection de commande via un

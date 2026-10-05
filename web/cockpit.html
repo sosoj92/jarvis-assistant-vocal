@@ -85,8 +85,9 @@
 </main>
 <script>
 const $=(s,e=document)=>e.querySelector(s);
-const eur=n=>(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
-const api=async u=>{try{return await (await fetch(u)).json()}catch(e){return null}};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eur=n=>esc((n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}))+' €';
+const api=async u=>{try{return await (await fetch(u,{headers:{'X-Jarvis-Panneau':'1'}})).json()}catch(e){return null}};
 
 document.querySelectorAll('nav button:not([disabled])').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
@@ -109,24 +110,24 @@ async function charger(){
   // alertes
   $('#alertes').innerHTML=(d.alertes||[]).map(a=>{
     const chg=a.startsWith('Montant');
-    return `<div class="alerte ${chg?'chg':''}">${chg?'🔔':'⏰'} ${a}</div>`;
+    return `<div class="alerte ${chg?'chg':''}">${chg?'🔔':'⏰'} ${esc(a)}</div>`;
   }).join('');
   // kpis
   $('#kpis').innerHTML=`
     <div class="kpi"><div class="v">${eur(d.total_mensuel)}</div><div class="l">abonnements / mois</div></div>
     <div class="kpi"><div class="v">${eur(d.total_annuel)}</div><div class="l">soit / an</div></div>
-    <div class="kpi"><div class="v">${d.nb}</div><div class="l">abonnements actifs</div></div>`;
+    <div class="kpi"><div class="v">${esc(d.nb)}</div><div class="l">abonnements actifs</div></div>`;
   // timeline
   $('#vide').style.display=d.nb?'none':'block';
   $('#timeline').innerHTML=(d.abonnements||[]).map(a=>`<tr>
-    <td>${a.service}</td><td><span class="badge">${a.categorie}</span></td>
-    <td class="num">${eur(a.montant)}</td><td class="muted">${a.periodicite}</td>
-    <td>${jour(a.prochaine)} <span class="muted">· ${dans(a.dans_jours)}</span></td></tr>`).join('');
+    <td>${esc(a.service)}</td><td><span class="badge">${esc(a.categorie)}</span></td>
+    <td class="num">${eur(a.montant)}</td><td class="muted">${esc(a.periodicite)}</td>
+    <td>${esc(jour(a.prochaine))} <span class="muted">· ${esc(dans(a.dans_jours))}</span></td></tr>`).join('');
   // categories (barres)
   const cats=Object.entries(d.par_categorie||{}).sort((a,b)=>b[1]-a[1]);
   const max=cats.length?cats[0][1]:1;
   $('#categories').innerHTML=cats.map(([c,v])=>`
-    <div class="cat"><span>${c}</span><span class="num">${eur(v)}/mois</span></div>
+    <div class="cat"><span>${esc(c)}</span><span class="num">${eur(v)}/mois</span></div>
     <div class="barre"><i style="width:${Math.round(v/max*100)}%"></i></div>`).join('')
     || '<span class="muted">—</span>';
 }
@@ -138,20 +139,20 @@ async function chargerTx(){
   const rien=(v.entrees===0&&v.sorties===0);
   if(!rien){
     $('#txkpis').innerHTML=`
-      <div class="kpi"><div class="v" style="color:#3ecf8e">${eur(v.entrees)}</div><div class="l">entrées (${v.mois})</div></div>
+      <div class="kpi"><div class="v" style="color:#3ecf8e">${eur(v.entrees)}</div><div class="l">entrées (${esc(v.mois)})</div></div>
       <div class="kpi"><div class="v" style="color:#ff8a8a">${eur(v.sorties)}</div><div class="l">sorties</div></div>
       <div class="kpi"><div class="v">${eur(v.solde)}</div><div class="l">solde</div></div>`;
     const cats=Object.entries(v.par_categorie||{}).filter(([,x])=>x.sorties>0);
     const max=cats.length?Math.max(...cats.map(([,x])=>x.sorties)):1;
     $('#txcats').innerHTML=cats.map(([c,x])=>`
-      <div class="cat"><span>${c}</span><span class="num">${eur(x.sorties)}</span></div>
+      <div class="cat"><span>${esc(c)}</span><span class="num">${eur(x.sorties)}</span></div>
       <div class="barre"><i style="width:${Math.round(x.sorties/max*100)}%"></i></div>`).join('');
   }
   const rec=d.recurrents||[];
   $('#txrec').innerHTML= rec.length? `<table><thead><tr><th>Prélèvement</th>
     <th class="num">Montant</th><th>Fréquence</th><th></th></tr></thead><tbody>`
-    + rec.map(r=>`<tr><td>${r.service}</td><td class="num">${eur(r.montant)}</td>
-      <td class="muted">${r.mois} mois · ${r.occurrences}×</td>
+    + rec.map(r=>`<tr><td>${esc(r.service)}</td><td class="num">${eur(r.montant)}</td>
+      <td class="muted">${esc(r.mois)} mois · ${esc(r.occurrences)}×</td>
       <td>${r.stable?'<span class="badge">montant fixe</span>':'<span class="badge soon">variable</span>'}</td></tr>`).join('')
     + '</tbody></table>' : '<span class="muted">Aucun (importe un relevé pour les détecter).</span>';
 }

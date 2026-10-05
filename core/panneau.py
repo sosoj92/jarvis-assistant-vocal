@@ -19,6 +19,7 @@ Trois vues (une seule page a onglets) :
 """
 import json
 import logging
+import re
 import shutil
 import socket
 import subprocess
@@ -234,8 +235,20 @@ def _modeles():
     }
 
 
+# Noms de modeles recus du navigateur : jamais de chemin, d'option ni de « .. ».
+_NOM_MODELE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
+_REFUS_NOM = {"ok": False, "message": "Nom de modele invalide."}
+
+
+def _nom_valide(nom):
+    nom = str(nom or "")
+    return bool(_NOM_MODELE.match(nom)) and ".." not in nom
+
+
 def _ollama_pull(nom):
     """Telecharge un modele en tache de fond, avec suivi de progression."""
+    if not _nom_valide(nom):
+        return _REFUS_NOM
     _PULLS[nom] = {"statut": "en cours", "pct": 0, "message": "demarrage"}
 
     def worker():
@@ -269,6 +282,8 @@ def _ollama_pull(nom):
 
 
 def _ollama_supprimer(nom):
+    if not _nom_valide(nom):
+        return _REFUS_NOM
     try:
         import requests
         r = requests.delete(f"{_ollama_hote()}/api/delete", json={"model": nom}, timeout=15)
@@ -282,6 +297,8 @@ def _ollama_supprimer(nom):
 
 def _ollama_tester(nom):
     """Mini-benchmark : latence + un appel d'outil factice + une phrase en francais."""
+    if not _nom_valide(nom):
+        return _REFUS_NOM
     import requests
     hote = _ollama_hote()
     outil = [{"type": "function", "function": {
@@ -341,7 +358,13 @@ def _whisper_installes():
     return dl
 
 
+def _whisper_du_catalogue(nom):
+    return nom in {c["nom"] for c in CATALOGUE_WHISPER}
+
+
 def _whisper_installer(nom):
+    if not _whisper_du_catalogue(nom):
+        return _REFUS_NOM
     from core.transcription import whisper_local_disponible
     if not whisper_local_disponible():
         return {"ok": False, "message": "Whisper local n'existe pas sur cette machine "
@@ -362,7 +385,14 @@ def _whisper_installer(nom):
 
 
 def _whisper_supprimer(nom):
-    dossier = _hf_cache() / f"models--Systran--faster-whisper-{nom}"
+    # Nom du catalogue uniquement, et dossier resolu DANS le cache : jamais de
+    # rmtree hors du cache Hugging Face, quel que soit le nom recu.
+    if not _whisper_du_catalogue(nom):
+        return _REFUS_NOM
+    cache = _hf_cache().resolve()
+    dossier = (cache / f"models--Systran--faster-whisper-{nom}").resolve()
+    if dossier.parent != cache:
+        return _REFUS_NOM
     if not dossier.exists():
         return {"ok": False, "message": "Modele non trouve dans le cache."}
     try:
@@ -392,6 +422,8 @@ def _hermes_modele():
 
 def _hermes_definir_modele(modele):
     """Change model.default cote Hermes via son CLI (sans toucher aux droits)."""
+    if not _nom_valide(modele):       # argument passe a un CLI (parfois un .cmd)
+        return _REFUS_NOM
     exe = shutil.which("hermes")
     if not exe:
         return {"ok": False, "message": "CLI 'hermes' introuvable dans le PATH du serveur. "
@@ -410,6 +442,8 @@ def _hermes_definir_modele(modele):
 
 def _definir_actif(backend, modele, profil="hybride", fournisseur=""):
     backend = (backend or "").lower()
+    if modele and not _nom_valide(modele):
+        return _REFUS_NOM
     if backend == "local":
         if not modele:
             return {"ok": False, "message": "Modele manquant."}
@@ -811,16 +845,10 @@ def _permissions():
 # ==================================================================== routes
 
 def _local_seulement(request):
-    """True si la requete vient VRAIMENT du poste local (pas du LAN ni du tunnel).
-
-    On se base sur l'IP REELLE de la socket (request.client.host), non falsifiable
-    par un en-tete, PLUS l'absence d'en-tetes X-Forwarded-* (que ngrok ajoute
-    toujours -> identifie le trafic tunnelise). L'ancien check sur l'en-tete Host
-    etait contournable (`curl -H "Host: localhost"`)."""
-    if request.headers.get("x-forwarded-for") or request.headers.get("x-forwarded-host"):
-        return False
-    hote = (getattr(request.client, "host", "") or "").strip().lower()
-    return hote in {"127.0.0.1", "::1", "localhost"}
+    """True si la requete vient VRAIMENT du poste local (pas du LAN, du tunnel, ni
+    d'un site web via DNS rebinding) : voir core/http_local."""
+    from core.http_local import requete_locale
+    return requete_locale(getattr(request.client, "host", ""), request.headers)
 
 
 def monter_routes(app):
@@ -833,14 +861,20 @@ def monter_routes(app):
             return JSONResponse({"ok": False,
                                  "message": "Panneau accessible en local uniquement."},
                                 status_code=403)
-        # Anti-CSRF : sur les écritures (POST), exiger application/json. Une page
-        # web malveillante ne peut pas envoyer ce Content-Type en « requête simple »
-        # (il déclenche un préflight CORS qu'on ne satisfait pas) -> pas de CSRF.
+        # Anti-CSRF sur les ecritures : type MIME EXACT application/json (un simple
+        # « contient » laissait passer « text/plain; application/json », envoye sans
+        # preflight), en-tete X-Jarvis-Panneau (impose un preflight qu'on ne
+        # satisfait pas) et Origin locale si le navigateur en envoie une.
         if request.method not in ("GET", "HEAD"):
-            ct = (request.headers.get("content-type", "") or "").lower()
-            if "application/json" not in ct:
+            from core.http_local import origine_locale
+            ct = (request.headers.get("content-type", "") or "").split(";")[0].strip().lower()
+            if ct != "application/json":
                 return JSONResponse({"ok": False, "message": "Content-Type invalide."},
                                     status_code=415)
+            if (request.headers.get("x-jarvis-panneau") != "1"
+                    or not origine_locale(request.headers.get("origin"))):
+                return JSONResponse({"ok": False, "message": "Requete refusee."},
+                                    status_code=403)
         return None
 
     @app.get("/panneau")
@@ -850,7 +884,8 @@ def monter_routes(app):
             return refus
         if not _HTML.exists():
             return HTMLResponse("<h1>Panneau</h1><p>web/panneau.html manquant.</p>", 500)
-        return HTMLResponse(_HTML.read_text(encoding="utf-8"))
+        return HTMLResponse(_HTML.read_text(encoding="utf-8"),
+                            headers={"X-Frame-Options": "DENY"})
 
     # -- lecture --
     @app.get("/api/panneau/modeles")

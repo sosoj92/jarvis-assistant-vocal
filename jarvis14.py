@@ -589,15 +589,14 @@ def _repondre_route_prioritaire_commune(historique):
     if decision is None:
         return None
 
+    if decision.type == "astra" and decision.tache:
+        # Nommer Astra ne vaut pas confirmation : controle_pc_astra est N3, il
+        # passe par la meme confirmation vocale que s'il etait choisi par le LLM.
+        from core.routage_intentions import Decision
+        decision = Decision("outil", "controle_pc_astra", {"tache": decision.tache})
+
     if decision.type == "astra":
-        from tools.astra_pc import executer_controle
-        if not decision.tache:
-            texte = "Dis-moi quelle tache tu veux que je fasse sur le PC avec Astra."
-        else:
-            _hud("etat", "parole")
-            dire("D'accord, Astra prend le controle du PC. Appuie sur Echap pour arreter.")
-            _hud("etat", "reflexion")
-            texte = executer_controle(decision.tache)
+        texte = "Dis-moi quelle tache tu veux que je fasse sur le PC avec Astra."
         nom_outil = "controle_pc_astra"
 
     elif decision.type == "vision":

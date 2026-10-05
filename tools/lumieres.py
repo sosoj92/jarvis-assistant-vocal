@@ -98,7 +98,7 @@ def _agir_hue(ident, action):
 
 @outil(
     nom="allumer_lumiere",
-    mcp_expose=True,
+    mcp_expose=False,
     description="Allume ou eteint les lumieres Philips Hue d'une piece, ou de "
                 "toutes les pieces. A utiliser quand l'utilisateur dit 'allume le "
                 "salon', 'eteins la chambre', 'eteins tout'.",
@@ -136,7 +136,7 @@ def allumer_lumiere(piece: str, allumer: bool = True) -> str:
 
 @outil(
     nom="regler_luminosite",
-    mcp_expose=True,
+    mcp_expose=False,
     description="Regle la luminosite des lumieres Hue d'une piece en pourcentage. "
                 "A utiliser pour 'baisse le salon a 30 pour cent', 'mets la chambre "
                 "au maximum'.",
@@ -175,7 +175,7 @@ def regler_luminosite(piece: str, pourcentage: int) -> str:
 
 @outil(
     nom="changer_couleur",
-    mcp_expose=True,
+    mcp_expose=False,
     description="Change la couleur des lumieres Hue d'une piece a partir d'un nom "
                 "de couleur en francais. Pour 'mets le salon en bleu', 'passe la "
                 "chambre en rouge'.",

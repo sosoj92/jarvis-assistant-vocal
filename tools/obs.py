@@ -30,11 +30,15 @@ def _erreur_obs(e):
             "WebSocket est active.")
 
 
+# Camera, micro et ecran : rien d'OBS n'est expose au MCP sauf l'arret d'un
+# enregistrement. Lancer un direct public est une action externe difficile a
+# annuler -> N3 (confirmation a chaque fois, jamais a distance).
 @outil(
     nom="start_stream",
-    mcp_expose=True,
     description="Demarre le direct (streaming) dans OBS. Pour 'lance le stream', "
                 "'demarre le direct', 'on stream'.",
+    confirmation=True,
+    annonce=lambda args: "Je vais lancer le direct public sur OBS.",
 )
 def start_stream() -> str:
     try:
@@ -46,7 +50,6 @@ def start_stream() -> str:
 
 @outil(
     nom="stop_stream",
-    mcp_expose=True,
     description="Coupe le direct (streaming) dans OBS. Pour 'coupe le stream', "
                 "'arrete le direct'.",
     confirmation=True,
@@ -62,9 +65,10 @@ def stop_stream() -> str:
 
 @outil(
     nom="start_record",
-    mcp_expose=True,
     description="Demarre l'enregistrement local dans OBS. Pour 'lance "
                 "l'enregistrement', 'enregistre'.",
+    confirmation=True,
+    annonce=lambda args: "Je vais lancer l'enregistrement OBS.",
 )
 def start_record() -> str:
     try:
@@ -90,7 +94,6 @@ def stop_record() -> str:
 
 @outil(
     nom="switch_scene",
-    mcp_expose=True,
     description="Change la scene active dans OBS. La liste des scenes est recuperee "
                 "dynamiquement. Pour 'scene jeu', 'passe sur la scene pause', 'mets "
                 "la scene webcam'.",
@@ -128,7 +131,6 @@ def switch_scene(nom: str) -> str:
 
 @outil(
     nom="save_replay",
-    mcp_expose=True,
     description="Sauvegarde le replay buffer (les dernieres secondes de jeu). Pour "
                 "'clippe ca', 'sauvegarde le replay', 'garde ce moment'. Si le buffer "
                 "n'est pas actif, le demarre et previent l'utilisateur.",

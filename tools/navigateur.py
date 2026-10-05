@@ -431,6 +431,11 @@ def browser_close_tabs(filtre: str = "") -> str:
     },
     lent=True,
     phrase_attente="Je regarde la page.",
+    # Clique ou tape dans le navigateur connecte (mail, reseaux...) en suivant le
+    # contenu de la page : on annonce l'instruction exacte et on attend un oui.
+    confirmation=True,
+    annonce=lambda args: (f"Je vais agir sur la page ouverte : "
+                          f"{' '.join(str(args.get('instruction', '')).split())[:160]}."),
 )
 def browser_interact(instruction: str) -> str:
     browser = _connexion()

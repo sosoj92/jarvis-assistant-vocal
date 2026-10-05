@@ -41,7 +41,9 @@ def app():
     global _APP
     if _APP is None:
         from fastapi import FastAPI
-        _APP = FastAPI(title="Jarvis")
+        # Pas de /docs, /redoc ni /openapi.json : l'app est joignable par le tunnel
+        # public, inutile d'y publier la carte des routes.
+        _APP = FastAPI(title="Jarvis", docs_url=None, redoc_url=None, openapi_url=None)
         from core.pont_iphone import monter_routes
         monter_routes(_APP)                       # /api/inbox, /api/ping
         try:

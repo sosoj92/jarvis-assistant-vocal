@@ -260,6 +260,12 @@ def _executer_action(page, act):
     },
     lent=True,
     phrase_attente="Je m'occupe de la reservation, ca peut prendre un moment. Je te previens avant de valider.",
+    # N3 (core/registre._N3) : le navigateur pilote saisit ton nom, ton telephone et
+    # ton e-mail sur le site. On confirme le site et l'objet AVANT de commencer.
+    confirmation=True,
+    annonce=lambda args: (f"Je vais remplir une reservation sur {str(args.get('site', '?'))[:80]} "
+                          f"pour {str(args.get('quoi', '?'))[:80]}, {str(args.get('quand', '?'))[:60]}, "
+                          "avec tes coordonnees."),
 )
 def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str:
     global _RESUME_RESA

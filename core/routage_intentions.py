@@ -55,8 +55,9 @@ def decider_prioritaire(phrase: str, piece: str = "") -> Decision | None:
     except Exception:
         LOG.exception("routage caméra et gestes")
 
-    # Une invocation Astra explicite vaut autorisation pour la tâche sûre
-    # demandée ; les garde-fous de l'opérateur restent appliqués ensuite.
+    # Une invocation Astra explicite choisit l'outil sans passer par le LLM ;
+    # elle ne vaut PAS autorisation : controle_pc_astra (N3) reste confirmé au
+    # PC, et il est refusé depuis un satellite.
     try:
         from tools.astra_pc import extraire_commande_explicite
         tache = extraire_commande_explicite(phrase)

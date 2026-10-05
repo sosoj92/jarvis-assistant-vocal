@@ -153,7 +153,7 @@ hpack==4.2.0
     # via h2
 httpcore==1.0.9
     # via httpx
-httpcore2==2.9.1
+httpcore2==2.13.1 ; sys_platform != 'emscripten'
     # via httpx2
 httplib2==0.32.0
     # via
@@ -167,10 +167,12 @@ httpx==0.28.1
     #   ddgs
     #   huggingface-hub
     #   ollama
-httpx2==2.9.1
+httpx2==2.13.1
     # via
     #   mcp
     #   openai
+httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+    # via httpx2
 huggingface-hub==1.26.0 ; platform_machine != 'ARM64' or sys_platform != 'win32'
     # via
     #   faster-whisper
@@ -237,7 +239,7 @@ nvidia-cudnn-cu12==9.24.0.43 ; (platform_machine == 'AMD64' and sys_platform != 
     # via jarvis-vocal
 nvidia-ml-py==13.610.43 ; (platform_machine == 'AMD64' and sys_platform != 'darwin') or (platform_machine == 'x86_64' and sys_platform != 'darwin')
     # via jarvis-vocal
-oauthlib==3.3.1
+oauthlib==4.0.0
     # via requests-oauthlib
 obsws-python==1.8.0
     # via jarvis-vocal
@@ -304,7 +306,7 @@ pyee==13.0.1
     # via playwright
 pygments==2.20.0
     # via rich
-pyjwt==2.13.0
+pyjwt==2.15.1
     # via
     #   mcp
     #   twilio
@@ -1140,7 +1142,7 @@ tzdata==2026.3
     # via icalendar
 uritemplate==4.2.0
     # via google-api-python-client
-urllib3==2.7.0
+urllib3==2.8.0
     # via requests
 uvicorn==0.52.1 ; sys_platform != 'emscripten'
     # via mcp

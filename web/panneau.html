@@ -212,8 +212,9 @@
 <script>
 const $=(s,e=document)=>e.querySelector(s), $$=(s,e=document)=>[...e.querySelectorAll(s)];
 const api=async(u,o)=>{const r=await fetch(u,o);try{return await r.json()}catch(e){return{ok:false,message:'reponse invalide'}}};
-const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
-const bYes=(t)=>`<span class="badge on">${t}</span>`, bNo=(t)=>`<span class="badge off">${t}</span>`;
+const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis-Panneau':'1'},body:JSON.stringify(b||{})});
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const bYes=(t)=>`<span class="badge on">${esc(t)}</span>`, bNo=(t)=>`<span class="badge off">${esc(t)}</span>`;
 
 $$('nav button').forEach(b=>b.onclick=()=>{
   $$('nav button').forEach(x=>x.classList.toggle('on',x===b));
@@ -221,7 +222,7 @@ $$('nav button').forEach(b=>b.onclick=()=>{
   if(b.dataset.t==='etat'){chargerEtat();chargerBudget();chargerActivite();chargerTaches();} if(b.dataset.t==='perms')chargerPerms();
   if(b.dataset.t==='reglages')chargerReglages();
 });
-const fmt=n=>(n||0).toLocaleString('fr-FR');
+const fmt=n=>esc((n||0).toLocaleString('fr-FR'));
 const eur=n=>'$'+(n||0).toFixed(2);
 
 /* ---------- MODELES ---------- */
@@ -231,17 +232,17 @@ async function chargerModeles(){
   const m=d.materiel;
   $('#mat').innerHTML = m.cpu_seulement
     ? `<div class="kpi"><div class="v">CPU seulement</div><div class="l">aucun GPU NVIDIA</div></div>`
-    : m.gpu.map(g=>`<div class="kpi"><div class="v">${g.nom.replace('NVIDIA ','')}</div><div class="l">GPU</div></div>`).join('')
-      + `<div class="kpi"><div class="v">${m.vram_total_go} Go</div><div class="l">VRAM totale</div></div>`
-      + `<div class="kpi"><div class="v">${m.vram_exploitable_go} Go</div><div class="l">exploitable (LLM)</div></div>`;
+    : m.gpu.map(g=>`<div class="kpi"><div class="v">${esc(g.nom.replace('NVIDIA ',''))}</div><div class="l">GPU</div></div>`).join('')
+      + `<div class="kpi"><div class="v">${esc(m.vram_total_go)} Go</div><div class="l">VRAM totale</div></div>`
+      + `<div class="kpi"><div class="v">${esc(m.vram_exploitable_go)} Go</div><div class="l">exploitable (LLM)</div></div>`;
   // actifs par backend
   const A=d.actifs, be=d.backend_actif;
   const ligneActif=(cle,label,val,editable)=>{
     const on = (cle==='local'&&be==='local')||(cle==='cloud'&&(be==='hybride'||be==='qualite'));
-    let ed = editable? `<input class="txt" id="in-${cle}" value="${val}" style="width:230px">
+    let ed = editable? `<input class="txt" id="in-${cle}" value="${esc(val)}" style="width:230px">
        <button class="act ghost" onclick="${cle==='cloud'?`activerCloud($('#in-cloud').value,'${be==='qualite'?'qualite':'hybride'}')`:`activer('${cle}',$('#in-${cle}').value)`}">Activer</button>`:'';
     return `<tr><td>${label} ${on?'<span class="badge on">actif</span>':''}</td>
-      <td class="mono">${val}</td><td>${ed}</td></tr>`;
+      <td class="mono">${esc(val)}</td><td>${ed}</td></tr>`;
   };
   $('#actifs').innerHTML=`<table><tbody>
     ${ligneActif('local','LLM local (Ollama)',A.local,false)}
@@ -254,16 +255,16 @@ async function chargerModeles(){
   $('#openai-etat').innerHTML = !oa.configure
     ? '<span style="color:var(--ko)">Clé API absente : ajoute <span class="mono">openai.cle</span> dans config.yaml.</span>'
     : oa.joignable ? '<span style="color:var(--ok)">API OpenAI connectée.</span>'
-    : `<span style="color:var(--ko)">API non vérifiée : ${(oa.erreur||'accès refusé').replace(/</g,'&lt;')}</span>`;
+    : `<span style="color:var(--ko)">API non vérifiée : ${esc(oa.erreur||'accès refusé')}</span>`;
   $('#openai-modeles').innerHTML=(oa.catalogue||[]).map(c=>{
     const acces=c.accessible===true?bYes('autorisé'):(c.accessible===false?bNo('non autorisé'):'<span class="badge">à vérifier</span>');
     const badges=acces+bYes('outils')+bYes('vision')+bYes('français');
     const actifH=A.cloud_fournisseur==='openai'&&A.cloud_hybride===c.nom&&be==='hybride';
     const actifQ=A.cloud_fournisseur==='openai'&&A.cloud_qualite===c.nom&&be==='qualite';
-    return `<tr class="${actifH||actifQ?'actif':''}"><td><b class="mono">${c.nom}</b><br><small class="note">${c.role}</small></td>
-      <td>${badges}</td><td class="mono">$${c.prix_entree} entrée · $${c.prix_sortie} sortie</td>
-      <td><div class="row"><button class="act ghost" onclick="activerCloud('${c.nom}','hybride')">Hybride</button>
-      <button class="act" onclick="activerCloud('${c.nom}','qualite')">Qualité</button></div></td></tr>`;
+    return `<tr class="${actifH||actifQ?'actif':''}"><td><b class="mono">${esc(c.nom)}</b><br><small class="note">${esc(c.role)}</small></td>
+      <td>${badges}</td><td class="mono">$${esc(c.prix_entree)} entrée · $${esc(c.prix_sortie)} sortie</td>
+      <td><div class="row"><button class="act ghost" data-nom="${esc(c.nom)}" onclick="activerCloud(this.dataset.nom,'hybride')">Hybride</button>
+      <button class="act" data-nom="${esc(c.nom)}" onclick="activerCloud(this.dataset.nom,'qualite')">Qualité</button></div></td></tr>`;
   }).join('');
   // ollama
   $('#ollama-etat').textContent = d.ollama.joignable
@@ -271,31 +272,31 @@ async function chargerModeles(){
   $('#llm').innerHTML = d.ollama.catalogue.map(c=>{
     const badges=[c.tient_en_vram?bYes('tient en VRAM'):bNo('VRAM juste'),
       c.tool_calling?bYes('tool calling'):bNo('pas d\'outils'),
-      c.francais?bYes('français'):'', `<span class="badge">${c.licence}</span>`].join('');
+      c.francais?bYes('français'):'', `<span class="badge">${esc(c.licence)}</span>`].join('');
     const act = c.installe
-      ? `<button class="act" onclick="activer('local','${c.nom}')">Activer</button>
-         <button class="act ghost" onclick="tester('${c.nom}',this)">Tester</button>
-         <button class="act danger" onclick="supprimer('ollama','${c.nom}',this)">Suppr.</button>`
-      : `<button class="act" onclick="installer('ollama','${c.nom}',this)">Installer</button>`;
-    return `<tr class="${A.local===c.nom?'actif':''}"><td class="mono">${c.nom}<br><small class="note">${c.params}</small></td>
-      <td>${badges}</td><td class="muted">${c.taille_go} Go</td>
+      ? `<button class="act" data-nom="${esc(c.nom)}" onclick="activer('local',this.dataset.nom)">Activer</button>
+         <button class="act ghost" data-nom="${esc(c.nom)}" onclick="tester(this.dataset.nom,this)">Tester</button>
+         <button class="act danger" data-nom="${esc(c.nom)}" onclick="supprimer('ollama',this.dataset.nom,this)">Suppr.</button>`
+      : `<button class="act" data-nom="${esc(c.nom)}" onclick="installer('ollama',this.dataset.nom,this)">Installer</button>`;
+    return `<tr class="${A.local===c.nom?'actif':''}"><td class="mono">${esc(c.nom)}<br><small class="note">${esc(c.params)}</small></td>
+      <td>${badges}</td><td class="muted">${esc(c.taille_go)} Go</td>
       <td><div class="row">${act}</div><div class="prog"><i></i></div><div class="msg"></div></td></tr>`;
   }).join('');
   // installes hors catalogue
   const cat=new Set(d.ollama.catalogue.map(c=>c.nom));
   const autres=d.ollama.installes.filter(m2=>!cat.has(m2.nom));
   $('#llm-autres').innerHTML = autres.length? `<div style="margin-top:10px" class="muted">Autres modèles installés : `
-    + autres.map(m2=>`<span class="badge">${m2.nom} · ${m2.taille_go} Go
-      <a href="#" onclick="activer('local','${m2.nom}');return false" style="color:var(--acc)">activer</a></span>`).join(' ')+'</div>':'';
+    + autres.map(m2=>`<span class="badge">${esc(m2.nom)} · ${esc(m2.taille_go)} Go
+      <a href="#" data-nom="${esc(m2.nom)}" onclick="activer('local',this.dataset.nom);return false" style="color:var(--acc)">activer</a></span>`).join(' ')+'</div>':'';
   // whisper
   $('#whisper').innerHTML = d.whisper.catalogue.map(c=>{
     const badges=[c.francais_fiable?bYes('français fiable'):bNo('français faible'),
-      `<span class="badge">${c.note}</span>`].join('');
+      `<span class="badge">${esc(c.note)}</span>`].join('');
     const act = c.installe
-      ? `<button class="act" onclick="activer('whisper','${c.nom}')">Activer</button>
-         <button class="act danger" onclick="supprimer('whisper','${c.nom}',this)">Suppr.</button>`
-      : `<button class="act" onclick="installer('whisper','${c.nom}',this)">Installer</button>`;
-    return `<tr class="${A.whisper===c.nom?'actif':''}"><td class="mono">${c.nom}</td><td>${badges}</td>
+      ? `<button class="act" data-nom="${esc(c.nom)}" onclick="activer('whisper',this.dataset.nom)">Activer</button>
+         <button class="act danger" data-nom="${esc(c.nom)}" onclick="supprimer('whisper',this.dataset.nom,this)">Suppr.</button>`
+      : `<button class="act" data-nom="${esc(c.nom)}" onclick="installer('whisper',this.dataset.nom,this)">Installer</button>`;
+    return `<tr class="${A.whisper===c.nom?'actif':''}"><td class="mono">${esc(c.nom)}</td><td>${badges}</td>
       <td><div class="row">${act}</div><div class="prog"><i></i></div><div class="msg"></div></td></tr>`;
   }).join('');
 }
@@ -311,9 +312,9 @@ async function activerCloud(modele,profil){
 async function tester(nom,btn){
   const cell=btn.closest('td'), msg=$('.msg',cell); msg.textContent='Test en cours…'; btn.disabled=true;
   const r=await post('/api/panneau/ollama/tester',{nom}); btn.disabled=false;
-  if(!r.ok){msg.innerHTML=`<span style="color:var(--ko)">${r.message||'échec'}</span>`;return;}
-  msg.innerHTML=`⏱ ${r.latence_ms} ms · ${r.tool_call_ok?bYes('appel d\'outil OK'):bNo('outil raté')}
-    <br><small class="note">« ${(r.phrase_fr||'').replace(/</g,'&lt;')} »</small>`;
+  if(!r.ok){msg.innerHTML=`<span style="color:var(--ko)">${esc(r.message||'échec')}</span>`;return;}
+  msg.innerHTML=`⏱ ${esc(r.latence_ms)} ms · ${r.tool_call_ok?bYes('appel d\'outil OK'):bNo('outil raté')}
+    <br><small class="note">« ${esc(r.phrase_fr||'')} »</small>`;
 }
 async function supprimer(type,nom,btn){
   if(!confirm(`Supprimer ${nom} ?`))return; btn.disabled=true;
@@ -331,7 +332,7 @@ async function installer(type,nom,btn){
     fill.style.width=(s.pct||0)+'%'; msg.textContent=`${s.statut} — ${s.message||''}`;
     if(s.statut==='termine'){clearInterval(timer);setTimeout(chargerModeles,600);}
     if(s.statut==='erreur'){clearInterval(timer);btn.disabled=false;
-      msg.innerHTML=`<span style="color:var(--ko)">${s.message}</span>`;}
+      msg.innerHTML=`<span style="color:var(--ko)">${esc(s.message)}</span>`;}
   },1000);
 }
 
@@ -340,26 +341,26 @@ async function chargerEtat(){
   const d=await api('/api/panneau/etat');
   $('#chaine').innerHTML=d.chaine.map(c=>{
     const cls=c.inconnu?'unk':(c.up?'up':'down'), et=c.inconnu?'inconnu':(c.up?'UP':'DOWN');
-    return `<div style="padding:6px 0"><span class="dot ${cls}"></span><b>${c.nom}</b>
+    return `<div style="padding:6px 0"><span class="dot ${cls}"></span><b>${esc(c.nom)}</b>
       <span class="badge ${c.up?'on':(c.inconnu?'':'off')}">${et}</span>
-      <span class="muted mono" style="margin-left:8px">${(c.detail||'').replace(/</g,'&lt;')}</span></div>`;
+      <span class="muted mono" style="margin-left:8px">${esc(c.detail||'')}</span></div>`;
   }).join('');
 }
 async function reconnecter(){
   $('#etat-msg').textContent='Reconnexion…';
   const r=await post('/api/panneau/reconnecter-mcp',{});
-  $('#etat-msg').innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${r.message}</span>`;
+  $('#etat-msg').innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${esc(r.message)}</span>`;
   setTimeout(chargerEtat,600);
 }
 async function chargerBudget(){
   const d=await api('/api/panneau/budget');
   const lignes=(obj,periode)=>Object.entries(obj||{}).map(([f,v])=>
-    `<tr><td>${f}</td><td class="muted">${periode}</td><td class="mono">${fmt(v.tin)}→${fmt(v.tout)}</td>
-     <td>${v.appels} appels</td><td><b>${eur(v.cout)}</b></td></tr>`).join('');
+    `<tr><td>${esc(f)}</td><td class="muted">${periode}</td><td class="mono">${fmt(v.tin)}→${fmt(v.tout)}</td>
+     <td>${esc(v.appels)} appels</td><td><b>${eur(v.cout)}</b></td></tr>`).join('');
   let html='<table><thead><tr><th>Fournisseur</th><th>Période</th><th>Tokens (in→out)</th><th></th><th>Coût est.</th></tr></thead><tbody>';
   html+=lignes(d.jarvis.jour,'aujourd’hui')||'';
   html+=lignes(d.jarvis.mois,'ce mois')||'';
-  if(d.twilio) html+=`<tr><td>Twilio (appels)</td><td class="muted">ce mois</td><td class="mono">${d.twilio.appels||0} appels / ${d.twilio.minutes||0} min</td><td></td><td><b>${eur(d.twilio.cout)}</b></td></tr>`;
+  if(d.twilio) html+=`<tr><td>Twilio (appels)</td><td class="muted">ce mois</td><td class="mono">${esc(d.twilio.appels||0)} appels / ${esc(d.twilio.minutes||0)} min</td><td></td><td><b>${eur(d.twilio.cout)}</b></td></tr>`;
   html+='<tr id="budget-hermes"><td>Hermes</td><td class="muted">—</td><td class="mono">…</td><td></td><td>—</td></tr>';
   html+='</tbody></table>';
   if(!Object.keys(d.jarvis.jour||{}).length && !Object.keys(d.jarvis.mois||{}).length && !d.twilio)
@@ -378,11 +379,11 @@ async function chargerTaches(){
     const dur=t.duree!=null?t.duree+'s':(t.debut?Math.round((Date.now()/1000)-t.debut)+'s':'');
     const tok=t.tokens!=null?' · '+fmt(t.tokens)+' tk':'';
     const cout=t.cout!=null?' · $'+Number(t.cout).toFixed(4):'';
-    const modele=t.modele?' · '+t.modele:'';
-    const res=t.resume?`<div class="muted" style="font-size:12px;margin-top:2px">${(t.resume||'').replace(/</g,'&lt;')}</div>`:'';
+    const modele=t.modele?' · '+esc(t.modele):'';
+    const res=t.resume?`<div class="muted" style="font-size:12px;margin-top:2px">${esc(t.resume||'')}</div>`:'';
     return `<div style="padding:6px 0;border-bottom:1px solid var(--bord)">
-      <div>${ic[t.statut]||'•'} <b>${(t.tache||'').replace(/</g,'&lt;')}</b></div>
-      <div class="mono muted" style="font-size:11px">session « ${t.session} » · ${lib[t.statut]||t.statut} · ${dur}${tok}${cout}${modele}</div>
+      <div>${ic[t.statut]||'•'} <b>${esc(t.tache||'')}</b></div>
+      <div class="mono muted" style="font-size:11px">session « ${esc(t.session)} » · ${esc(lib[t.statut]||t.statut)} · ${esc(dur)}${tok}${cout}${modele}</div>
       ${res}</div>`;
   }).join('');
 }
@@ -394,12 +395,12 @@ async function chargerActivite(){
   const rowH=$('#budget-hermes');
   if(rowH && (ij||im)) rowH.innerHTML=`<td>Hermes (opus)</td><td class="muted">jour / 30j</td>
     <td class="mono">${fmt(ij&&ij.tokens)} / ${fmt(im&&im.tokens)} tokens</td>
-    <td>${im?im.sessions+' sessions':''}</td><td class="muted">voir hermes insights</td>`;
-  const crons=(d.crons||[]).map(c=>`<div style="padding:3px 0">🗓 <b>${c.nom}</b>
-    <span class="mono muted">${c.planning||''}</span> → prochain : <span class="mono">${c.prochain||'?'}</span></div>`).join('')
+    <td>${im?esc(im.sessions)+' sessions':''}</td><td class="muted">voir hermes insights</td>`;
+  const crons=(d.crons||[]).map(c=>`<div style="padding:3px 0">🗓 <b>${esc(c.nom)}</b>
+    <span class="mono muted">${esc(c.planning||'')}</span> → prochain : <span class="mono">${esc(c.prochain||'?')}</span></div>`).join('')
     || '<span class="muted">Aucun cron.</span>';
   const bloc=(t,txt)=>`<div style="margin-top:10px"><div class="muted" style="font-size:12px">${t}</div>`
-    +(txt?`<pre style="white-space:pre-wrap;background:var(--card2);border:1px solid var(--bord);border-radius:8px;padding:8px;overflow-x:auto;font-size:12px;margin:4px 0">${txt.replace(/</g,'&lt;')}</pre>`:'<span class="muted">—</span>')+'</div>';
+    +(txt?`<pre style="white-space:pre-wrap;background:var(--card2);border:1px solid var(--bord);border-radius:8px;padding:8px;overflow-x:auto;font-size:12px;margin:4px 0">${esc(txt)}</pre>`:'<span class="muted">—</span>')+'</div>';
   $('#activite').innerHTML=`<div><b>Crons planifiés</b></div>${crons}`
     + bloc('Derniers runs de cron', d.runs_texte)
     + bloc('Tâches (kanban) en cours', d.taches_texte);
@@ -416,7 +417,7 @@ async function chargerReglages(){
     x.onclick=()=>setReglage('mode',x.dataset.v,x.closest('.card').querySelector('.msg')||x);
   });
   // micro / haut-parleur
-  const opt=(v,t,sel)=>`<option value="${v}" ${sel?'selected':''}>${t.replace(/</g,'&lt;')}</option>`;
+  const opt=(v,t,sel)=>`<option value="${esc(v)}" ${sel?'selected':''}>${esc(t)}</option>`;
   $('#sel-micro').innerHTML=(d.entrees||[]).map(e=>opt(e.index,`#${e.index} · ${e.nom}`,e.index===d.micro)).join('')
     || opt(d.micro,`micro #${d.micro}`,true);
   const hpNul = d.haut_parleur===null||d.haut_parleur===undefined;
@@ -430,8 +431,8 @@ async function chargerReglages(){
   const el=d.elevenlabs||{};
   $('#elevenlabs-etat').innerHTML=!el.configure
     ? '<span style="color:var(--ko)">Clé absente dans config.yaml.</span>'
-    : el.joignable?`<span style="color:var(--ok)">Connecté · ${(el.voix||[]).length} voix.</span>`
-    : `<span style="color:var(--ko)">Connexion refusée : ${(el.erreur||'vérifie la clé').replace(/</g,'&lt;')}</span>`;
+    : el.joignable?`<span style="color:var(--ok)">Connecté · ${esc((el.voix||[]).length)} voix.</span>`
+    : `<span style="color:var(--ko)">Connexion refusée : ${esc(el.erreur||'vérifie la clé')}</span>`;
   let voix=(el.voix||[]).map(v=>opt(v.id,`${v.nom}${v.categorie?' · '+v.categorie:''}`,v.id===d.elevenlabs_voix)).join('');
   if(!voix&&d.elevenlabs_voix) voix=opt(d.elevenlabs_voix,'Voix actuellement configurée',true);
   $('#sel-eleven-voix').innerHTML=voix||opt('','Aucune voix disponible',true);
@@ -452,47 +453,47 @@ async function setReglage(cle,valeur,cibleOuBtn){
     'assistant.seuil_reveil':'#wake-msg','tts.moteur':'#tts-msg',
     'elevenlabs.voix':'#tts-msg','elevenlabs.modele':'#tts-msg'}[cle];
   const el=zone?$(zone):null;
-  if(el) el.innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${r.message||''}</span>`;
+  if(el) el.innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${esc(r.message||'')}</span>`;
   if(r.ok&&cle==='mode') setTimeout(chargerModeles,250);
 }
 async function testerVoix(){
   const r=await post('/api/panneau/tester-voix',{});
-  $('#tts-msg').innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${r.message||''}</span>`;
+  $('#tts-msg').innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${esc(r.message||'')}</span>`;
 }
 
 /* ---------- PERMISSIONS ---------- */
 async function chargerPerms(){
   const d=await api('/api/panneau/permissions');
-  $('#n3').innerHTML=`🔒 <b>Règle N3 (verrouillée dans le code)</b><br>${d.regle_n3}`;
+  $('#n3').innerHTML=`🔒 <b>Règle N3 (verrouillée dans le code)</b><br>${esc(d.regle_n3)}`;
   $('#perm-kpi').innerHTML=`
-    <div class="kpi"><div class="v">${d.compte.total}</div><div class="l">outils au total</div></div>
-    <div class="kpi"><div class="v">${d.compte.n1}</div><div class="l">N1 sûr (local + iPhone)</div></div>
-    <div class="kpi"><div class="v">${d.compte.n2}</div><div class="l">N2 sensible (${d.compte.toujours} en « toujours »)</div></div>
-    <div class="kpi"><div class="v">${d.compte.n3}</div><div class="l">N3 critique 🔒</div></div>
-    <div class="kpi"><div class="v">${d.compte.mcp_expose}</div><div class="l">exposés à Hermes (MCP)</div></div>`;
+    <div class="kpi"><div class="v">${esc(d.compte.total)}</div><div class="l">outils au total</div></div>
+    <div class="kpi"><div class="v">${esc(d.compte.n1)}</div><div class="l">N1 sûr (local + iPhone)</div></div>
+    <div class="kpi"><div class="v">${esc(d.compte.n2)}</div><div class="l">N2 sensible (${esc(d.compte.toujours)} en « toujours »)</div></div>
+    <div class="kpi"><div class="v">${esc(d.compte.n3)}</div><div class="l">N3 critique 🔒</div></div>
+    <div class="kpi"><div class="v">${esc(d.compte.mcp_expose)}</div><div class="l">exposés à Hermes (MCP)</div></div>`;
   $('#perm-note').textContent=d.note_n8;
   $('#mounts').innerHTML = (d.hermes_montages||[]).map(m=>{
-    const ro=m.endsWith(':ro'); return `<div style="padding:3px 0"><span class="badge ${ro?'':'off'}">${ro?'lecture seule':'lecture+écriture'}</span> <span class="mono">${m}</span></div>`;
+    const ro=m.endsWith(':ro'); return `<div style="padding:3px 0"><span class="badge ${ro?'':'off'}">${ro?'lecture seule':'lecture+écriture'}</span> <span class="mono">${esc(m)}</span></div>`;
   }).join('') || '<span class="muted">Aucun montage détecté.</span>';
   $('#outils').innerHTML=d.outils.map(o=>`<tr>
-    <td class="mono">${o.nom}</td>
+    <td class="mono">${esc(o.nom)}</td>
     <td>${nivBadge(o.niveau)}</td>
     <td>${o.mcp_expose?bYes('oui'):'<span class="badge">non</span>'}</td>
     <td>${confCell(o)}</td>
-    <td class="muted">${(o.description||'').replace(/</g,'&lt;')}</td></tr>`).join('');
+    <td class="muted">${esc(o.description||'')}</td></tr>`).join('');
 }
 function nivBadge(n){
   if(n==='N1')return '<span class="badge on">N1</span>';
   if(n==='N2')return '<span class="badge" style="background:#2a2410;color:#e9cf7a;border-color:#5a4a12">N2</span>';
   if(n==='N3')return '<span class="badge off">N3 🔒</span>';
-  return `<span class="badge">${n}</span>`;
+  return `<span class="badge">${esc(n)}</span>`;
 }
 function confCell(o){
   if(!o.confirmation)return '<span class="badge">non</span>';
   if(o.niveau==='N3')return '<span class="badge off">requise 🔒</span>';
   // N2
   if(o.toujours)return `<span class="badge on">toujours ✓</span>
-    <button class="act ghost" style="padding:2px 8px" onclick="revoquer('${o.nom}',this)">Révoquer</button>`;
+    <button class="act ghost" style="padding:2px 8px" data-nom="${esc(o.nom)}" onclick="revoquer(this.dataset.nom,this)">Révoquer</button>`;
   return '<span class="badge on">requise</span>';
 }
 async function revoquer(nom,btn){
@@ -503,7 +504,7 @@ async function revoquer(nom,btn){
 
 function flash(r,cell){
   const el = cell? $('.msg',cell) : $('#etat-msg');
-  if(el) el.innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${r.message||''}</span>`;
+  if(el) el.innerHTML=`<span style="color:var(--${r.ok?'ok':'ko'})">${esc(r.message||'')}</span>`;
 }
 chargerModeles();
 </script>
