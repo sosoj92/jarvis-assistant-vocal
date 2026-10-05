@@ -33,7 +33,6 @@ except Exception:
 import numpy as np
 import openwakeword
 import sounddevice as sd
-from faster_whisper import WhisperModel
 from openwakeword.model import Model as WakeModel
 
 from core import config, journal, memoire, personnalite, registre, voix
@@ -822,7 +821,20 @@ def _ajouter_dll_nvidia():
 
 
 def charger_whisper():
-    """Charge Whisper sur GPU si possible, sinon sur CPU."""
+    """Charge Whisper sur GPU si possible, sinon sur CPU, sinon le repli cloud
+    (machines sans faster-whisper, comme Windows ARM64 : voir core/transcription)."""
+    from core import transcription
+    if transcription.moteur() == "openai" and transcription.cloud_autorise():
+        print("Transcription par OpenAI (stt.moteur: openai).")
+        return transcription.TranscripteurCloud()
+    if not transcription.whisper_local_disponible():
+        repli = transcription.repli_cloud("faster-whisper absent")
+        if repli is None:
+            raise RuntimeError(transcription.MESSAGE_INDISPONIBLE)
+        print("faster-whisper absent sur cette machine : transcription par OpenAI.")
+        return repli
+
+    from faster_whisper import WhisperModel
     _ajouter_dll_nvidia()
 
     try:

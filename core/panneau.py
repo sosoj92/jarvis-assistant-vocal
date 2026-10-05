@@ -342,6 +342,10 @@ def _whisper_installes():
 
 
 def _whisper_installer(nom):
+    from core.transcription import whisper_local_disponible
+    if not whisper_local_disponible():
+        return {"ok": False, "message": "Whisper local n'existe pas sur cette machine "
+                                        "(Windows ARM64) : la transcription passe par OpenAI."}
     _PULLS[f"whisper:{nom}"] = {"statut": "en cours", "pct": 0, "message": "telechargement"}
 
     def worker():

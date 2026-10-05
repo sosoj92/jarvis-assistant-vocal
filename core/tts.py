@@ -83,11 +83,18 @@ class ElevenLabsProvider(ProviderTTS):
 
     def synthetiser(self, texte):
         try:
-            import miniaudio
             import numpy as np
         except ImportError:
             return None
+        try:
+            import miniaudio
+        except ImportError:
+            # miniaudio n'existe pas partout (Windows ARM64) : on demande alors du PCM
+            # brut 24 kHz a ElevenLabs, qui n'a pas besoin d'etre decode.
+            miniaudio = None
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._resoudre_voix()}"
+        if miniaudio is None:
+            url += "?output_format=pcm_24000"
         charge = {"text": texte, "model_id": self.modele}
         # Flash/Turbo v2.5 acceptent language_code : on force le francais pour une
         # bonne prononciation des accents (e accent, c cedille...) quelle que soit
@@ -97,19 +104,22 @@ class ElevenLabsProvider(ProviderTTS):
         corps = json.dumps(charge).encode("utf-8")
         requete = urllib.request.Request(url, data=corps, method="POST", headers={
             "xi-api-key": self.cle, "Content-Type": "application/json",
-            "Accept": "audio/mpeg"})
+            "Accept": "audio/mpeg" if miniaudio is not None else "audio/pcm"})
         try:
             with urllib.request.urlopen(requete, timeout=15) as reponse:
-                mp3 = reponse.read()
-            decode = miniaudio.decode(
-                mp3, nchannels=1, sample_rate=24000,
-                output_format=miniaudio.SampleFormat.SIGNED16)
+                donnees = reponse.read()
+            if miniaudio is not None:
+                donnees = miniaudio.decode(
+                    donnees, nchannels=1, sample_rate=24000,
+                    output_format=miniaudio.SampleFormat.SIGNED16).samples
+            else:
+                donnees = donnees[:len(donnees) - len(donnees) % 2]
             try:                                  # N12 : comptabilite voix (au caractere)
                 from core import budget
                 budget.enregistrer_tts(len(texte or ""))
             except Exception:
                 pass
-            return np.frombuffer(decode.samples, dtype=np.int16), 24000
+            return np.frombuffer(donnees, dtype=np.int16), 24000
         except Exception as e:
             print(f"  [ElevenLabs] indisponible ({e}), repli voix Windows.")
             return None

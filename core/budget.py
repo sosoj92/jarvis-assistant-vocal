@@ -134,6 +134,30 @@ def enregistrer_tts(caracteres, fournisseur="ElevenLabs"):
     _apres()
 
 
+_PRIX_STT_MINUTE = 0.003     # $ / minute de transcription cloud (estimation ; config)
+
+
+def enregistrer_stt(secondes, modele, fournisseur="OpenAI transcription"):
+    """Compte une transcription cloud (facturee a la minute d'audio)."""
+    try:
+        prix = float(reglage("budget.prix_stt_minute", _PRIX_STT_MINUTE))
+        cout = max(0.0, float(secondes or 0.0)) / 60.0 * prix
+        jour = dt.date.today().isoformat()
+        with _VERROU:
+            data = _charger()
+            j = data.setdefault(jour, {})
+            f = j.setdefault(fournisseur, {"modele": modele, "appels": 0, "tin": 0,
+                                           "tout": 0, "cout": 0.0, "secondes": 0.0})
+            f["modele"] = modele
+            f["appels"] += 1
+            f["secondes"] = round(f.get("secondes", 0.0) + float(secondes or 0.0), 1)
+            f["cout"] = round(f["cout"] + cout, 4)
+            _fichier().write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        LOG.exception("budget: stt")
+    _apres()
+
+
 def _twilio_mois():
     """Cout Twilio du mois courant (logs/calls/compteur.json)."""
     f = _RACINE / (reglage("appels.dossier", "logs/calls")) / "compteur.json"

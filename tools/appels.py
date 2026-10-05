@@ -46,11 +46,13 @@ def definir_transcripteur(fn):
 def _transcrire(chemin):
     if _TRANSCRIPTEUR is not None:
         return _TRANSCRIPTEUR(chemin)
-    # Repli autonome : charge un Whisper si l'assistant n'en a pas fourni.
+    # Repli autonome : charge un Whisper si l'assistant n'en a pas fourni
+    # (ou la transcription cloud la ou faster-whisper n'existe pas).
     try:
-        from faster_whisper import WhisperModel
-        modele = WhisperModel(reglage("whisper.modele", "small"), device="cpu",
-                              compute_type="int8")
+        from core import transcription
+        modele = transcription.charger(reglage("whisper.modele", "small"))
+        if modele is None:
+            return f"(transcription impossible : {transcription.MESSAGE_INDISPONIBLE})"
         segments, _ = modele.transcribe(chemin, language="fr", beam_size=5)
         return " ".join(s.text for s in segments).strip()
     except Exception as e:

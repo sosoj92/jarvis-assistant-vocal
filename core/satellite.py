@@ -240,13 +240,14 @@ def _whisper():
     global _WHISPER
     if _WHISPER is None:
         try:
-            from faster_whisper import WhisperModel
+            from core import transcription
             nom = reglage("satellite_lan.whisper_modele", "small")
             appareil = reglage("satellite_lan.whisper_device", "cpu")
             calcul = reglage("satellite_lan.whisper_compute_type", "int8")
-            _WHISPER = WhisperModel(nom, device=appareil, compute_type=calcul)
+            _WHISPER = transcription.charger(nom, device=appareil, compute_type=calcul)
             LOG.info(
-                "satellite: Whisper %s sur %s (%s)", nom, appareil, calcul
+                "satellite: transcription %s",
+                getattr(_WHISPER, "nom", f"Whisper {nom} sur {appareil} ({calcul})"),
             )
         except Exception:
             LOG.exception("satellite: chargement Whisper")

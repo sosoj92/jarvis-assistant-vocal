@@ -86,6 +86,11 @@ audio:
 whisper:
   modele: "medium"
 
+stt:                            # moteur de reconnaissance vocale (voir core/transcription.py)
+  moteur: "auto"                # auto : Whisper local, sinon OpenAI | local : jamais de cloud | openai : toujours OpenAI
+                                # le cloud n'est jamais utilise en mode local ; l'audio de la phrase part alors chez OpenAI
+  modele_cloud: "gpt-4o-mini-transcribe"   # modele de transcription OpenAI (repli, ex. Windows ARM64)
+
 interruption:                  # couper Jarvis quand tu dis "attends/stop/arrete" par-dessus
   facteur: 1.8                 # tu dois parler ~1.8x plus fort que l'echo de Jarvis (baisse si ca ne coupe pas)
   seuil: 0.025                 # niveau minimum absolu de ta voix (baisse si micro peu sensible)
