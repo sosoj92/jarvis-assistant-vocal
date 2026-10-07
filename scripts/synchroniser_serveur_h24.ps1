@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis', 'verifier_securite')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -204,6 +204,65 @@ try { Write-Output ('ping local 127.0.0.1:8790 -> HTTP ' + (Invoke-WebRequest -U
 `$journal = Join-Path `$repo 'logs\jarvis.log'
 Get-Content -LiteralPath `$journal -Tail 3000 -Encoding UTF8 | Where-Object { `$_ -match '(?i)ngrok|tunnel' } |
     ForEach-Object { `$_ -replace 'https://[^\s]+', 'https://<adresse-publique>' } | Select-Object -Last 6
+"@
+    exit 0
+}
+
+if ($Action -eq 'verifier_securite') {
+    # Lecture seule : rejoue sur le serveur les attaques corrigees par l'audit et
+    # n'affiche que les codes HTTP. L'ecriture tentee vise un nom inexistant : rien
+    # ne peut etre supprime. L'adresse publique ngrok n'est jamais affichee.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+Set-Location `$repo
+`$py = @'
+import http.client, json, ssl, urllib.request
+from pathlib import Path
+import truststore
+import yaml
+
+truststore.inject_into_ssl()      # magasin de certificats Windows, comme Jarvis
+
+def code(hote, port, methode, chemin, entetes=None, corps=None, https=False):
+    try:
+        if https:
+            c = http.client.HTTPSConnection(hote, port, timeout=8, context=ssl.create_default_context())
+        else:
+            c = http.client.HTTPConnection(hote, port, timeout=8)
+        c.request(methode, chemin, body=corps, headers=entetes or {})
+        return c.getresponse().status
+    except Exception as e:
+        return type(e).__name__
+
+L = "127.0.0.1"
+print("panneau lecture locale (attendu 200)        :", code(L, 8790, "GET", "/api/panneau/modeles"))
+print("panneau Host externe (attendu 403)          :", code(L, 8790, "GET", "/api/panneau/modeles", {"Host": "evil.example:8790"}))
+corps = json.dumps({"nom": "inexistant-test-audit"})
+print("ecriture type deguise (attendu 415)         :", code(L, 8790, "POST", "/api/panneau/whisper/supprimer",
+      {"Content-Type": "text/plain; application/json", "X-Jarvis-Panneau": "1"}, corps))
+print("ecriture sans en-tete panneau (attendu 403) :", code(L, 8790, "POST", "/api/panneau/whisper/supprimer",
+      {"Content-Type": "application/json"}, corps))
+print("cockpit Host externe (attendu 403)          :", code(L, 8790, "GET", "/api/cockpit/finances", {"Host": "evil.example"}))
+print("/docs (attendu 404)                         :", code(L, 8790, "GET", "/docs"))
+print("HUD Host externe (attendu 403, ou HUD eteint):", code(L, 8770, "GET", "/api/controle", {"Host": "evil.example:8770"}))
+try:
+    tunnels = json.load(urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=5))["tunnels"]
+    public = next(t["public_url"] for t in tunnels if t["public_url"].startswith("https://"))
+    hote = public.split("://", 1)[1].split("/", 1)[0]
+    print("tunnel panneau (attendu 403)                :", code(hote, 443, "GET", "/api/panneau/modeles", https=True))
+    print("tunnel /docs (attendu 404)                  :", code(hote, 443, "GET", "/docs", https=True))
+    print("tunnel ping (attendu 200)                   :", code(hote, 443, "GET", "/api/ping", https=True))
+except Exception as e:
+    print("tunnel : verification impossible", type(e).__name__)
+conf = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8")) or {}
+domo = (conf.get("pont_iphone") or {}).get("domotique_distante") or []
+print("pont iPhone domotique_distante              :", ", ".join(map(str, domo)) or "(vide)")
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_verifier_securite.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
 "@
     exit 0
 }
