@@ -31,6 +31,18 @@ google_credentials.json
 google_token.json*
 notes/
 reminders.json
+satellite_pi/config.yaml
+# Filets de securite si un dossier de session est deplace hors de logs/
+# (alexa.dossier, spotify.dossier, instagram.dossier...).
+*.cookies
+cookies*.json
+*.oauth.json
+token.json
+tokens.json
+credentials*.json
+*.log
+*.sqlite
+*.db
 
 # Journaux
 logs/

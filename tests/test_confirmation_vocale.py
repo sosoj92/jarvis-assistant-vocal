@@ -45,7 +45,9 @@ class InterpretationTest(unittest.TestCase):
 
 class SatelliteTest(unittest.TestCase):
     def _session(self):
-        return SimpleNamespace(en_attente=("envoyer_mail", {"a": "x"}))
+        # Satellite de la maison, autorise aux actions critiques (le cas « refuse »
+        # est couvert par tests/test_securite_lot2.py).
+        return SimpleNamespace(en_attente=("envoyer_mail", {"a": "x"}), actions_critiques=True)
 
     def test_negation_sur_satellite_n_execute_rien(self):
         session = self._session()

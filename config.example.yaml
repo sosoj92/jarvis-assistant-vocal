@@ -487,6 +487,8 @@ satellites:                    # Jarvis dans d'autres pieces (Raspberry Pi, futu
   #   wake: "appareil"         # pris en charge ; "serveur" est reserve a un futur client a flux continu
   #   priorite_micro: 1.0      # ajustement optionnel du score si ce micro gagne trop/pas assez souvent
   #   brief_au_demarrage: false # true seulement pour le poste principal ; une fois par jour côté serveur
+  #   actions_critiques: true  # false : aucun mail/appel/reservation/suppression/extinction depuis ce micro
+  #                            # (toujours refuses si le satellite arrive par Tailscale, donc de loin)
 
 # Poste Windows qui porte les applis, le navigateur, les touches media et le son.
 # L'agent initie une connexion sortante et n'accepte jamais de commande shell.

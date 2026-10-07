@@ -28,6 +28,21 @@ from core.registre import outil
 
 LOG = logging.getLogger("jarvis")
 
+_SITE_DEPART = [""]      # URL de depart de la reservation en cours
+
+
+def _site(url):
+    """Domaine enregistrable approximatif : www.doctolib.fr -> doctolib.fr."""
+    from urllib.parse import urlparse
+    morceaux = urlparse(str(url or ""))
+    if morceaux.scheme not in ("http", "https") or not morceaux.hostname:
+        return ""
+    return ".".join(morceaux.hostname.lower().split(".")[-2:])
+
+
+def _meme_site(url, depart):
+    return bool(_site(url)) and _site(url) == _site(depart)
+
 # --- etat du navigateur persistant (garde entre les appels/tours) ------------
 _PW = None      # instance Playwright
 _CTX = None     # contexte persistant (le navigateur)
@@ -229,8 +244,13 @@ def _executer_action(page, act):
         page.wait_for_timeout(600)
         return "deroule"
     if a == "aller":
-        page.goto(act.get("texte", ""), wait_until="domcontentloaded")
-        return f"navigue vers {act.get('texte','')}"
+        cible = str(act.get("texte", "") or "")
+        # Le modele suit le contenu des pages : il ne peut pas emmener tes
+        # coordonnees vers un autre site que celui de depart.
+        if not _meme_site(cible, _SITE_DEPART[0]):
+            return "navigation refusee : on reste sur le site de la reservation"
+        page.goto(cible, wait_until="domcontentloaded")
+        return f"navigue vers {cible}"
     if a == "attendre":
         page.wait_for_timeout(1500)
         return "attendu"
@@ -275,6 +295,7 @@ def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str
         url = site if site.startswith("http") else f"https://www.google.com/search?q={site}"
     objectif = (f"Reserver sur {site}. Quoi : {quoi}. Quand : {quand}."
                 + (f" Details : {details}." if details else ""))
+    _SITE_DEPART[0] = url
 
     try:
         page = _demarrer_navigateur()

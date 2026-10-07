@@ -187,8 +187,14 @@ def preparer_mail(destinataire: str, sujet: str, corps: str) -> str:
 
 
 def _annonce_envoi(args):
+    # On dit ce qui part vraiment : destinataire, objet et debut du message.
     dest = _BROUILLON.get("destinataire") or "le destinataire"
-    return f"Je vais envoyer le mail a {dest}."
+    sujet = " ".join(str(_BROUILLON.get("sujet", "")).split())[:100]
+    corps = " ".join(str(_BROUILLON.get("corps", "")).split())
+    debut = corps[:160] + ("…" if len(corps) > 160 else "")
+    return (f"Je vais envoyer le mail a {dest}"
+            + (f", objet : {sujet}" if sujet else "")
+            + (f". Il commence par : {debut}" if debut else "") + ".")
 
 
 @outil(

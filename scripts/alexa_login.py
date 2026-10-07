@@ -15,7 +15,7 @@ script attend donc que la **session soit réellement peuplée** avant de sauver 
 sinon on écrivait un cookie vide (d'où les « Connexion Alexa requise » passés).
 
 alexapy est une lib communautaire non officielle : ça peut casser si Amazon change
-quelque chose. Détail des échecs : logs/alexa/login-debug.log. Voir docs/alexa.md.
+quelque chose. Détail des échecs : relancer avec --debug (logs/alexa/login-debug.log, contient les cookies : ne pas le partager). Voir docs/alexa.md.
 """
 import asyncio
 import json
@@ -82,6 +82,10 @@ def _sauver_oauth(login, email):
 
 
 def _activer_debug():
+    # Ce journal contient les echanges de connexion Amazon (cookies, code
+    # d'autorisation) : seulement sur demande (--debug), jamais par defaut.
+    if "--debug" not in sys.argv:
+        return
     h = logging.FileHandler(_dossier() / "login-debug.log", encoding="utf-8")
     h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     for nom in ("alexapy", "authcaptureproxy"):
@@ -238,7 +242,9 @@ async def _login_navigateur():
             if n == 0:
                 print("   → Ton navigateur n'a pas atteint la page finale Amazon.")
                 print("     Reprends et va jusqu'à « Successfully logged in ».")
-            print("   Détails : logs/alexa/login-debug.log")
+            print("   Pour un diagnostic détaillé, relance avec --debug "
+                  "(journal local logs/alexa/login-debug.log, ne le partage pas : "
+                  "il contient tes cookies Amazon).")
             return
 
         # 1) Échange l'authorization_code (capturé par le proxy) contre des tokens
@@ -259,8 +265,8 @@ async def _login_navigateur():
             print("   ou teste tout de suite : python scripts/alexa_login.py --check")
         else:
             print("\n⚠️ Login capturé mais la session durable n'est pas exploitable.")
-            print("   (Souvent : get_tokens a échoué.) Envoie-moi la fin de")
-            print("   logs/alexa/login-debug.log.")
+            print("   (Souvent : get_tokens a échoué.) Relance avec --debug pour un")
+            print("   journal détaillé ; ne le partage pas, il contient tes cookies Amazon.")
     except KeyboardInterrupt:
         print("\nAnnulé.")
     finally:

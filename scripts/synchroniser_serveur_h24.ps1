@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis', 'verifier_securite')]
+    [ValidateSet('etat', 'mettre_a_jour', 'sauvegarder_et_mettre_a_jour', 'tester_signal_matin', 'verifier_rendu', 'definir_heure', 'etat_hermes', 'modele_hermes_vm', 'tester_hermes_contexte', 'modifications', 'lignes_uniques', 'etat_liseuse', 'mettre_a_jour_liseuse', 'activer_brief', 'tester_brief', 'derniere_edition', 'processus', 'lancement_jarvis', 'etat_agent_bureau', 'redemarrer_jarvis', 'journal_postes', 'routes_lan', 'etat_tunnel', 'tester_colis', 'verifier_securite', 'autoriser_lumieres_iphone')]
     [string]$Action = 'etat',
 
     [string]$Configuration = '',
@@ -204,6 +204,36 @@ try { Write-Output ('ping local 127.0.0.1:8790 -> HTTP ' + (Invoke-WebRequest -U
 `$journal = Join-Path `$repo 'logs\jarvis.log'
 Get-Content -LiteralPath `$journal -Tail 3000 -Encoding UTF8 | Where-Object { `$_ -match '(?i)ngrok|tunnel' } |
     ForEach-Object { `$_ -replace 'https://[^\s]+', 'https://<adresse-publique>' } | Select-Object -Last 6
+"@
+    exit 0
+}
+
+if ($Action -eq 'autoriser_lumieres_iphone') {
+    # Ajoute les lumieres et ambiances a pont_iphone.domotique_distante (pilotables
+    # depuis les raccourcis iPhone, sans etre exposees au MCP). Sauvegarde d'abord
+    # config.yaml dans logs/ (ignore par git). N'affiche que des noms d'outils.
+    Invoke-ServeurH24 @"
+`$ErrorActionPreference = 'Stop'
+`$repo = $projetLitteral
+Set-Location `$repo
+`$sauvegarde = Join-Path `$repo ('logs\config.yaml.avant-iphone-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.bak')
+Copy-Item -LiteralPath (Join-Path `$repo 'config.yaml') -Destination `$sauvegarde
+Write-Output ('sauvegarde=' + (Split-Path `$sauvegarde -Leaf))
+`$py = @'
+import sys
+sys.path.insert(0, ".")
+from core.config import definir, reglage
+voulus = ["allumer_lumiere", "regler_luminosite", "changer_couleur", "activer_mode"]
+actuels = list(reglage("pont_iphone.domotique_distante", []) or [])
+nouveaux = actuels + [n for n in voulus if n not in actuels]
+if nouveaux != actuels:
+    definir("pont_iphone.domotique_distante", nouveaux)
+print("domotique_distante=" + ", ".join(nouveaux))
+'@
+`$fichier = Join-Path `$env:TEMP 'jarvis_lumieres_iphone.py'
+Set-Content -LiteralPath `$fichier -Value `$py -Encoding utf8
+& (Join-Path `$repo '.venv\Scripts\python.exe') `$fichier
+Remove-Item -LiteralPath `$fichier -Force
 "@
     exit 0
 }
