@@ -55,6 +55,49 @@ class GestesToolsTests(unittest.TestCase):
             "Arrête le contrôle par gestes"), False)
         self.assertIs(demande_mode_visio("Coupe le mode vision"), False)
         self.assertIs(demande_mode_visio("Coupe les gestes"), False)
+        self.assertIs(demande_mode_visio("Désactive les gestes"), False)
+        self.assertIs(demande_mode_visio("Suis mes mains"), True)
+        self.assertIs(demande_mode_visio("Active la caméra des gestes"), True)
+        self.assertIs(demande_mode_visio(
+            "Active le contrôle avec les mains"), True)
+
+    def test_media_minuteur_appel_ou_document_n_allument_pas_la_camera(self):
+        for phrase in (
+                "Mets la chanson Les yeux de la mama",
+                "Mets un minuteur de 5 minutes pour reposer mes yeux",
+                "Lance la musique Regard",
+                "Mets les yeux de la mama sur Spotify",
+                "Lance une visio avec maman sur Teams",
+                "Lance une visio Teams",
+                "Lance la playlist mains libres",
+                "Ouvre le document sur les gestes barrières"):
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(demande_mode_regard(phrase))
+                self.assertIsNone(demande_mode_visio(phrase))
+
+    def test_gestes_ou_mains_isoles_ne_suffisent_plus(self):
+        self.assertIsNone(demande_mode_visio("Lance les mains libres"))
+        self.assertIsNone(demande_mode_visio("Ouvre la page des gestes barrières"))
+
+    def test_routeur_commun_envoie_la_chanson_vers_la_musique(self):
+        from core import config
+        from core.routage_intentions import decider_prioritaire
+        outils_camera = {
+            "lancer_mode_regard", "quitter_mode_regard", "lancer_demo_gestes",
+            "controler_gestes", "lancer_calibration_gestes"}
+        # Configuration vide en mémoire : le test ne dépend pas de config.yaml.
+        with patch.object(config, "_CONFIG", {}):
+            decision = decider_prioritaire("Mets la chanson Les yeux de la mama")
+            self.assertIsNotNone(decision)
+            self.assertEqual(decision.outil, "lire_spotify")
+            for phrase in (
+                    "Lance la playlist mains libres",
+                    "Mets un minuteur de 5 minutes pour reposer mes yeux",
+                    "Ouvre le document sur les gestes barrières",
+                    "Lance une visio avec maman sur Teams"):
+                with self.subTest(phrase=phrase):
+                    decision = decider_prioritaire(phrase)
+                    self.assertNotIn(getattr(decision, "outil", ""), outils_camera)
 
     def test_mode_regard_est_separe_du_mode_visio(self):
         self.assertIs(demande_mode_regard(
@@ -126,6 +169,40 @@ class GestesToolsTests(unittest.TestCase):
                    return_value="Regard coupé.") as arreter:
             self.assertEqual(quitter_mode_regard(), "Regard coupé.")
         arreter.assert_called_once_with()
+
+    def test_poing_sans_hook_laisse_une_trace(self):
+        ancien = gestes_core._COUPER_TTS
+        gestes_core._COUPER_TTS = None
+        try:
+            with self.assertLogs("jarvis.gestes", level="WARNING") as journal:
+                gestes_core._executer("couper_tts", {})
+        finally:
+            gestes_core._COUPER_TTS = ancien
+        self.assertIn("sans hook", journal.output[0])
+
+    def test_poing_avec_hook_coupe_la_voix(self):
+        couper = Mock()
+        ancien = gestes_core._COUPER_TTS
+        gestes_core._COUPER_TTS = couper
+        try:
+            gestes_core._executer("couper_tts", {})
+        finally:
+            gestes_core._COUPER_TTS = ancien
+        couper.assert_called_once_with()
+
+    def test_tracker_poste_sur_le_port_effectif_du_serveur(self):
+        from core import config
+        with patch.object(gestes_core, "_seuils", return_value={}):
+            with patch.object(config, "_CONFIG", {"pont_iphone": {"port": 8800}}):
+                self.assertEqual(gestes_core._conf_tracker("t")["url"],
+                                 "http://127.0.0.1:8800/api/gestes")
+            with patch.object(config, "_CONFIG", {
+                    "serveur": {"port": 8791}, "pont_iphone": {"port": 8800}}):
+                self.assertEqual(gestes_core._conf_tracker("t")["url"],
+                                 "http://127.0.0.1:8791/api/gestes")
+            with patch.object(config, "_CONFIG", {}):
+                self.assertEqual(gestes_core._conf_tracker("t")["url"],
+                                 "http://127.0.0.1:8790/api/gestes")
 
     def test_mode_regard_demarre_avec_les_clics_actifs(self):
         ancien_regard = gestes_core._PROC_REGARD

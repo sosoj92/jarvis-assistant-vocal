@@ -37,18 +37,45 @@ def _mots_commande(phrase: str):
     return mots
 
 
+# Une phrase qui parle de média, de minuteur, d'appel ou de document n'est jamais
+# un ordre caméra : « mets la chanson Les yeux de la mama », « lance la playlist
+# mains libres » ou « lance une visio Teams » doivent rejoindre leur propre outil
+# au lieu d'allumer la webcam. Comparaison sur des mots entiers.
+_MARQUEURS_HORS_CAMERA = {
+    "chanson", "chansons", "musique", "musiques", "morceau", "morceaux",
+    "titre", "titres", "album", "albums", "playlist", "playlists",
+    "spotify", "netflix", "video", "videos",
+    "minuteur", "minuteurs", "chronometre", "alarme", "alarmes",
+    "rappel", "rappels", "teams", "zoom", "appel", "appels", "appelle",
+    "document", "documents", "fichier", "fichiers",
+}
+
+
+def _hors_camera(mots) -> bool:
+    return any(mot in _MARQUEURS_HORS_CAMERA for mot in mots)
+
+
 def demande_mode_visio(phrase: str):
     """True=active les mains visibles, False=les coupe, None=pas un ordre visio."""
     mots = _mots_commande(phrase)
+    if _hors_camera(mots):
+        return None
     texte = " ".join(mots)
+    # « gestes »/« mains » seuls ne suffisent plus (« lance la playlist mains
+    # libres ») : il faut « les gestes », « mes mains » ou « la caméra des
+    # gestes » juste après le verbe.
     gestes_explicites = (
-        any(mot in mots for mot in ("geste", "gestes", "mains"))
+        (" ".join(mots[1:3]) in {"les gestes", "mes mains"}
+         or " ".join(mots[1:5]) == "la camera des gestes")
         and not any(mot.startswith("calibr") or mot in {"demo", "video", "reconnaissance"}
                     for mot in mots)
     )
     cible_visio = ("visio" in mots or "mode vision" in texte
                    or "controle gestuel" in texte
                    or "controle par gestes" in texte
+                   or any(expression in texte for expression in (
+                       "controle avec les mains", "controle par les mains",
+                       "controle avec mes mains", "controle par mes mains"))
                    or gestes_explicites)
     if not cible_visio:
         return None
@@ -79,6 +106,8 @@ def demande_mode_regard(phrase: str):
     """True=active le regard, False=le coupe, None=pas un ordre de regard."""
     mots = _mots_commande(phrase)
     if not any(mot in mots for mot in ("regard", "yeux", "oculaire")):
+        return None
+    if _hors_camera(mots):
         return None
     texte = " ".join(mots)
     if any(expression in texte for expression in (

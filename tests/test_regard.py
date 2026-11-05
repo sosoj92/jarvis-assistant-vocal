@@ -1,7 +1,13 @@
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
+from gestes import regard
 from gestes.regard import (
     CalibrationRegard,
     DetecteurSourcils,
@@ -126,6 +132,63 @@ class TestDetecteurSourcils(unittest.TestCase):
         self.assertIsNone(d.alimenter(0.1, self.PROFIL, 1.31))
         self.assertIsNone(d.alimenter(0.7, self.PROFIL, 1.4))
         self.assertEqual(d.alimenter(0.7, self.PROFIL, 1.51), "clic_gauche")
+
+
+def _camera_sans_image(limite=500):
+    """Fausse webcam débranchée ; échoue au lieu de tourner sans fin."""
+    cap = MagicMock()
+    appels = {"n": 0}
+
+    def lire():
+        appels["n"] += 1
+        if appels["n"] > limite:
+            raise AssertionError("boucle sans waitKey : Echap jamais lu")
+        return False, None
+
+    cap.read.side_effect = lire
+    return cap, appels
+
+
+class TestWebcamPerdue(unittest.TestCase):
+    """Sans image, la fenêtre reste servie et Échap fonctionne (aucun matériel)."""
+
+    def test_calibration_sans_image_lit_echap(self):
+        cv2 = MagicMock()
+        cv2.waitKey.side_effect = [32, -1, 27]   # Espace, rien, puis Échap
+        cap, appels = _camera_sans_image()
+        with self.assertRaises(KeyboardInterrupt):
+            regard._calibrer(cv2, cap, MagicMock(), MagicMock(),
+                             SimpleNamespace(largeur=64, hauteur=48))
+        self.assertEqual(appels["n"], 2)
+        self.assertEqual(cv2.waitKey.call_args.args, (30,))
+
+    def test_boucle_principale_sans_image_sort_sur_echap(self):
+        cv2 = MagicMock()
+        cv2.waitKey.side_effect = [-1, 27]
+        cap, appels = _camera_sans_image()
+        cv2.VideoCapture.return_value = cap
+        mediapipe = MagicMock()
+        modules = {
+            "cv2": cv2, "mediapipe": mediapipe,
+            "mediapipe.tasks": mediapipe.tasks,
+            "mediapipe.tasks.python": mediapipe.tasks.python,
+            "mediapipe.tasks.python.vision": mediapipe.tasks.python.vision,
+        }
+        with tempfile.TemporaryDirectory() as dossier:
+            modele = Path(dossier) / "face_landmarker.task"
+            modele.write_bytes(b"faux")
+            with (patch.dict(sys.modules, modules),
+                  patch.object(regard, "SourisWindows",
+                               return_value=SimpleNamespace(largeur=64, hauteur=48)),
+                  patch.object(regard, "_calibrer",
+                               return_value=(MagicMock(), {}))):
+                regard.executer(device=0, modele=str(modele), clics_actifs=True)
+        self.assertEqual(appels["n"], 2)
+        cap.release.assert_called_once_with()
+        cv2.destroyAllWindows.assert_called_once_with()
+
+    def test_docstring_decrit_l_option_des_clics_actifs(self):
+        self.assertIn("--clics-actifs", regard.__doc__)
 
 
 if __name__ == "__main__":

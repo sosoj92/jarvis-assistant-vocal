@@ -92,5 +92,28 @@ class RegistreFiltreTests(unittest.TestCase):
             self.assertEqual(registre.schemas_api(modules=set()), [])
 
 
+class RouteurCommunCameraTests(unittest.TestCase):
+    """Une chanson, un minuteur ou un document n'allument jamais la caméra."""
+
+    OUTILS_CAMERA = {"lancer_mode_regard", "quitter_mode_regard", "lancer_demo_gestes",
+                     "controler_gestes", "lancer_calibration_gestes"}
+
+    def test_chanson_vers_la_musique_et_jamais_vers_la_camera(self):
+        from core import config
+        # Configuration vide en mémoire : le test ne dépend pas de config.yaml.
+        with patch.object(config, "_CONFIG", {}):
+            decision = decider_prioritaire("Mets la chanson Les yeux de la mama")
+            self.assertIsNotNone(decision)
+            self.assertEqual(decision.outil, "lire_spotify")
+            for phrase in (
+                    "Lance la playlist mains libres",
+                    "Mets un minuteur de 5 minutes pour reposer mes yeux",
+                    "Ouvre le document sur les gestes barrières",
+                    "Lance une visio avec maman sur Teams"):
+                with self.subTest(phrase=phrase):
+                    decision = decider_prioritaire(phrase)
+                    self.assertNotIn(getattr(decision, "outil", ""), self.OUTILS_CAMERA)
+
+
 if __name__ == "__main__":
     unittest.main()

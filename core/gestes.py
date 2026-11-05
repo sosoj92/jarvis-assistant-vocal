@@ -171,7 +171,11 @@ def _seuils():
 
 
 def _conf_tracker(token):
-    port = int(reglage("serveur.port", 8790))
+    # Même port que le serveur unifié, replis historiques compris
+    # (pont_iphone.port, appels.port_stream) : sinon le tracker poste dans le
+    # vide et ses erreurs sont avalées. Import local : serveur importe gestes.
+    from core.serveur import port_effectif
+    port = int(port_effectif())
     return {
         "device": int(reglage("gestes.device", 0)),
         "fps": int(reglage("gestes.fps", 24)),
@@ -467,6 +471,9 @@ def _executer(action, spec):
     elif action == "couper_tts":
         if _COUPER_TTS:
             _COUPER_TTS()
+        else:
+            # Ex. agent du bureau : definir_hooks n'y est jamais appelé.
+            LOG.warning("gestes: couper_tts demandé sans hook installé")
     elif action == "obs_scene":
         _obs_scene(spec.get("sens", "suivante"))
     elif action == "swipe":
@@ -658,8 +665,11 @@ def monter_routes(app):
     async def api_gestes(request: Request):
         if not _local(request):
             return JSONResponse({"ok": False}, status_code=403)
+        # Comparaison en octets UTF-8 : un en-tete non ASCII donne un refus, pas
+        # une erreur 500.
         if not _TOKEN or not secrets.compare_digest(
-                request.headers.get("x-gestes-token", ""), _TOKEN):
+                str(request.headers.get("x-gestes-token") or "").encode("utf-8"),
+                str(_TOKEN).encode("utf-8")):
             return JSONResponse({"ok": False, "message": "token"}, status_code=401)
         try:
             data = await request.json()

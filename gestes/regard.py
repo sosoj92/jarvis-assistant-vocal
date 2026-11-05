@@ -1,9 +1,11 @@
 """Prototype local de controle du pointeur par le regard.
 
 La webcam reste strictement dans ce processus. Aucune image, aucun landmark et
-aucune calibration ne sont enregistres ni transmis. Le clic par haussement
-volontaire des deux sourcils est
-desactive au demarrage et doit etre active explicitement avec la touche ``c``.
+aucune calibration ne sont enregistres ni transmis. Lance seul, le clic par
+haussement volontaire des deux sourcils est desactive au demarrage et s'active
+avec la touche ``c``. L'option ``--clics-actifs``, que Jarvis passe toujours via
+core.gestes.demarrer_regard, l'active des la fin de la calibration ; ``c`` le
+coupe ou le reactive.
 """
 from __future__ import annotations
 
@@ -390,6 +392,16 @@ def filtrer_mesures(mesures):
     return conservees if len(conservees) >= 5 else valeurs
 
 
+def _echap_sans_image(cv2):
+    """Sans image de la webcam : sert la fenetre et lit Echap/q avant de reboucler.
+
+    Une boucle ``continue`` sans waitKey figerait la fenetre plein ecran
+    (« Ne repond pas ») et rendrait Echap inoperant, processeur a vide.
+    """
+    touche = cv2.waitKey(30) & 0xFF
+    return touche in (27, ord("q"))
+
+
 def _calibrer(cv2, cap, landmarker, mp, souris):
     largeur, hauteur = souris.largeur, souris.hauteur
     nom = "Jarvis - calibration du regard"
@@ -430,6 +442,8 @@ def _calibrer(cv2, cap, landmarker, mp, souris):
         while True:
             ok, frame = cap.read()
             if not ok:
+                if _echap_sans_image(cv2):
+                    raise KeyboardInterrupt
                 continue
             maintenant = time.monotonic()
             ts = max(dernier_ts + 1, int(maintenant * 1000))
@@ -481,6 +495,8 @@ def _calibrer(cv2, cap, landmarker, mp, souris):
         while True:
             ok, frame = cap.read()
             if not ok:
+                if _echap_sans_image(cv2):
+                    raise KeyboardInterrupt
                 continue
             maintenant = time.monotonic()
             ts = max(dernier_ts + 1, int(maintenant * 1000))
@@ -602,6 +618,8 @@ def executer(device=0, modele=None, clics_actifs=False):
         while True:
             ok, frame = cap.read()
             if not ok:
+                if _echap_sans_image(cv2):
+                    break
                 continue
             maintenant = time.monotonic()
             ts = max(dernier_ts + 1, int(maintenant * 1000))

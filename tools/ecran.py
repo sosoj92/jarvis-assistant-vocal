@@ -1,5 +1,7 @@
 """Capture d'écran et lecture visuelle ponctuelle, sans contrôle du PC."""
 import logging
+import threading
+from contextlib import contextmanager
 
 from core.registre import outil
 
@@ -12,11 +14,58 @@ LARGEUR_CAPTURE = 1568
 # l'image ENVOYÉE au modèle. Sert à tools/souris.py pour convertir des coordonnées
 # vues dans l'image -> coordonnees ecran reelles (cf. cliquer_ecran).
 _DERNIERE = None
+# Protège _DERNIERE : une capture concurrente attend la fin d'un clic figé.
+_VERROU = threading.RLock()
 
 
 def derniere_capture():
     """Renvoie {moniteur, largeur, hauteur} de la derniere capture, ou None."""
     return _DERNIERE
+
+
+def _geometrie_valide(geometrie):
+    """Copie bornée d'une géométrie {moniteur, largeur, hauteur}, ou None."""
+    try:
+        moniteur = geometrie["moniteur"]
+        copie = {
+            "moniteur": {cle: int(moniteur[cle])
+                         for cle in ("left", "top", "width", "height")},
+            "largeur": int(geometrie["largeur"]),
+            "hauteur": int(geometrie["hauteur"]),
+        }
+    except Exception:
+        return None
+    tailles = (copie["largeur"], copie["hauteur"],
+               copie["moniteur"]["width"], copie["moniteur"]["height"])
+    if min(tailles) <= 0 or max(tailles) > 100_000:
+        return None
+    if max(abs(copie["moniteur"]["left"]), abs(copie["moniteur"]["top"])) > 100_000:
+        return None
+    return copie
+
+
+@contextmanager
+def geometrie_figee(geometrie):
+    """Clique dans le repère d'UNE capture précise, même si une autre a suivi.
+
+    Astra réfléchit plusieurs secondes entre sa capture et son clic : une lecture
+    d'écran faite entre-temps (depuis une autre pièce) réécrit _DERNIERE et
+    décalerait le clic. Ce contexte rétablit la géométrie fournie, fait attendre
+    les captures concurrentes pendant le clic, puis remet la plus récente.
+    Sans géométrie valide, le comportement historique est conservé.
+    """
+    global _DERNIERE
+    geometrie = _geometrie_valide(geometrie) if geometrie else None
+    with _VERROU:
+        if geometrie is None:
+            yield
+            return
+        precedente = _DERNIERE
+        _DERNIERE = geometrie
+        try:
+            yield
+        finally:
+            _DERNIERE = precedente
 
 
 def _fenetre_active(moniteur_global):
@@ -105,8 +154,9 @@ def capture_screen(ecran: int = 0, cible: str = "ecran"):
 
         # Memorise la geometrie pour un eventuel clic (tools/souris.py).
         global _DERNIERE
-        _DERNIERE = {"moniteur": dict(zone),
-                     "largeur": image.size[0], "hauteur": image.size[1]}
+        with _VERROU:
+            _DERNIERE = {"moniteur": dict(zone),
+                         "largeur": image.size[0], "hauteur": image.size[1]}
 
         tampon = io.BytesIO()
         image.save(tampon, format="JPEG", quality=80)
@@ -114,6 +164,9 @@ def capture_screen(ecran: int = 0, cible: str = "ecran"):
         return {
             "image": {"media_type": "image/jpeg", "data": b64},
             "apercu": f"Capture ecran {ecran or 1} ({image.size[0]}x{image.size[1]}).",
+            # Repère de CETTE capture : Astra clique dedans (geometrie_figee).
+            "geometrie": {"moniteur": dict(zone),
+                          "largeur": image.size[0], "hauteur": image.size[1]},
         }
     except Exception:
         LOG.exception("capture d'écran impossible")
