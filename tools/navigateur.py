@@ -150,6 +150,16 @@ def _lancer_chrome(port):
         return False
 
 
+def _via_playwright(fonction, *args, **kwargs):
+    """Execute fonction sur le thread Playwright dedie (core.playwright_partage).
+
+    L'API sync de Playwright est liee a son thread : _BROWSER n'est donc manipule
+    que la-bas, quel que soit le thread de l'appel (tour vocal, satellite,
+    confirmation, tableau de bord)."""
+    from core.playwright_partage import executer
+    return executer(fonction, *args, **kwargs)
+
+
 def _tenter_cdp(port):
     """Une tentative de connexion CDP. Renvoie le browser ou None."""
     global _BROWSER
@@ -175,11 +185,18 @@ def _connexion(auto=True):
     desactiver ce comportement)."""
     global _BROWSER
     if _BROWSER is not None:
+        # .contexts ne leve jamais d'erreur apres la fermeture de Chrome :
+        # seul is_connected() dit si le navigateur repond encore.
         try:
-            _ = _BROWSER.contexts
-            return _BROWSER
+            if _BROWSER.is_connected():
+                return _BROWSER
         except Exception:
-            _BROWSER = None
+            pass
+        ancien, _BROWSER = _BROWSER, None
+        try:
+            ancien.close()
+        except Exception:
+            pass
     port = int(reglage("navigateur.cdp_port", 9222))
     # 1) Chrome deja lance avec le port de debug ?
     b = _tenter_cdp(port)
@@ -264,6 +281,10 @@ def browser_open(url: str = "", recherche: str = "") -> str:
             return f"C'est ouvert dans {nom_navigateur()}."
         return f"Je n'ai pas pu ouvrir le navigateur. L'adresse : {cible}"
 
+    return _via_playwright(_ouvrir_dans_chrome, cible)
+
+
+def _ouvrir_dans_chrome(cible):
     browser = _connexion()
     if browser is None:
         return _absent()
@@ -290,6 +311,10 @@ def browser_open(url: str = "", recherche: str = "") -> str:
     phrase_attente="Je lis la page.",
 )
 def browser_current_page() -> str:
+    return _via_playwright(_browser_current_page)
+
+
+def _browser_current_page():
     browser = _connexion()
     if browser is None:
         return _absent()
@@ -326,6 +351,10 @@ def browser_current_page() -> str:
     },
 )
 def browser_tabs(action: str = "lister", filtre: str = "") -> str:
+    return _via_playwright(_browser_tabs, action, filtre)
+
+
+def _browser_tabs(action, filtre):
     browser = _connexion()
     if browser is None:
         return _absent()
@@ -353,26 +382,13 @@ def browser_tabs(action: str = "lister", filtre: str = "") -> str:
 
 # ------------------------------------------------------------------- actions
 
-def _compter_onglets(filtre):
-    browser = _connexion()
-    if browser is None:
-        return 0
-    f = (filtre or "").lower()
-    n = 0
-    for p in _pages(browser):
-        try:
-            if not f or f in (p.title() or "").lower() or f in p.url.lower():
-                n += 1
-        except Exception:
-            continue
-    return n
-
-
 def _annonce_fermeture(args):
-    filtre = args.get("filtre", "")
-    n = _compter_onglets(filtre)
-    quoi = f"les {n} onglets" if not filtre else f"{n} onglet(s) '{filtre}'"
-    return f"Je ferme {quoi}."
+    # L'annonce est calculee par le cerveau, pas forcement sur le poste qui ferme
+    # les onglets : on dit ce qui sera fait sans interroger le navigateur.
+    filtre = str(args.get("filtre", "") or "").strip()
+    if not filtre:
+        return "Je ferme l'onglet actif."
+    return f"Je ferme les onglets qui contiennent « {filtre[:60]} »."
 
 
 @outil(
@@ -391,6 +407,10 @@ def _annonce_fermeture(args):
     annonce=_annonce_fermeture,
 )
 def browser_close_tabs(filtre: str = "") -> str:
+    return _via_playwright(_browser_close_tabs, filtre)
+
+
+def _browser_close_tabs(filtre):
     browser = _connexion()
     if browser is None:
         return _absent()
@@ -438,6 +458,10 @@ def browser_close_tabs(filtre: str = "") -> str:
                           f"{' '.join(str(args.get('instruction', '')).split())[:160]}."),
 )
 def browser_interact(instruction: str) -> str:
+    return _via_playwright(_browser_interact, instruction)
+
+
+def _browser_interact(instruction):
     browser = _connexion()
     if browser is None:
         return _absent()

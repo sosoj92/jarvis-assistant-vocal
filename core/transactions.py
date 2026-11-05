@@ -10,10 +10,12 @@ Format d'une transaction (une par ligne dans finances/transactions.jsonl) :
    "source":"csv"|"enablebanking", "id":"<hash>"}
 montant : négatif = dépense, positif = rentrée.
 """
+import collections
 import datetime as dt
 import hashlib
 import json
 import logging
+import re
 from pathlib import Path
 
 import yaml
@@ -59,18 +61,33 @@ def _regles():
     return r
 
 
+def _correspond(cle, lib):
+    """Sous-chaîne pour les clés de 3 caractères ou plus ; mot entier pour les
+    plus courtes (« bp » touche « CB BP 1234 », « ca » ne touche pas CASTORAMA)."""
+    k = _norm(cle).strip()
+    if not k:
+        return False
+    if len(k) >= 3:
+        return k in lib
+    return re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", lib) is not None
+
+
 def categoriser(libelle, montant=0.0):
     """Catégorie d'une transaction via les règles (perso prioritaires)."""
     lib = _norm(libelle)
     # les règles perso les plus longues (spécifiques) d'abord
     for cle in sorted(_regles(), key=len, reverse=True):
-        if _norm(cle) in lib:
+        if _correspond(cle, lib):
             return _regles()[cle]
     return "Revenus" if float(montant or 0) > 0 else "Non catégorisé"
 
 
 def memoriser_regle(motif, categorie):
-    """Mémorise une correction : « ce libellé (motif) => cette catégorie »."""
+    """Mémorise une correction : « ce libellé (motif) => cette catégorie ».
+    ValueError si le motif est vide (il toucherait toutes les transactions)."""
+    motif = str(motif or "").strip()
+    if not _norm(motif).strip():
+        raise ValueError("motif vide")
     perso = {}
     if _REGLES.exists():
         try:
@@ -85,8 +102,13 @@ def memoriser_regle(motif, categorie):
 
 # ------------------------------------------------------------ stockage
 
-def _id(t):
+def _id(t, rang=0):
+    """Identifiant de déduplication. rang = k-ième occurrence identique (même date,
+    libellé, montant) dans le relevé importé : deux cafés le même jour restent deux
+    transactions. Le rang 0 garde l'ancienne formule (ids déjà stockés)."""
     brut = f"{t.get('date')}|{_norm(t.get('libelle'))}|{t.get('montant')}"
+    if rang:
+        brut += f"|{rang}"
     return hashlib.sha1(brut.encode("utf-8")).hexdigest()[:16]
 
 
@@ -109,12 +131,15 @@ def ajouter(transactions):
     nombre de nouvelles."""
     existantes = charger()
     vus = {t.get("id") for t in existantes}
+    rangs = collections.Counter()      # occurrences identiques dans ce lot
     nouvelles = []
     for t in transactions:
         t = dict(t)
         if not t.get("categorie"):
             t["categorie"] = categoriser(t.get("libelle"), t.get("montant"))
-        t["id"] = _id(t)
+        cle = (t.get("date"), _norm(t.get("libelle")), t.get("montant"))
+        t["id"] = _id(t, rangs[cle])
+        rangs[cle] += 1
         if t["id"] in vus:
             continue
         vus.add(t["id"])

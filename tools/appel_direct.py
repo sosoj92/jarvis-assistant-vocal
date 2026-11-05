@@ -94,7 +94,14 @@ def _tts_ulaw(texte):
                 "text": texte,
                 "model_id": reglage("elevenlabs.modele", "eleven_flash_v2_5")},
             timeout=30)
-        return r.content if r.status_code == 200 else b""
+        if r.status_code != 200:
+            return b""
+        try:                                  # comptabilite voix (au caractere)
+            from core import budget
+            budget.enregistrer_tts(len(texte or ""))
+        except Exception:
+            pass
+        return r.content
     except Exception:
         LOG.exception("tts ulaw")
         return b""
@@ -273,7 +280,10 @@ def monter_ws(app):
                     info = data["start"]
                     params = info.get("customParameters", {}) or {}
                     # AUTH : refuse tout /stream sans le bon secret (voir _STREAM_SECRET).
-                    if not secrets.compare_digest(str(params.get("secret", "")), _STREAM_SECRET):
+                    # En octets UTF-8 : un secret non ASCII donne un refus, pas un TypeError.
+                    if not secrets.compare_digest(
+                            str(params.get("secret") or "").encode("utf-8"),
+                            str(_STREAM_SECRET).encode("utf-8")):
                         LOG.warning("ws /stream : secret invalide -> fermeture")
                         await ws.close(code=1008)
                         return
@@ -348,14 +358,14 @@ def _twiml_stream(objectif, contraintes):
     mcp_expose=False,
 )
 def call_and_book(numero: str, objectif: str, contraintes: str = "") -> str:
-    from tools.appels import _normaliser, _surtaxe, _config_ok, _journaliser
+    from tools.appels import (_ajouter_compteur, _config_ok, _cout, _journaliser,
+                              _valider_numero)
     if not reglage("appels.actif", True):
         return "Les appels sont desactives dans la configuration."
     # Mode test : on "fait comme si" l'appel etait passe et la reservation faite,
     # sans appeler personne (appels.simulation dans config.yaml). Le message dit
     # clairement que c'est une simulation.
     if reglage("appels.simulation", False):
-        import time
         time.sleep(4)   # petit delai pour faire comme si on telephonait
         return (f"(Mode test, aucun vrai appel n'a ete passe) J'ai appele et c'est "
                 f"regle : {objectif}. La reservation est confirmee.")
@@ -364,9 +374,10 @@ def call_and_book(numero: str, objectif: str, contraintes: str = "") -> str:
     if not reglage("elevenlabs.cle", ""):
         return ("La V2 a besoin d'une voix ElevenLabs (elevenlabs.cle) pour parler "
                 "pendant l'appel. Sans elle, utilise call_with_message (V1).")
-    e164 = _normaliser(numero)
-    if _surtaxe(numero):
-        return f"Je n'appelle pas le {e164} : numero surtaxe."
+    # Meme validation que la V1, avant de demarrer le serveur ou le tunnel.
+    e164, erreur = _valider_numero(numero)
+    if erreur:
+        return erreur
 
     try:
         from core.serveur import demarrer, url_publique
@@ -384,6 +395,7 @@ def call_and_book(numero: str, objectif: str, contraintes: str = "") -> str:
         pass
     from twilio.rest import Client
     client = Client(reglage("twilio.account_sid", ""), reglage("twilio.auth_token", ""))
+    t0 = time.time()
     try:
         appel = client.calls.create(to=e164, from_=reglage("twilio.numero", ""),
                                     twiml=_twiml_stream(objectif, contraintes))
@@ -399,9 +411,26 @@ def call_and_book(numero: str, objectif: str, contraintes: str = "") -> str:
     res = _RESULTATS.pop(appel.sid, {})
     echanges = res.get("echanges", [])
 
+    # Duree reelle (Twilio) pour le compteur mensuel et le budget, comme la V1.
+    statut, duree = None, 0
+    try:
+        a = client.calls(appel.sid).fetch()
+        statut = a.status
+        duree = int(a.duration or 0)
+    except Exception:
+        LOG.exception("call_and_book: duree")
+    if not duree and echanges:
+        # Raccrochage encore en cours cote Twilio : on estime par l'horloge.
+        duree = int(time.time() - t0)
+    cout = 0.0
+    if statut not in ("no-answer", "busy", "failed", "canceled") and (echanges or duree > 0):
+        minutes = max(duree / 60.0, 0.1)
+        cout = _cout(minutes)
+        _ajouter_compteur(minutes, cout)
+
     # Journalise + resume
     transcript = "\n".join(f"{qui} : {txt}" for qui, txt in echanges)
-    _journaliser(e164, f"[V2] {objectif}", transcript or "(pas d'echange capte)", 0, 0.0)
+    _journaliser(e164, f"[V2] {objectif}", transcript or "(pas d'echange capte)", duree, cout)
 
     if not fini and not echanges:
         return ("L'appel n'a pas abouti a une conversation (pas de decrochage, ou le "

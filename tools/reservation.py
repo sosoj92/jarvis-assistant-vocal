@@ -8,8 +8,11 @@ rempli le formulaire.
 
 SECURITE (le coeur du dispositif) :
   - book_appointment ne valide JAMAIS tout seul. Il remplit le formulaire, puis
-    s'ARRETE devant le bouton final, arme une confirmation vocale (mecanisme de
-    la Phase 0) et resume l'action. Rien n'est valide sans ton "oui".
+    s'ARRETE devant le bouton final et resume l'action. La validation passe par
+    l'outil confirmer_reservation, qui est N3 : il est donc toujours confirme a
+    la voix. Rien n'est valide sans ton "oui".
+  - Saisie, menus et validation restent sur le site de depart : hors de ce site,
+    le navigateur pilote refuse de taper tes coordonnees.
   - Aucun paiement : si une page reclame une carte bancaire, il s'arrete et te
     passe la main (la fenetre reste ouverte).
   - Aucun mot de passe tape : les champs "password" ne sont jamais remplis. Pour
@@ -23,25 +26,71 @@ import base64
 import logging
 
 from core.config import reglage
-from core import registre
 from core.registre import outil
 
 LOG = logging.getLogger("jarvis")
 
 _SITE_DEPART = [""]      # URL de depart de la reservation en cours
+# Depart sur une recherche Google (site inconnu) : le vrai site est epingle au
+# premier domaine atteint hors de Google.
+_DEPART_RECHERCHE = [False]
+
+# Suffixes publics a deux labels les plus courants : evil.co.uk et resto.co.uk
+# ne sont pas le meme site. Liste volontairement courte, sans reseau.
+_SUFFIXES_DOUBLES = {
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk", "net.uk",
+    "com.au", "net.au", "org.au", "gov.au",
+    "gouv.fr", "asso.fr", "nom.fr", "com.fr", "tm.fr",
+    "com.br", "com.ar", "com.mx", "com.tr", "com.cn", "com.hk", "com.sg",
+    "co.jp", "ne.jp", "or.jp", "co.nz", "co.za", "co.in", "co.kr", "co.il",
+    "gv.at", "co.at", "or.at",
+}
 
 
 def _site(url):
-    """Domaine enregistrable approximatif : www.doctolib.fr -> doctolib.fr."""
+    """Domaine enregistrable approximatif : www.doctolib.fr -> doctolib.fr,
+    www.resto.co.uk -> resto.co.uk."""
     from urllib.parse import urlparse
     morceaux = urlparse(str(url or ""))
     if morceaux.scheme not in ("http", "https") or not morceaux.hostname:
         return ""
-    return ".".join(morceaux.hostname.lower().split(".")[-2:])
+    labels = morceaux.hostname.lower().rstrip(".").split(".")
+    if len(labels) >= 3 and ".".join(labels[-2:]) in _SUFFIXES_DOUBLES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
 
 
 def _meme_site(url, depart):
     return bool(_site(url)) and _site(url) == _site(depart)
+
+
+def _est_google(url):
+    """Vrai pour google.com, google.fr, google.co.uk..."""
+    return _site(url).split(".")[0] == "google"
+
+
+def _epingler_site(page):
+    """Depart sur une recherche Google : le premier domaine atteint hors de Google
+    devient le site de la reservation."""
+    if not _DEPART_RECHERCHE[0]:
+        return
+    try:
+        url = str(page.url or "")
+    except Exception:
+        return
+    if _site(url) and not _est_google(url):
+        _SITE_DEPART[0] = url
+        _DEPART_RECHERCHE[0] = False
+        LOG.info("resa : site de la reservation epingle sur %s", _site(url))
+
+
+def _hors_site(page):
+    """Vrai si la page n'est plus sur le site de depart de la reservation."""
+    try:
+        url = str(page.url or "")
+    except Exception:
+        return True
+    return not _meme_site(url, _SITE_DEPART[0])
 
 # --- etat du navigateur persistant (garde entre les appels/tours) ------------
 _PW = None      # instance Playwright
@@ -227,6 +276,10 @@ def _executer_action(page, act):
         page.click(cible, timeout=8000)
         page.wait_for_timeout(1200)
         return f"clic sur [{idx}]"
+    if a in ("taper", "choisir") and _hors_site(page):
+        # Un clic a pu mener vers un autre domaine : tes coordonnees ne sont
+        # saisies que sur le site de depart.
+        return "saisie refusee : on reste sur le site de la reservation"
     if a == "taper":
         el = page.query_selector(cible)
         if el and (el.get_attribute("type") or "").lower() == "password":
@@ -246,8 +299,11 @@ def _executer_action(page, act):
     if a == "aller":
         cible = str(act.get("texte", "") or "")
         # Le modele suit le contenu des pages : il ne peut pas emmener tes
-        # coordonnees vers un autre site que celui de depart.
-        if not _meme_site(cible, _SITE_DEPART[0]):
+        # coordonnees vers un autre site que celui de depart. Seule exception :
+        # depuis la recherche Google de depart, il peut rejoindre le vrai site,
+        # qui est alors epingle (_epingler_site).
+        depuis_recherche = _DEPART_RECHERCHE[0] and bool(_site(cible))
+        if not depuis_recherche and not _meme_site(cible, _SITE_DEPART[0]):
             return "navigation refusee : on reste sur le site de la reservation"
         page.goto(cible, wait_until="domcontentloaded")
         return f"navigue vers {cible}"
@@ -288,7 +344,18 @@ def _executer_action(page, act):
                           "avec tes coordonnees."),
 )
 def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str:
+    # Tout le travail Playwright (_PW/_CTX/_PAGE) sur son thread dedie : une
+    # confirmation venue d'un satellite tourne sur la boucle asyncio, ou l'API sync
+    # refuse de demarrer (voir core.playwright_partage).
+    from core.playwright_partage import executer
+    return executer(_book_appointment, site, quoi, quand, details)
+
+
+def _book_appointment(site, quoi, quand, details=""):
     global _RESUME_RESA
+    # Le resume d'une reservation precedente ne doit jamais etre annonce pour
+    # valider celle-ci : il n'est rempli qu'au « pret_a_confirmer » de cette page.
+    _RESUME_RESA = ""
     sites = reglage("reservation.sites", {}) or {}
     url = sites.get(site.strip().lower())
     if not url:
@@ -296,6 +363,7 @@ def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str
     objectif = (f"Reserver sur {site}. Quoi : {quoi}. Quand : {quand}."
                 + (f" Details : {details}." if details else ""))
     _SITE_DEPART[0] = url
+    _DEPART_RECHERCHE[0] = _est_google(url)
 
     try:
         page = _demarrer_navigateur()
@@ -309,6 +377,7 @@ def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str
     dernier = ""
     max_etapes = int(reglage("reservation.max_etapes", 22))
     for etape in range(max_etapes):
+        _epingler_site(page)
         if _paiement_present(page):
             return ("Une page de paiement est apparue : je m'arrete et te laisse la "
                     "main, la fenetre reste ouverte. Je ne saisis jamais de carte bancaire.")
@@ -329,10 +398,14 @@ def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str
         if a == "fini":
             return f"C'est deja confirme a l'ecran : {act.get('resume', '')}"
         if a == "pret_a_confirmer":
+            if _hors_site(page):
+                _RESUME_RESA = ""
+                return ("Je bloque : le formulaire est sur un autre site que celui de "
+                        "la reservation, je ne le valide pas. La fenetre reste ouverte.")
             _RESUME_RESA = act.get("resume", f"{quoi}, {quand}")
-            # Arme la confirmation vocale (mecanisme Phase 0) : rien n'est valide
-            # sans le "oui" de l'utilisateur.
-            registre.mettre_en_attente(registre.get("confirmer_reservation"), {})
+            # Pas de confirmation armee ici : book_appointment s'execute deja apres
+            # un "oui" (N3), et une attente posee maintenant ne serait jamais
+            # annoncee. La validation passe par confirmer_reservation (N3).
             return f"Formulaire pret : {_RESUME_RESA}."
         try:
             dernier = _executer_action(page, act)
@@ -344,6 +417,9 @@ def book_appointment(site: str, quoi: str, quand: str, details: str = "") -> str
 
 
 def _annonce_validation(_args):
+    if not _RESUME_RESA:
+        return ("Aucune reservation n'est prete a valider : je ne cliquerai sur aucun "
+                "bouton.")
     return f"Je vais valider la reservation : {_RESUME_RESA}."
 
 
@@ -355,11 +431,25 @@ def _annonce_validation(_args):
     annonce=_annonce_validation,
 )
 def confirmer_reservation() -> str:
+    from core.playwright_partage import executer
+    return executer(_confirmer_reservation)
+
+
+def _confirmer_reservation():
+    global _RESUME_RESA
     page = _PAGE
     if page is None:
         return "Il n'y a pas de reservation en cours a valider."
+    if _hors_site(page):
+        return ("La page n'est plus sur le site de la reservation : je ne valide pas. "
+                "La fenetre reste ouverte si tu veux le faire toi-meme.")
     if _paiement_present(page):
         return "La page demande un paiement : je te laisse valider toi-meme."
+    if not _RESUME_RESA:
+        # Formulaire jamais arrive a « pret a confirmer » (blocage, etapes epuisees)
+        # ou deja valide : l'annonce ne decrirait pas ce que le clic validerait.
+        return ("Il n'y a rien de pret a valider : je ne clique pas. La fenetre reste "
+                "ouverte si tu veux le faire toi-meme.")
     try:
         act = _demander_action(
             page,
@@ -368,7 +458,8 @@ def confirmer_reservation() -> str:
         if act.get("action") == "cliquer":
             _executer_action(page, act)
             page.wait_for_timeout(2500)
-            return f"Reservation validee : {_RESUME_RESA}. Verifie la confirmation a l'ecran."
+            resume, _RESUME_RESA = _RESUME_RESA, ""
+            return f"Reservation validee : {resume}. Verifie la confirmation a l'ecran."
         return ("Je n'ai pas trouve le bouton de validation avec certitude ; je "
                 "prefere te laisser cliquer toi-meme, la fenetre est ouverte.")
     except Exception as e:

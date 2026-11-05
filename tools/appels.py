@@ -36,6 +36,22 @@ _TRANSCRIPTEUR = None
 # Surchargables via config appels.prefixes_interdits.
 _INTERDITS_DEFAUT = ["089", "0899", "3", "118", "10"]
 
+# Prefixes surtaxes ETRANGERS, testes sur la forme E.164 (+...). Liste courte des
+# cas les plus courants : numeros a revenu partage (UK 09/087x/070, DE 0900/0137,
+# BE 090x, CH 090x, ES 80x/905, IT 89x, NL 090x), reseaux satellites et
+# internationaux (+870, +881, +882, +883) et service premium international (+979).
+# Surchargables via config appels.prefixes_interdits_etrangers.
+_INTERDITS_E164_DEFAUT = [
+    "+449", "+44871", "+44872", "+44873", "+4470",
+    "+49900", "+49137",
+    "+3290",
+    "+41900", "+41901", "+41906",
+    "+34803", "+34806", "+34807", "+34905",
+    "+39892", "+39899",
+    "+31900", "+31906", "+31909",
+    "+870", "+881", "+882", "+883", "+979",
+]
+
 
 def definir_transcripteur(fn):
     """jarvis14 fournit ici une fonction chemin_audio -> texte (Whisper deja charge)."""
@@ -89,10 +105,35 @@ def _national(numero):
 
 
 def _surtaxe(numero):
-    """True si le numero est surtaxe (teste sur sa forme nationale)."""
+    """True si le numero est surtaxe (forme nationale francaise, puis forme
+    E.164 pour les surtaxes etrangers)."""
     nat = _national(numero).replace(" ", "")
     interdits = reglage("appels.prefixes_interdits", None) or _INTERDITS_DEFAUT
-    return any(nat.startswith(p.replace(" ", "")) for p in interdits)
+    if any(nat.startswith(p.replace(" ", "")) for p in interdits):
+        return True
+    e164 = _normaliser(numero)
+    etrangers = reglage("appels.prefixes_interdits_etrangers", None) or _INTERDITS_E164_DEFAUT
+    return any(e164.startswith(p.replace(" ", "")) for p in etrangers)
+
+
+def _valider_numero(numero):
+    """Validation commune aux appels V1 et V2, AVANT toute preparation.
+
+    Renvoie (e164, None) si le numero peut etre compose, sinon (e164, message).
+    Refuse le texte parasite (« poste 12 »), corrige le « (0) » des numeros
+    ecrits a l'internationale, bloque les surtaxes et exige 8 a 15 chiffres."""
+    brut = str(numero or "").strip()
+    if any(c.isalpha() for c in brut):
+        return _normaliser(brut), f"Ce numero ne semble pas valide : {brut}."
+    brut = brut.replace("(0)", "")             # +33 (0)6 ... -> +33 6 ...
+    e164 = _normaliser(brut)
+    if _surtaxe(brut):
+        return e164, (f"Je n'appelle pas le {e164} : il ressemble a un numero surtaxe. "
+                      "Par securite je ne compose pas ce genre de numero.")
+    chiffres = e164[1:]
+    if not e164.startswith("+") or not chiffres.isdigit() or not 8 <= len(chiffres) <= 15:
+        return e164, f"Ce numero ne semble pas valide : {brut}."
+    return e164, None
 
 
 def _config_ok():
@@ -139,7 +180,7 @@ def _cout(minutes):
 # ---------------------------------------------------------------- confirmation
 
 def _annonce(args):
-    e164 = _normaliser(args.get("numero", ""))
+    e164 = _valider_numero(args.get("numero", ""))[0]     # le numero compose
     msg = args.get("message", "")
     est = _cout(1.0)
     return (f"Je vais appeler le {e164} et dire : «{msg}». Cout estime environ "
@@ -187,19 +228,15 @@ def call_with_message(numero: str, message: str) -> str:
         return "Les appels sont desactives dans la configuration."
     # Mode test : simule l'appel sans telephoner (appels.simulation dans config).
     if reglage("appels.simulation", False):
-        import time
         time.sleep(4)
         return (f"(Mode test, aucun vrai appel) J'ai appele et transmis : "
                 f"«{message}». Reponse simulee : c'est note, c'est bon.")
     if not _config_ok():
         return ("Twilio n'est pas configure (twilio.account_sid, auth_token et numero "
                 "dans config.yaml). Voir docs/appels.md.")
-    e164 = _normaliser(numero)
-    if not e164 or len(e164) < 8:
-        return f"Ce numero ne semble pas valide : {numero}."
-    if _surtaxe(numero):
-        return (f"Je n'appelle pas le {e164} : il ressemble a un numero surtaxe. "
-                "Par securite je ne compose pas ce genre de numero.")
+    e164, erreur = _valider_numero(numero)
+    if erreur:
+        return erreur
 
     try:
         import truststore

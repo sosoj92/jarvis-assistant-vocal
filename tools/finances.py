@@ -24,8 +24,8 @@ from core.config import reglage
 from core.registre import outil
 
 # Réutilise la config Gmail du module mail.
-from tools.mail import (IMAP_SERVEUR, MAIL_ADRESSE, _corps_texte, _decoder_entete,
-                        _mail_configure, _mail_mdp)
+from tools.mail import (DELAI_MAIL_S, IMAP_SERVEUR, MAIL_ADRESSE, _corps_texte,
+                        _decoder_entete, _mail_configure, _mail_mdp)
 
 _RACINE = Path(__file__).resolve().parent.parent
 _DOSSIER = _RACINE / "finances"
@@ -97,16 +97,20 @@ _GENERIQUES = {"info", "e", "noreply", "no-reply", "no reply", "support", "team"
 
 
 def _service_depuis(nom_exp, exp_adresse, sujet):
-    dom = exp_adresse.lower()
+    # Seul le domaine (après le @) identifie le service : la partie locale et le nom
+    # affiché sont écrits librement par l'expéditeur (« netflix.com@pirate.example »).
+    adresse = (exp_adresse or "").lower()
+    dom = adresse.rsplit("@", 1)[1] if "@" in adresse else ""
     for cle, (nom, cat) in _SERVICES.items():
         if cle in dom:
             return nom, cat
-    nom = (nom_exp or "").strip().strip('"')
+    # Nom affiché borné : il repart vers le modèle et dans le cockpit.
+    nom = (nom_exp or "").strip().strip('"')[:40].strip()
     bon_nom = nom and len(nom) > 2 and nom.lower() not in _GENERIQUES
     # Stripe/PayPal/GoCardless : le vrai marchand est le NOM affiché de l'expéditeur.
     if any(p in dom for p in _PROCESSEURS) and bon_nom:
         return nom, "Autres"
-    m = re.search(r"@([\w-]+)\.", exp_adresse)
+    m = re.match(r"([\w-]+)\.", dom)
     if m and m.group(1).lower() not in _GENERIQUES:
         return m.group(1).capitalize(), "Autres"
     return (nom if bon_nom else "Abonnement"), "Autres"
@@ -162,7 +166,7 @@ def _scanner(mois):
     """Détecte les abonnements RÉCURRENTS (≥2 reçus, OU un mot-clé d'abonnement).
     Renvoie {service: {service, montant, periodicite, jour, categorie, date, devise}}."""
     par_service = {}                                 # service -> liste d'occurrences
-    imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
+    imap = imaplib.IMAP4_SSL(IMAP_SERVEUR, timeout=DELAI_MAIL_S)
     imap.login(MAIL_ADRESSE, _mail_mdp())
     try:
         imap.select(f'"{_dossier_tous(imap)}"')      # Tous les messages (reçus archivés inclus)
@@ -240,7 +244,21 @@ def _colonne(entetes, *cands):
 
 
 def _nombre(s):
-    s = str(s or "").strip().replace(" ", "").replace(" ", "").replace(",", ".")
+    """Montant d'un export bancaire : « -45,10 », « 1 234,56 », « 1.234,56 »,
+    « 1,234.56 », « 12,99- » (signe final). None si illisible."""
+    s = str(s or "").strip().replace(" ", "").replace(" ", "")
+    for blanc in (" ", " "):
+        s = s.replace(blanc, "")                    # espaces U+00A0 et U+2009
+    if s.endswith("-") and not s.startswith("-"):
+        s = "-" + s[:-1]                                # signe final -> devant
+    if "," in s and "." in s:
+        # Le dernier separateur rencontre est la decimale, l'autre les milliers.
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    else:
+        s = s.replace(",", ".")
     s = re.sub(r"[^0-9.\-]", "", s)
     try:
         return float(s) if s not in ("", "-", ".") else None
@@ -259,7 +277,8 @@ def _date_iso(s):
 
 
 def _parser_csv(texte):
-    """Détecte le séparateur + les colonnes (date, libellé, montant OU débit/crédit)."""
+    """Détecte le séparateur + les colonnes (date, libellé, montant OU débit/crédit).
+    Renvoie (transactions, nombre de lignes de données illisibles ignorées)."""
     sep = ";" if texte[:2000].count(";") >= texte[:2000].count(",") else ","
     lignes = list(csv.reader(io.StringIO(texte), delimiter=sep))
     # trouve la ligne d'en-tête (celle qui contient 'date')
@@ -272,8 +291,12 @@ def _parser_csv(texte):
     idb = _colonne(entetes, "debit")
     icr = _colonne(entetes, "credit")
     trans = []
+    ignorees = 0
     for l in lignes[idx + 1:]:
-        if not l or (ic is not None and ic >= len(l)):
+        if not any(str(c).strip() for c in l):
+            continue                                       # ligne vide
+        if ic is not None and ic >= len(l):
+            ignorees += 1
             continue
         date = _date_iso(l[ic]) if ic is not None else None
         lib = l[il].strip() if (il is not None and il < len(l)) else ""
@@ -282,11 +305,16 @@ def _parser_csv(texte):
         else:
             deb = _nombre(l[idb]) if (idb is not None and idb < len(l)) else None
             cred = _nombre(l[icr]) if (icr is not None and icr < len(l)) else None
-            montant = (cred or 0) - (deb or 0) if (deb or cred) else None
+            # Certaines banques ecrivent le debit en negatif dans la colonne Debit :
+            # le sens vient de la colonne, pas du signe.
+            montant = (abs(cred or 0) - abs(deb or 0)
+                       if (deb is not None or cred is not None) else None)
         if date and lib and montant is not None:
             trans.append({"date": date, "libelle": lib, "montant": round(montant, 2),
                           "source": "csv"})
-    return trans
+        else:
+            ignorees += 1
+    return trans, ignorees
 
 
 @outil(
@@ -321,14 +349,15 @@ def importer_releve(chemin: str = "") -> str:
                 "finances/releves/, ou précise le chemin.")
     try:
         texte = p.read_text(encoding="utf-8-sig", errors="replace")
-        trans = _parser_csv(texte)
+        trans, ignorees = _parser_csv(texte)
     except Exception as e:
         return f"Lecture du CSV impossible ({str(e)[:100]})."
     if not trans:
         return "Aucune transaction lisible dans ce fichier (colonnes date/libellé/montant ?)."
     n = tx.ajouter(trans)
     v = tx.vue_mois()
-    return (f"Importé : {n} nouvelles transactions sur {len(trans)} lues. Ce mois : "
+    illisibles = (f" {ignorees} ligne(s) illisible(s) ignorée(s)." if ignorees else "")
+    return (f"Importé : {n} nouvelles transactions sur {len(trans)} lues.{illisibles} Ce mois : "
             f"{v['sorties']:.0f} € de sorties, {v['entrees']:.0f} € de rentrées "
             f"(solde {v['solde']:+.0f} €).")
 
@@ -349,7 +378,10 @@ def importer_releve(chemin: str = "") -> str:
     mcp_expose=False,
 )
 def corriger_categorie(motif: str, categorie: str) -> str:
-    tx.memoriser_regle(motif, categorie)
+    try:
+        tx.memoriser_regle(motif, categorie)
+    except ValueError:
+        return "Précise le libellé à reconnaître."
     return f"C'est noté : « {motif} » ira dans « {categorie} » (rétroactif)."
 
 

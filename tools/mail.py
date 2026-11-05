@@ -6,6 +6,7 @@ demande l'accord vocal de l'utilisateur avant d'agir.
 import email
 import imaplib
 import smtplib
+import threading
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -18,12 +19,57 @@ MAIL_MOT_DE_PASSE_APP = reglage("mail.mot_de_passe_app", "")
 IMAP_SERVEUR = "imap.gmail.com"
 SMTP_SERVEUR = "smtp.gmail.com"
 SMTP_PORT = 465
+# Delai d'attente reseau (par operation, en secondes) : une connexion figee ne
+# bloque jamais le brief ni le tour de conversation indefiniment. Assez long pour
+# qu'un SMTP lent ne fasse pas annoncer un echec alors que le mail est parti.
+DELAI_MAIL_S = float(reglage("mail.delai_s", 30) or 30)
 
 # Brouillon en attente, rempli par preparer_mail puis envoye par envoyer_mail.
 _BROUILLON = {}
 
-# UID des mails du dernier lire_mails, pour lire_mail / corbeille par numero.
+# (uid, expediteur, objet) des mails de la derniere liste ENTENDUE, pour
+# lire_mail / corbeille par numero. Remplacee d'un bloc, sous verrou.
 _DERNIERS_MAILS = []
+_VERROU_MAILS = threading.Lock()
+
+
+def _liste_memorisee():
+    """Copie de la derniere liste entendue (jamais modifiee en cours de lecture)."""
+    with _VERROU_MAILS:
+        return list(_DERNIERS_MAILS)
+
+
+def _connexion_imap():
+    imap = imaplib.IMAP4_SSL(IMAP_SERVEUR, timeout=DELAI_MAIL_S)
+    try:
+        imap.login(MAIL_ADRESSE, _mail_mdp())
+        imap.select("INBOX")
+    except Exception:
+        _deconnecter(imap)
+        raise
+    return imap
+
+
+def _deconnecter(imap):
+    try:
+        imap.logout()
+    except Exception:
+        pass
+
+
+def _entete(donnees):
+    """(expediteur lisible, objet) depuis un FETCH des en-tetes FROM/SUBJECT."""
+    entete = donnees[0][1].decode("utf-8", "replace") \
+        if donnees and donnees[0] and isinstance(donnees[0], tuple) else ""
+    exp, sujet = "", ""
+    for ligne in entete.splitlines():
+        bas = ligne.lower()
+        if bas.startswith("from:"):
+            exp = _decoder_entete(ligne[5:].strip())
+        elif bas.startswith("subject:"):
+            sujet = _decoder_entete(ligne[8:].strip())
+    nom, adresse = parseaddr(exp)
+    return (nom or adresse or exp), sujet
 
 
 def _mail_configure():
@@ -73,36 +119,35 @@ def _corps_texte(message):
     lent=True,
     phrase_attente="D'accord, je regarde tes mails.",
 )
-def lire_mails(nombre: int = 5) -> str:
-    """Liste les derniers mails recus (expediteur et objet) pour faire le tri."""
+def lire_mails(nombre: int = 5, memoriser: bool = True) -> str:
+    """Liste les derniers mails recus (expediteur et objet) pour faire le tri.
+
+    memoriser=False (usage interne : Signal Matin, journal du matin) : la liste
+    n'est pas retenue, pour ne pas changer en douce la cible d'un « mets le 3 a
+    la corbeille » sur une liste entendue plus tot."""
+    global _DERNIERS_MAILS
     if not _mail_configure():
         return "La messagerie n'est pas configuree."
     nombre = max(1, min(int(nombre), 10))
     try:
-        imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
-        imap.login(MAIL_ADRESSE, _mail_mdp())
-        imap.select("INBOX")
-        # On travaille en UID : stables meme apres une mise a la corbeille.
-        _, donnees = imap.uid("search", None, "ALL")
-        ids = donnees[0].split()
-        derniers = ids[-nombre:][::-1]     # les plus recents d'abord
-        _DERNIERS_MAILS.clear()
-        _DERNIERS_MAILS.extend(derniers)
-        lignes = []
-        for i, num in enumerate(derniers, 1):
-            # BODY.PEEK : lire sans marquer le mail comme lu.
-            _, d = imap.uid("fetch", num, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])")
-            entete = d[0][1].decode("utf-8", "replace") if d and d[0] else ""
-            exp, sujet = "", ""
-            for ligne in entete.splitlines():
-                bas = ligne.lower()
-                if bas.startswith("from:"):
-                    exp = _decoder_entete(ligne[5:].strip())
-                elif bas.startswith("subject:"):
-                    sujet = _decoder_entete(ligne[8:].strip())
-            nom, adresse = parseaddr(exp)
-            lignes.append(f"{i}. De {nom or adresse or exp} : « {sujet or 'sans objet'} »")
-        imap.logout()
+        imap = _connexion_imap()
+        try:
+            # On travaille en UID : stables meme apres une mise a la corbeille.
+            _, donnees = imap.uid("search", None, "ALL")
+            ids = donnees[0].split()
+            derniers = ids[-nombre:][::-1]     # les plus recents d'abord
+            memo, lignes = [], []
+            for i, num in enumerate(derniers, 1):
+                # BODY.PEEK : lire sans marquer le mail comme lu.
+                _, d = imap.uid("fetch", num, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])")
+                exp, sujet = _entete(d)
+                memo.append((num, exp, sujet))
+                lignes.append(f"{i}. De {exp} : « {sujet or 'sans objet'} »")
+        finally:
+            _deconnecter(imap)
+        if memoriser:
+            with _VERROU_MAILS:
+                _DERNIERS_MAILS = memo
         if not lignes:
             return "Ta boite de reception est vide."
         return "Tes derniers mails. " + " ".join(lignes)
@@ -130,24 +175,25 @@ def lire_mail(numero: int = 1) -> str:
     """Lit en detail un mail de la derniere liste, par son numero."""
     if not _mail_configure():
         return "La messagerie n'est pas configuree."
-    if not _DERNIERS_MAILS:
+    liste = _liste_memorisee()
+    if not liste:
         return "Demande-moi d'abord de lister tes mails."
     numero = int(numero)
-    if numero < 1 or numero > len(_DERNIERS_MAILS):
+    if numero < 1 or numero > len(liste):
         return f"Je n'ai pas de mail numero {numero}."
     try:
-        imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
-        imap.login(MAIL_ADRESSE, _mail_mdp())
-        imap.select("INBOX")
-        num = _DERNIERS_MAILS[numero - 1]
-        _, d = imap.uid("fetch", num, "(BODY.PEEK[])")
+        num = liste[numero - 1][0]
+        imap = _connexion_imap()
+        try:
+            _, d = imap.uid("fetch", num, "(BODY.PEEK[])")
+        finally:
+            _deconnecter(imap)
         brut = d[0][1] if d and d[0] else b""
         message = email.message_from_bytes(brut)
         exp = _decoder_entete(message.get("From", ""))
         sujet = _decoder_entete(message.get("Subject", ""))
         nom, adresse = parseaddr(exp)
         corps = _corps_texte(message).strip()
-        imap.logout()
         if len(corps) > 1200:
             corps = corps[:1200] + "..."
         return (f"Mail de {nom or adresse} ({adresse}), objet « {sujet} ». "
@@ -214,7 +260,7 @@ def envoyer_mail() -> str:
         msg["To"] = _BROUILLON["destinataire"]
         msg["Subject"] = _BROUILLON["sujet"]
         msg.set_content(_BROUILLON["corps"])
-        with smtplib.SMTP_SSL(SMTP_SERVEUR, SMTP_PORT) as smtp:
+        with smtplib.SMTP_SSL(SMTP_SERVEUR, SMTP_PORT, timeout=DELAI_MAIL_S) as smtp:
             smtp.login(MAIL_ADRESSE, _mail_mdp())
             smtp.send_message(msg)
         destinataire = _BROUILLON["destinataire"]
@@ -248,19 +294,30 @@ def mettre_a_la_corbeille(numero: int = 1) -> str:
     """Deplace un mail vers la corbeille Gmail (recuperable 30 jours)."""
     if not _mail_configure():
         return "La messagerie n'est pas configuree."
-    if not _DERNIERS_MAILS:
+    liste = _liste_memorisee()
+    if not liste:
         return "Demande-moi d'abord de lister tes mails."
     numero = int(numero)
-    if numero < 1 or numero > len(_DERNIERS_MAILS):
+    if numero < 1 or numero > len(liste):
         return f"Je n'ai pas de mail numero {numero}."
+    uid, _exp, sujet = liste[numero - 1]
     try:
-        imap = imaplib.IMAP4_SSL(IMAP_SERVEUR)
-        imap.login(MAIL_ADRESSE, _mail_mdp())
-        imap.select("INBOX")
-        uid = _DERNIERS_MAILS[numero - 1]
-        # Gmail : ajouter le libelle \Trash deplace le message vers la corbeille.
-        imap.uid("store", uid, "+X-GM-LABELS", "\\Trash")
-        imap.logout()
+        imap = _connexion_imap()
+        try:
+            # On verifie que ce mail est toujours la, et que c'est bien celui de
+            # la liste entendue, avant de le deplacer.
+            _, d = imap.uid("fetch", uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])")
+            if not (d and d[0] and isinstance(d[0], tuple)):
+                return "Ce mail n'est plus dans ta boite de reception, je n'y touche pas."
+            if _entete(d)[1] != sujet:
+                return ("Ce mail ne correspond plus a la liste que je t'ai lue, je n'y "
+                        "touche pas. Redemande-moi la liste.")
+            # Gmail : ajouter le libelle \Trash deplace le message vers la corbeille.
+            typ, _ = imap.uid("store", uid, "+X-GM-LABELS", "\\Trash")
+        finally:
+            _deconnecter(imap)
+        if typ != "OK":
+            return "Impossible de mettre a la corbeille : la messagerie a refuse."
         return "Mail mis a la corbeille, recuperable pendant trente jours."
     except Exception as e:
         return f"Impossible de mettre a la corbeille : {e}"
