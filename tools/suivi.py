@@ -12,6 +12,9 @@ j'ai en cours" et suggerer les priorites. Jamais d'ecriture cote Hermes.
 """
 import datetime as dt
 import logging
+import os
+import re
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -60,9 +63,54 @@ def _charger():
     return data if isinstance(data, list) else []
 
 
+def _charger_pour_ecriture():
+    """Lecture STRICTE avant ecriture : (contenus, None), ou (None, message).
+
+    Le fichier est edite a la main : s'il est illisible (YAML invalide, ou pas une
+    liste), le reecrire a partir d'une liste vide effacerait tout le suivi. Les
+    outils d'ecriture refusent donc d'ecrire et le disent. Absent ou vide -> [].
+    """
+    f = _fichier()
+    if not f.exists():
+        return [], None
+    try:
+        data = yaml.safe_load(f.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        LOG.warning("suivi: contenus.yaml illisible (%s)", type(e).__name__)
+        marque = getattr(e, "problem_mark", None)
+        ligne = f" (ligne {marque.line + 1})" if marque is not None else ""
+        return None, (f"Ton fichier {f.name} est illisible{ligne}, je n'y ecris rien : "
+                      "corrige-le d'abord.")
+    except OSError as e:
+        LOG.warning("suivi: contenus.yaml inaccessible (%s)", type(e).__name__)
+        return None, f"Je n'arrive pas a lire ton fichier {f.name}, je n'y ecris rien."
+    if data is None:
+        return [], None
+    if not isinstance(data, list):
+        return None, (f"Ton fichier {f.name} n'est pas une liste de contenus, je n'y "
+                      "ecris rien : corrige-le d'abord.")
+    return data, None
+
+
 def _sauver(contenus):
-    with _fichier().open("w", encoding="utf-8") as fh:
-        yaml.safe_dump(contenus, fh, allow_unicode=True, sort_keys=False)
+    """Ecriture atomique : fichier temporaire du meme dossier puis os.replace,
+    pour ne jamais laisser un contenus.yaml tronque."""
+    f = _fichier()
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=f.parent,
+                                         prefix=f".{f.name}.", suffix=".tmp",
+                                         delete=False) as fh:
+            tmp = fh.name
+            yaml.safe_dump(contenus, fh, allow_unicode=True, sort_keys=False)
+        os.replace(tmp, f)
+    except BaseException:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        raise
 
 
 # --------------------------------------------------------------------- helpers
@@ -77,17 +125,35 @@ def _normaliser_statut(texte):
     return None
 
 
+# Mots vides ignores dans le rapprochement. Pas de seuil de longueur : « Video A »
+# et « Video B », ou « Episode 1 » et « Episode 2 », doivent rester distincts.
+_MOTS_VIDES = {"le", "la", "les", "un", "une", "des", "de", "du", "et", "au", "aux",
+               "en", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses",
+               "sur", "pour", "avec", "dans", "par"}
+
+
+def _mots_titre(texte):
+    """Mots entiers significatifs d'un titre normalise (mots vides retires)."""
+    return {m for m in re.findall(r"\w+", texte) if m not in _MOTS_VIDES}
+
+
 def _trouver(contenus, titre):
-    """Index du contenu au titre le plus proche, ou None (exact puis inclusion)."""
+    """Index du contenu au titre le plus proche, ou None (exact puis inclusion).
+
+    L'inclusion porte sur des MOTS entiers, pas des caracteres : « IA » ne doit
+    pas correspondre a « Les medias sociaux » (« ia » est dans « medias »)."""
     cible = sans_accents((titre or "").lower().strip())
     if not cible:
         return None
     for i, c in enumerate(contenus):
         if sans_accents(str(c.get("titre", "")).lower()) == cible:
             return i
+    mots_cible = _mots_titre(cible)
     for i, c in enumerate(contenus):
-        t = sans_accents(str(c.get("titre", "")).lower())
-        if t and (cible in t or t in cible):
+        mots = _mots_titre(sans_accents(str(c.get("titre", "")).lower()))
+        # Ensembles non vides : un titre fait de mots vides serait sinon inclus
+        # dans n'importe quelle cible.
+        if mots and mots_cible and (mots_cible <= mots or mots <= mots_cible):
             return i
     return None
 
@@ -141,7 +207,7 @@ def _agenda_a_venir(jours=21):
         from tools import agenda
         if not agenda._chemin("agenda.token", "google_token.json").exists():
             return []
-        service = agenda._service()
+        service = agenda._service(interactif=False)
         debut = _dt.datetime.now().astimezone()
         fin = debut + _dt.timedelta(days=jours)
         evs = []
@@ -235,7 +301,9 @@ def nouvelle_idee_video(titre: str, plateforme: str = "", deadline: str = "") ->
     titre = (titre or "").strip()
     if not titre:
         return "Il me faut un titre pour l'idee."
-    contenus = _charger()
+    contenus, erreur = _charger_pour_ecriture()
+    if erreur:
+        return erreur
     if _trouver(contenus, titre) is not None:
         return f"« {titre} » est deja dans ton suivi."
     contenus.append({
@@ -276,7 +344,9 @@ def changer_statut_contenu(titre: str, statut: str) -> str:
     if statut_c is None:
         return (f"Je ne connais pas le statut « {statut} ». Les etapes sont : "
                 + ", ".join(STATUTS) + ".")
-    contenus = _charger()
+    contenus, erreur = _charger_pour_ecriture()
+    if erreur:
+        return erreur
     i = _trouver(contenus, titre)
     if i is None:
         return f"Je ne trouve pas « {titre} » dans ton suivi."

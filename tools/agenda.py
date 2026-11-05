@@ -17,6 +17,7 @@ Premier lancement (lister tes agendas pour choisir dans config.yaml) :
 """
 import datetime as dt
 import logging
+import re
 from pathlib import Path
 
 from core.config import reglage
@@ -40,7 +41,26 @@ def _chemin(cle, defaut):
     return p if p.is_absolute() else (_RACINE / p)
 
 
-def _service():
+class AgendaNonRelie(FileNotFoundError):
+    """Identifiants presents mais aucun jeton, et pas de consentement possible ici.
+    Le message est une phrase complete, prononcee telle quelle."""
+
+
+def _serveur_sans_peripheriques():
+    """Meme definition que jarvis14.main : poste principal sans ecran (H24)."""
+    return bool(reglage("poste_principal.actif", False)
+                and reglage("poste_principal.serveur_sans_peripheriques", False))
+
+
+def _service(interactif=None):
+    """Service Google Agenda.
+
+    Sans jeton valide ni rafraichissable, l'autorisation OAuth ouvre un navigateur
+    et attend la redirection. `interactif=None` ne l'autorise que sur un poste
+    avec ecran (reconnexion a la voix sur une installation de bureau) ; sur un
+    serveur sans peripheriques, personne ne peut consentir : on refuse aussitot
+    au lieu de bloquer le tour de conversation.
+    """
     global _SERVICE
     if _SERVICE is not None:
         return _SERVICE
@@ -67,8 +87,25 @@ def _service():
             if not fichier_ident.exists():
                 raise FileNotFoundError(
                     f"identifiants Google absents ({fichier_ident.name}). Voir docs/agenda.md.")
+            if interactif is None:
+                interactif = not _serveur_sans_peripheriques()
+            if not interactif:
+                if _serveur_sans_peripheriques():
+                    # Personne ne peut consentir sur un serveur sans ecran.
+                    raise AgendaNonRelie(
+                        "Agenda Google non relie sur le serveur : relie-le depuis un poste "
+                        "avec ecran (uv run python -m tools.agenda), puis copie "
+                        "google_token.json sur le serveur.")
+                raise AgendaNonRelie(
+                    "Agenda Google non relie sur ce poste : demande-moi ton agenda a la "
+                    "voix ou lance uv run python -m tools.agenda.")
+            from google_auth_oauthlib.flow import WSGITimeoutError
             flow = InstalledAppFlow.from_client_secrets_file(str(fichier_ident), SCOPES)
-            creds = flow.run_local_server(port=0)
+            try:
+                creds = flow.run_local_server(port=0, timeout_seconds=300)
+            except WSGITimeoutError:
+                raise RuntimeError(
+                    "autorisation Google non donnee dans les 5 minutes") from None
         fichier_token.write_text(creds.to_json(), encoding="utf-8")
     _SERVICE = build("calendar", "v3", credentials=creds, cache_discovery=False)
     return _SERVICE
@@ -94,6 +131,10 @@ def _local(d):
     return d.astimezone()
 
 
+# « apres-demain », « apres demain » (transcription sans tiret), « surlendemain ».
+_APRES_DEMAIN = re.compile(r"apres[\s-]*demain|surlendemain")
+
+
 def _periode(texte):
     """Renvoie (debut, fin, libelle) en datetimes locaux tz-aware."""
     t = sans_accents((texte or "").lower())
@@ -104,7 +145,7 @@ def _periode(texte):
     def bornes(debut, nb_jours, libelle):
         return debut, debut + dt.timedelta(days=nb_jours), libelle
 
-    if "apres-demain" in t:
+    if _APRES_DEMAIN.search(t):
         return bornes(minuit + 2 * jour, 1, "apres-demain")
     if "demain" in t:
         return bornes(minuit + jour, 1, "demain")
@@ -179,8 +220,22 @@ def _formuler(evenements, libelle):
 # ---------------------------------------------------------------------- outils
 
 def _msg_config(e):
+    if isinstance(e, AgendaNonRelie):
+        # Les identifiants sont la, c'est le jeton qui manque : pas de « verifie
+        # les identifiants », la marche a suivre est dans le message.
+        return str(e)
     return (f"Je n'accede pas a ton agenda Google ({e}). Verifie les identifiants "
             "(docs/agenda.md) puis relance.")
+
+
+def _raison(ex):
+    """Cause courte d'une erreur d'API, pour la voix et le LLM.
+
+    Jamais le texte brut : une HttpError cite l'URI de l'API, dont l'identifiant
+    du calendrier principal est l'adresse Gmail. Le detail reste dans le journal.
+    """
+    statut = getattr(getattr(ex, "resp", None), "status", None)
+    return f"erreur {statut}" if statut else type(ex).__name__
 
 
 @outil(
@@ -238,7 +293,7 @@ def _combiner(date_txt, heure_txt):
     except ValueError:
         t = sans_accents(date_txt.lower())
         base = maintenant.date()
-        if "apres-demain" in t:
+        if _APRES_DEMAIN.search(t):
             d = base + dt.timedelta(days=2)
         elif "demain" in t:
             d = base + dt.timedelta(days=1)
@@ -256,7 +311,11 @@ def _combiner(date_txt, heure_txt):
     h, m = 9, 0
     ht = sans_accents((heure_txt or "").lower().replace("h", ":"))
     ht = ht.strip(": ")
-    if ht:
+    if re.fullmatch(r"(?:a\s+)?midi", ht):
+        h, m = 12, 0
+    elif re.fullmatch(r"(?:a\s+)?minuit", ht):
+        h, m = 0, 0
+    elif ht:
         parts = ht.split(":")
         try:
             h = int(parts[0])
@@ -307,7 +366,7 @@ def create_event(titre: str, date: str, heure: str, duree_minutes: int = 60) -> 
         }).execute()
     except Exception as e:
         LOG.exception("create_event")
-        return f"Je n'ai pas pu creer l'evenement ({e})."
+        return f"Je n'ai pas pu creer l'evenement ({_raison(e)})."
     return f"C'est ajoute : {titre}, {_jour_fr(debut)} a {_heure_fr(debut)}."
 
 
@@ -382,7 +441,7 @@ def delete_event(recherche: str, periode: str = "cette semaine") -> str:
         service.events().delete(calendarId=cid, eventId=e["id"]).execute()
     except Exception as ex:
         LOG.exception("delete_event")
-        return f"Je n'ai pas pu supprimer ({ex})."
+        return f"Je n'ai pas pu supprimer ({_raison(ex)})."
     return f"C'est supprime : {e.get('summary','')}."
 
 
@@ -390,7 +449,7 @@ def delete_event(recherche: str, periode: str = "cette semaine") -> str:
 
 if __name__ == "__main__":
     try:
-        svc = _service()
+        svc = _service(interactif=True)
         items = svc.calendarList().list().execute().get("items", [])
     except Exception as ex:
         print("Erreur :", ex)

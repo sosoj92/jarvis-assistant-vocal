@@ -11,7 +11,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from core import hub_contenu, voix
+from core import confidentialite, hub_contenu, voix
 from core.config import reglage
 from core.registre import outil
 from tools.deleguer_a_hermes import deleguer_en_fond
@@ -102,6 +102,12 @@ def generer_script(sujet, style=""):
     return deleguer_en_fond(tache, intro="Ton brouillon est pret. ", nom_thread="generer-script")
 
 
+def _fin_stderr(texte) -> str:
+    """Fin de stderr pour logs/hub.log : secrets caviardes, dossier perso masque."""
+    t = confidentialite.caviarder(str(texte or "")[-300:])
+    return re.sub(r"(?i)(?:[a-z]:[\\/]|/[a-z]/)users[\\/][^\\/\s]+", "~", t).strip()
+
+
 @outil(
     nom="lancer_ingestion_youtube",
     mcp_expose=True,
@@ -142,16 +148,36 @@ def lancer_ingestion_youtube(url, cible, whisper=False, max=0):
     args += [url, cible]
 
     def worker():
+        clean = scripts / "sources" / "clean" / cible
+
+        def transcriptions():
+            return {f.name for f in clean.glob("*.md")} if clean.exists() else set()
+
         try:
-            subprocess.run(args, cwd=str(scripts), capture_output=True, text=True,
-                           timeout=int(reglage("hub.timeout_youtube", 3600)),
-                           env=dict(os.environ, WHISPER_DEVICE="cpu"))
-            clean = scripts / "sources" / "clean" / cible
-            n = len(list(clean.glob("*.md"))) if clean.exists() else 0
+            # On ne compte que les NOMS nouveaux : les .md des ingestions
+            # precedentes restent dans le dossier (et la voie sous-titres les
+            # reecrit), ils ne prouvent pas que cette ingestion a reussi.
+            avant = transcriptions()
+            proc = subprocess.run(args, cwd=str(scripts), capture_output=True, text=True,
+                                  timeout=int(reglage("hub.timeout_youtube", 3600)),
+                                  env=dict(os.environ, WHISPER_DEVICE="cpu"))
+            if proc.returncode != 0:
+                hub_contenu._LOGH.warning("ingestion YouTube %s : code %s | %s",
+                                          cible, proc.returncode, _fin_stderr(proc.stderr))
+            n = len(transcriptions() - avant)
             if n:
                 voix.parler(f"Ingestion YouTube terminee : {n} transcription pour {cible}."
                             if n == 1 else
                             f"Ingestion YouTube terminee : {n} transcriptions pour {cible}.")
+            elif proc.returncode != 0:
+                # La voie whisper sort aussi en erreur quand il n'y a simplement
+                # aucune nouvelle video : pas d'echec categorique.
+                voix.parler(f"L'ingestion YouTube de {cible} n'a ajoute aucune nouvelle "
+                            "transcription (echec ou rien de nouveau).")
+            elif avant:
+                # Chaine deja ingeree : code 0 sans nouveau fichier = rien de neuf.
+                voix.parler(f"L'ingestion YouTube de {cible} n'a trouve aucune nouvelle "
+                            "video depuis la derniere fois : aucune transcription a ajouter.")
             else:
                 voix.parler(f"L'ingestion YouTube de {cible} n'a produit aucune transcription "
                             "(chaine privee, pas de sous-titres, ou lien invalide).")

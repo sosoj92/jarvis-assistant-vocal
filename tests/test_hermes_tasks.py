@@ -39,6 +39,18 @@ class HermesTaskRegistryTests(unittest.TestCase):
         self.assertIsNotNone(hermes.extraire_tache_contenu(
             "Apprends à connaître mes créateurs et mes vidéos pour reprendre mon ton dans mes scripts"))
 
+    def test_demandes_de_production_vont_toujours_a_hermes(self):
+        # Non-regression : les vraies demandes de creation restent routees.
+        for phrase in (
+                "Trouve-moi des idées de vidéos sur la domotique",
+                "Analyse mes inspirations Instagram",
+                "Rédige trois accroches pour mon prochain post",
+                "Propose-moi des angles pour un reel sur le café",
+                "Écris la voix-off de ma vidéo",
+                "Génère des légendes pour mon carrousel"):
+            with self.subTest(phrase=phrase):
+                self.assertIsNotNone(hermes.extraire_tache_contenu(phrase))
+
     def test_mentions_de_contenu_non_creatives_restent_chez_jarvis(self):
         self.assertIsNone(hermes.extraire_tache_contenu(
             "J'ai tourné ma vidéo hier"))
@@ -48,6 +60,24 @@ class HermesTaskRegistryTests(unittest.TestCase):
             "Allume la lumière pour créer une vidéo"))
         self.assertIsNone(hermes.extraire_tache_contenu(
             "Où en est mon script ?"))
+
+    def test_consultations_restent_au_llm(self):
+        # Ces demandes ont un outil instantane (chercher_inspiration,
+        # instagram_resume, ou_j_en_suis...) : pas de delegation Hermes.
+        for phrase in (
+                "Cherche mes inspirations sur les hooks",
+                "Trouve mes inspirations sur le montage",
+                "Donne-moi mes stats Instagram",
+                "Jarvis, donne-moi mes stats Instagram",
+                "Fais le point sur mes vidéos",
+                "Je voudrais savoir combien de vues a ma dernière vidéo",
+                "Trouve-moi une vidéo de chat sur YouTube",
+                "Donne-moi une idée de repas",
+                "Je veux regarder une vidéo",
+                "Je veux ajouter une idée de vidéo",
+                "Tu connais ce créateur ?"):
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(hermes.extraire_tache_contenu(phrase))
 
     def test_transport_auto_se_replie_sur_le_cli(self):
         attendu = ("Résultat Hermes", 10, 0.01, "modele-test")

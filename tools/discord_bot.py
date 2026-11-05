@@ -22,7 +22,11 @@ from core.registre import outil
 LOG = obtenir()
 
 # Reference vers le bot lance en tache de fond (boucle asyncio dans un thread).
-_BOT = {"loop": None, "client": None, "lance": False}
+# `erreur` : type de la derniere erreur de connexion. `fatal` : jeton refuse ou
+# intent manquant -> pas de relance automatique (inutile de marteler l'API).
+_BOT = {"loop": None, "client": None, "lance": False, "erreur": "", "fatal": False}
+_VERROU = threading.Lock()
+_ERREURS_FATALES = ("LoginFailure", "PrivilegedIntentsRequired")
 
 _CAP_SALON = 150     # messages max lus par salon
 _CAP_TOTAL = 600     # messages max au total (garde-fou anti-lenteur)
@@ -34,36 +38,59 @@ def _configure():
 
 
 def demarrer_discord():
-    """Connecte le bot en tache de fond (si configure)."""
-    if not _configure() or _BOT["lance"]:
-        return
-    _BOT["lance"] = True
+    """Connecte le bot en tache de fond (si configure).
+
+    Rappelable : apres un echec transitoire (reseau absent au demarrage, 5xx...)
+    le bot est relance ; jamais apres un jeton refuse ou un intent manquant."""
+    with _VERROU:
+        if not _configure() or _BOT["lance"] or _BOT["fatal"]:
+            return
+        _BOT["lance"] = True
     threading.Thread(target=_lancer, daemon=True).start()
     print("Bot Discord : connexion en cours...")
 
 
 def _lancer():
-    import discord
-
-    token = reglage("discord.token", "")
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = discord.Client(intents=intents)
-    _BOT["client"] = client
-
-    @client.event
-    async def on_ready():
-        LOG.info("discord: connecte comme %s", client.user)
-        print(f"Bot Discord connecte ({client.user}).")
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    _BOT["loop"] = loop
+    loop = None
     try:
-        loop.run_until_complete(client.start(token))
+        import discord
+
+        token = reglage("discord.token", "")
+        intents = discord.Intents.default()
+        intents.message_content = True
+        client = discord.Client(intents=intents)
+        _BOT["client"] = client
+
+        @client.event
+        async def on_ready():
+            LOG.info("discord: connecte comme %s", client.user)
+            print(f"Bot Discord connecte ({client.user}).")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        _BOT["loop"] = loop
+        try:
+            loop.run_until_complete(client.start(token))
+        finally:
+            try:                  # session HTTP d'un login avorte
+                if not client.is_closed():
+                    loop.run_until_complete(client.close())
+            except Exception:
+                pass
     except Exception as e:
+        _BOT["erreur"] = type(e).__name__
+        _BOT["fatal"] = type(e).__name__ in _ERREURS_FATALES
         LOG.exception("discord: bot arrete")
         print(f"Bot Discord arrete : {e}")
+    finally:
+        # Sans cette remise a zero, un seul echec desactivait le bot jusqu'au
+        # redemarrage de Jarvis (« reessaie dans un instant » pour toujours).
+        _BOT.update(lance=False, client=None, loop=None)
+        if loop is not None:
+            try:
+                loop.close()
+            except Exception:
+                pass
 
 
 async def _collecter(client, apres):
@@ -98,6 +125,10 @@ def _lancer_scan(coro_factory):
                       "user_id dans config.yaml.")
     client, loop = _BOT["client"], _BOT["loop"]
     if not (loop and client and client.is_ready()):
+        if _BOT["fatal"]:
+            return None, ("Le bot Discord est deconnecte : jeton refuse ou intent "
+                          "manquant. Verifie sa configuration.")
+        demarrer_discord()        # relance si une connexion precedente a echoue
         return None, "Le bot Discord n'est pas encore connecte, reessaie dans un instant."
     futur = asyncio.run_coroutine_threadsafe(coro_factory(client), loop)
     try:
@@ -155,7 +186,7 @@ def digest_journal(heures: int = 24, attente_s: float = 18.0):
     deadline = time.monotonic() + max(1.0, attente_s)
     while time.monotonic() < deadline:
         client, loop = _BOT["client"], _BOT["loop"]
-        if loop and client and client.is_ready():
+        if (loop and client and client.is_ready()) or _BOT["fatal"]:
             break
         time.sleep(.25)
     apres = _debut_periode(heures)

@@ -52,29 +52,34 @@ _FICHIER_TACHES = Path(__file__).resolve().parent.parent / "logs" / "hermes" / "
 _MARQUEUR_VALIDATION = "[A VALIDER]"
 
 # Routage deterministe des vrais travaux de creation. On exige a la fois un
-# objet de contenu et une intention de le fabriquer/ameliorer : une simple
-# conversation qui contient « script » ou « video » reste ainsi chez Jarvis.
+# objet CREATIF (script, hook, accroche, idee...) et un verbe de PRODUCTION.
+# Les plateformes et medias seuls (video, instagram, post...) et les verbes
+# generiques (donne, fais, cherche, veux...) ne suffisent pas : une simple
+# consultation (« donne-moi mes stats Instagram », « fais le point sur mes
+# videos », « cherche mes inspirations sur les hooks ») reste au LLM, qui
+# choisit l'outil instantane adapte (instagram_resume, ou_j_en_suis,
+# chercher_inspiration...).
 _OBJETS_CONTENU = {
     "script", "scripts", "hook", "hooks", "accroche", "accroches",
-    "storyboard", "storyboards", "contenu", "contenus", "video", "videos",
-    "reel", "reels", "short", "shorts", "tiktok", "youtube", "post", "posts",
-    "instagram", "idee", "idees", "angle", "angles", "publication",
-    "publications", "carrousel", "carrousels", "legende",
-    "legendes", "caption", "captions", "voix-off", "createur", "createurs",
+    "storyboard", "storyboards", "idee", "idees", "angle", "angles",
+    "carrousel", "carrousels", "legende", "legendes", "caption", "captions",
     "inspiration", "inspirations",
 }
 _ACTIONS_CONTENU = {
     "ecris", "ecrire", "redige", "rediger", "cree", "creer", "prepare",
-    "preparer", "propose", "proposer", "trouve", "trouver", "donne", "donner",
+    "preparer", "propose", "proposer", "trouve", "trouver",
     "genere", "generer", "imagine", "imaginer", "analyse", "analyser", "etudie",
     "etudier", "corrige", "corriger", "reecris", "reecrire", "ameliore",
     "ameliorer", "optimise", "optimiser", "adapte", "adapter", "structure",
-    "structurer", "developpe", "developper", "cherche", "chercher", "compare",
-    "comparer", "travaille", "travailler", "brainstorme", "brainstormer", "fais",
-    "faire", "copie", "copier", "inspire", "inspirer", "reprends", "reprendre",
-    "utilise", "utiliser", "imite", "imiter", "apprends", "apprendre", "connais",
-    "connaitre", "veux", "voudrais", "aimerais",
+    "structurer", "developpe", "developper", "compare",
+    "comparer", "travaille", "travailler", "brainstorme", "brainstormer",
+    "inspire", "inspirer", "reprends", "reprendre",
+    "imite", "imiter", "apprends", "apprendre",
 }
+# « Trouve mes inspirations » = consultation du Vault (chercher_inspiration),
+# pas une production : laissee au LLM.
+_INSPIRATIONS = {"inspiration", "inspirations"}
+_ACTIONS_CONSULTATION = {"trouve", "trouver", "cherche", "chercher"}
 _ACTIONS_PHYSIQUES = {
     "allume", "allumer", "eteins", "eteindre", "ouvre", "ouvrir", "ferme",
     "fermer", "augmente", "baisse",
@@ -88,17 +93,22 @@ _OBJETS_PHYSIQUES = {
 def extraire_tache_contenu(phrase: str):
     """Transforme une demande creative explicite en tache Hermes, sinon None.
 
-    Les mises a jour de suivi (« j'ai tourne ma video »), les questions meta et
-    les actions physiques faites *pour* filmer ne sont volontairement pas routees.
+    Les mises a jour de suivi (« j'ai tourne ma video »), les consultations
+    (« donne-moi mes stats Instagram »), les questions meta et les actions
+    physiques faites *pour* filmer ne sont volontairement pas routees.
     """
     original = (phrase or "").strip()
     normalise = " ".join(re.sub(
         r"[^a-z0-9]+", " ", sans_accents(original.lower())
     ).split())
     mots = set(normalise.split())
-    if not original or not (mots & _OBJETS_CONTENU):
+    objets = mots & _OBJETS_CONTENU
+    if " voix off " in f" {normalise} ":       # « voix-off » apres normalisation
+        objets.add("voix off")
+    actions = mots & _ACTIONS_CONTENU
+    if not original or not objets or not actions:
         return None
-    if not (mots & _ACTIONS_CONTENU):
+    if objets <= _INSPIRATIONS and actions <= _ACTIONS_CONSULTATION:
         return None
     if (mots & _ACTIONS_PHYSIQUES) and (mots & _OBJETS_PHYSIQUES):
         return None

@@ -10,6 +10,7 @@ Les deadlines du jour et de la semaine sont aussi injectees dans le brief du mat
 Donnees perso de partenariats -> mcp_expose=False (jamais expose via MCP).
 """
 import logging
+import re
 import time
 
 from core.config import reglage
@@ -24,13 +25,22 @@ _CACHE_EV = None          # liste de (debut_dt, type, titre)
 _TTL = 900                # 15 min
 
 # Mots indiquant une absence/dispo (a distinguer des deadlines de rendu).
-_ABSENCE = ["vacance", "conge", "indispo", "dispo", "off", "absent", "repos",
-            "ferme", "holiday", "vacation", "prise de conge"]
+# Mots ENTIERS seulement : « offre », « coffret », « disposition », « fermer »
+# ou « repost » sont des deadlines, pas des conges.
+_ABSENCE_RE = re.compile(
+    r"\b(vacances?|conges?|prise de conge|indispo(?:nible|nibilites?)?s?"
+    r"|dispo(?:nible|nibilites?)?s?|absente?s?|repos|fermee?s?"
+    r"|holidays?|vacations?|day off|off)\b")
+
+
+class FluxIndisponible(RuntimeError):
+    """Flux Loopstr illisible. Le message est un libelle fixe : jamais l'URL
+    (une URL iCal privee est une URL-capacite, chemin et jeton compris)."""
 
 
 def _classer(titre, categories):
     s = sans_accents(f"{titre} {categories}".lower())
-    return "absence" if any(k in s for k in _ABSENCE) else "deadline"
+    return "absence" if _ABSENCE_RE.search(s) else "deadline"
 
 
 def _en_local(valeur):
@@ -60,11 +70,16 @@ def _charger(force=False):
     try:
         import requests
         from icalendar import Calendar
-        data = requests.get(url, timeout=12).content
-        cal = Calendar.from_ical(data)
+        reponse = requests.get(url, timeout=12)
+        reponse.raise_for_status()
+        cal = Calendar.from_ical(reponse.content)
     except Exception as e:
-        LOG.exception("loopstr: chargement")
-        raise RuntimeError(str(e))
+        # Le TYPE seul, sans trace : le message requests contient l'URL a jeton.
+        LOG.warning("loopstr: chargement impossible (%s)", type(e).__name__)
+        statut = getattr(getattr(e, "response", None), "status_code", None)
+        raise FluxIndisponible(
+            f"flux refuse, erreur {statut}" if statut else "flux injoignable"
+        ) from None
 
     evenements = []
     for comp in cal.walk("VEVENT"):
@@ -118,8 +133,12 @@ def get_deadlines(periode: str = "cette semaine") -> str:
         return "Ton flux Loopstr n'est pas configure (loopstr.url dans config.yaml)."
     try:
         deadlines, absences, libelle = _echeances(periode)
-    except Exception as e:
+    except FluxIndisponible as e:
         return f"Je n'ai pas pu lire ton flux Loopstr ({e})."
+    except Exception as e:
+        # Jamais le message brut : il pourrait contenir l'URL privee du flux.
+        LOG.warning("loopstr: lecture impossible (%s)", type(e).__name__)
+        return "Je n'ai pas pu lire ton flux Loopstr pour le moment."
     if deadlines is None:
         return "Ton flux Loopstr n'est pas configure."
     if not deadlines:
