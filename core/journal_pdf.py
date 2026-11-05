@@ -21,6 +21,8 @@ def _legacy_edition(
     maintenant: dt.datetime,
     sections: list[tuple[str, str]],
 ) -> MorningEdition:
+    # Les textes de l'ancien pipeline sont libres : chaque champ est coupe a la
+    # limite de son modele, sinon un agenda charge ferait echouer toute l'edition.
     mapping = {name.upper(): str(content or "") for name, content in sections}
     news = []
     for line in mapping.get("ACTUALITES", "").splitlines():
@@ -30,11 +32,13 @@ def _legacy_edition(
         source, _, title = text.partition(":")
         if not title:
             title, source = source, "Source locale"
+        if not title.strip():
+            continue
         news.append(NewsItem(
-            title=title.strip(),
+            title=title.strip()[:240],
             category="Actualites",
             summary="Titre collecte par l'ancien pipeline ; resume non disponible.",
-            source=SourceRef(name=source.strip() or "Source locale"),
+            source=SourceRef(name=source.strip()[:120] or "Source locale"),
         ))
     first = dt.date(maintenant.year, 1, 1)
     edition = MorningEdition(
@@ -43,13 +47,13 @@ def _legacy_edition(
             date=maintenant.date(),
             number=(maintenant.date() - first).days + 1,
         ),
-        weather=WeatherBlock(summary=mapping.get("METEO", ""), condition="Voir le resume"),
-        agenda=([AgendaItem(title="Agenda du jour", note=mapping["AGENDA DU JOUR"])]
+        weather=WeatherBlock(summary=mapping.get("METEO", "")[:420], condition="Voir le resume"),
+        agenda=([AgendaItem(title="Agenda du jour", note=mapping["AGENDA DU JOUR"][:300])]
                 if mapping.get("AGENDA DU JOUR") else []),
-        news=NewsBundle(lead=news[0] if news else None, world=news[1:]),
+        news=NewsBundle(lead=news[0] if news else None, world=news[1:13]),
         personal=PersonalBlock(
             greeting="Bonjour. Voici l'essentiel de la journee.",
-            note=mapping.get("ECHEANCES", ""),
+            note=mapping.get("ECHEANCES", "")[:600],
         ),
     )
     return normaliser_edition(edition, mode="auto")

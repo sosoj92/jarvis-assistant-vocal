@@ -11,7 +11,7 @@ from unittest.mock import patch
 from core.signal_matin import sources, tech_brief
 from core.signal_matin.mock_data import construire_demo
 from core.signal_matin.models import (
-    BriefFact, BriefSource, NewsItem, SourceRef, TechBrief,
+    BriefFact, BriefSource, LearningPage, NewsItem, SourceRef, TechBrief,
 )
 from core.signal_matin.normalizer import ecrire_edition, normaliser_edition
 from core.signal_matin.renderer import render_html
@@ -320,6 +320,110 @@ class RSSTest(unittest.TestCase):
                 state=sources.DataState.LIVE, detail="test")
         self.assertEqual([i.title for i in items], ["Normal", "Geant"])
         self.assertEqual(len(items[1].summary), 1600)
+
+    def _collecter(self, flux: bytes, url: str = "https://exemple.org/flux.xml?jeton=FAUX"):
+        with patch.object(sources.urllib.request, "urlopen", return_value=_Reponse(flux)):
+            items, _ = sources._collect_rss(
+                [{"nom": "Test", "url": url}], NOW,
+                limit=10, max_age_hours=72, status_name="Test",
+                state=sources.DataState.LIVE, detail="test")
+        return items
+
+    def test_items_sans_lien_gardes_sans_reprendre_l_url_du_flux(self):
+        flux = b"""<?xml version="1.0"?><rss><channel>
+        <item><title>Premier sujet</title><description>Un.</description></item>
+        <item><title>Deuxieme sujet</title><description>Deux.</description></item>
+        <item><title>Troisieme sujet</title><description>Trois.</description></item>
+        </channel></rss>"""
+        items = self._collecter(flux)
+        self.assertEqual([i.title for i in items], ["Premier sujet", "Deuxieme sujet", "Troisieme sujet"])
+        # L'URL du flux (et son jeton) ne devient jamais l'URL d'un article.
+        self.assertEqual([i.source.url for i in items], [None, None, None])
+
+    def test_guid_permalien_sert_de_lien_de_repli(self):
+        flux = b"""<?xml version="1.0"?><rss><channel>
+        <item><title>Permalien</title><guid>https://exemple.org/article-1</guid></item>
+        <item><title>Identifiant opaque</title><guid isPermaLink="false">https://exemple.org/id-2</guid></item>
+        <item><title>Etiquette</title><guid>tag:exemple.org,2026:3</guid></item>
+        </channel></rss>"""
+        urls = {i.title: (str(i.source.url) if i.source.url else None) for i in self._collecter(flux)}
+        self.assertEqual(urls, {"Permalien": "https://exemple.org/article-1",
+                                "Identifiant opaque": None, "Etiquette": None})
+
+    def test_dates_sans_fuseau_lues_en_utc(self):
+        def date(valeur: str):
+            return sources._published_at(sources.ET.fromstring(f"<item><pubDate>{valeur}</pubDate></item>"))
+
+        # « -0000 » vaut UTC (RFC 2822) ; une date ISO sans decalage aussi.
+        self.assertEqual(date("Thu, 29 Oct 2026 06:00:00 -0000"), date("Thu, 29 Oct 2026 06:00:00 +0000"))
+        self.assertEqual(date("2026-10-29T06:00:00"), date("2026-10-29T06:00:00Z"))
+        self.assertEqual(date("Thu, 29 Oct 2026 06:00:00 -0000"),
+                         dt.datetime(2026, 10, 29, 6, 0, tzinfo=dt.timezone.utc))
+
+
+class _Reponse:
+    def __init__(self, contenu: bytes):
+        self.contenu = contenu
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self.contenu
+
+
+class EditionLiveTest(unittest.TestCase):
+    def test_articles_sans_url_ne_sont_pas_remplaces_l_un_par_l_autre(self):
+        def article(titre: str, categorie: str, url: str | None = None) -> NewsItem:
+            return NewsItem(title=titre, summary="Resume.", category=categorie,
+                            source=SourceRef(name="Test", url=url, published_at=NOW))
+
+        actualites = [
+            article("A la une", "Monde", "https://exemple.org/une"),
+            article("Sujet sans lien A", "Monde"),
+            article("Sujet sans lien B", "Monde"),
+            article("Sujet avec lien", "France", "https://exemple.org/c"),
+        ]
+        statut = sources.DataSourceStatus(name="Test", state=sources.DataState.DISABLED)
+        reglages = {"signal_matin.actualites_detaillees": True, "signal_matin.brief_tech": False}
+        with patch.object(sources, "reglage", _reglages(reglages)), \
+                patch.object(sources.RssSource, "collect", return_value=(actualites, statut.model_copy(
+                    update={"state": sources.DataState.LIVE}))), \
+                patch.object(sources.TechRssSource, "collect", return_value=([], statut)), \
+                patch.object(sources, "enrichir_actualites", side_effect=lambda cibles, **_: list(cibles)), \
+                patch.object(sources, "_weather", return_value=(None, statut)), \
+                patch.object(sources, "_agenda", return_value=([], statut)), \
+                patch.object(sources, "_content_tasks", return_value=([], statut)), \
+                patch.object(sources, "_loopstr_tasks", return_value=([], statut)), \
+                patch.object(sources, "_hermes_digest", return_value=([], statut)), \
+                patch.object(sources, "_mail_digest", return_value=([], statut)), \
+                patch.object(sources, "_instagram_digest", return_value=([], statut)), \
+                patch.object(sources, "_discord_digest", return_value=([], statut)), \
+                patch.object(sources, "construire_apprentissage_du_jour", return_value=LearningPage()):
+            edition = sources.construire_edition_live(NOW, mode="standard")
+        titres = [item.title for item in edition.news.all_secondary()]
+        self.assertEqual(sorted(titres), ["Sujet avec lien", "Sujet sans lien A", "Sujet sans lien B"])
+
+
+class MailTest(unittest.TestCase):
+    def test_le_journal_lit_les_mails_sans_remplacer_la_liste_entendue(self):
+        import sys
+        import tools
+        from unittest.mock import Mock
+
+        faux = Mock()
+        faux._mail_configure.return_value = True
+        faux.lire_mails.return_value = "1. Expediteur - Objet"
+        with patch.dict(sys.modules, {"tools.mail": faux}), \
+                patch.object(tools, "mail", faux, create=True), \
+                patch.object(sources, "reglage", _reglages({"signal_matin.mails": True})):
+            items, statut = sources._mail_digest()
+        faux.lire_mails.assert_called_once_with(3, memoriser=False)
+        self.assertEqual(statut.state, sources.DataState.LIVE)
+        self.assertEqual(len(items), 1)
 
 
 class RenduTest(unittest.TestCase):

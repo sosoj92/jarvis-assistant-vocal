@@ -62,7 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--input", help="JSON MorningEdition deja normalise")
         command.add_argument("--date", type=_date, default=dt.date.today())
         command.add_argument("--mode", choices=("auto", "compact", "standard", "extended"), default="auto")
-        command.add_argument("--output", help="chemin PDF de sortie")
+        command.add_argument(
+            "--output",
+            help="chemin du PDF uniquement ; le HTML et le JSON gardent leur emplacement habituel",
+        )
 
     generate = sub.add_parser("generate", help="genere JSON, HTML et PDF")
     common(generate)

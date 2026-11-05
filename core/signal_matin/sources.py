@@ -98,6 +98,18 @@ def _child_link(element: ET.Element) -> str | None:
     return None
 
 
+def _guid_link(element: ET.Element) -> str | None:
+    """Repli RSS 2.0 : un <guid> permalien sert de lien quand <link> manque."""
+    for child in element:
+        if _tag(child) != "guid":
+            continue
+        value = (child.text or "").strip()
+        permalink = str(child.attrib.get("isPermaLink", "true")).strip().lower() != "false"
+        if permalink and value.startswith(("http://", "https://")):
+            return value
+    return None
+
+
 def _plain_text(value: str) -> str:
     value = re.sub(r"<[^>]+>", " ", html.unescape(value or ""))
     return " ".join(value.split())
@@ -114,7 +126,11 @@ def _published_at(element: ET.Element) -> dt.datetime | None:
             parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
-    return parsed.astimezone() if parsed.tzinfo else parsed.astimezone()
+    # Une date sans fuseau (« -0000 » en RFC 2822, ISO sans decalage) est en UTC,
+    # pas dans le fuseau local de la machine qui lit le flux.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone()
 
 
 def _collect_rss(
@@ -158,8 +174,10 @@ def _collect_rss(
                 root = ET.fromstring(repaired)
             for item in (node for node in root.iter() if _tag(node) in {"item", "entry"}):
                 title = _child_text(item, {"title"})
-                link = _child_link(item) or url
-                dedupe_key = link or title.casefold()
+                # Jamais l'URL du flux comme URL d'article : elle peut porter un
+                # jeton, et tous les items sans lien partageraient la meme cle.
+                link = _child_link(item) or _guid_link(item)
+                dedupe_key = link or f"{url}#{title.casefold()}"
                 published = _published_at(item)
                 if not title or dedupe_key in seen:
                     continue
@@ -174,7 +192,7 @@ def _collect_rss(
                         title=_plain_text(title)[:240],
                         category=category,
                         summary=_plain_text(summary)[:1600] or "Resume non fourni par le flux.",
-                        source=SourceRef(name=name, url=link, published_at=published),
+                        source=SourceRef(name=name, url=link or None, published_at=published),
                     ))
                 except ValueError as error:
                     LOG.info("Signal Matin : article ignore (%s): %s", name, error)
@@ -317,7 +335,8 @@ def _agenda(now: dt.datetime) -> tuple[list[AgendaItem], DataSourceStatus]:
                 detail="Connexion Google Agenda a retablir sur ce PC.",
             )
         from tools import agenda as agenda_tool
-        service = agenda_tool._service()
+        # Appel de fond : jamais de flux OAuth interactif, meme sur un poste de bureau.
+        service = agenda_tool._service(interactif=False)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + dt.timedelta(days=1)
         events: list[AgendaItem] = []
@@ -436,7 +455,7 @@ def _loopstr_tasks() -> tuple[list[TaskItem], DataSourceStatus]:
             item_count=len(tasks[:8]),
         )
     except Exception as error:
-        LOG.info("Signal Matin : Loopstr indisponible: %s", error)
+        LOG.info("Signal Matin : Loopstr indisponible: %s", type(error).__name__)
         return [], DataSourceStatus(
             name="Loopstr", state=DataState.UNAVAILABLE,
             detail="Le flux iCal n'a pas pu etre lu.",
@@ -579,7 +598,7 @@ def _mail_digest() -> tuple[list[DigestItem], DataSourceStatus]:
                 name="E-mails", state=DataState.UNAVAILABLE,
                 detail="Messagerie non configuree.",
             )
-        summary = str(mail.lire_mails(3) or "").strip()
+        summary = str(mail.lire_mails(3, memoriser=False) or "").strip()
         if summary.lower().startswith("impossible"):
             raise RuntimeError("mail read failed")
         items = [DigestItem(title="Boite de reception", summary=summary)] if summary else []
@@ -704,10 +723,13 @@ def construire_edition_live(
         enriched = enrichir_actualites(
             targets, limite=len(targets), allow_public_proxy=proxy,
         )
-        by_url = {str(item.source.url or ""): item for item in enriched}
+        # Un article sans URL n'est jamais enrichi : il ne doit pas partager la
+        # cle vide avec un autre, sinon il serait remplace (et imprime en double).
+        by_url = {str(item.source.url): item for item in enriched if item.source.url}
 
         def replace(item: NewsItem) -> NewsItem:
-            return by_url.get(str(item.source.url or ""), item)
+            key = str(item.source.url or "")
+            return by_url.get(key, item) if key else item
 
         bundle = bundle.model_copy(update={
             "lead": replace(bundle.lead) if bundle.lead else None,

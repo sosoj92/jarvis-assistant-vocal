@@ -6,7 +6,11 @@ param(
     [string]$NomTache = "Jarvis - Signal Matin",
     [string]$Imprimante = "",
     [switch]$Imprimer,
-    [switch]$RectoVerso
+    [switch]$RectoVerso,
+    # Duree maximale de la tache avant arret par Windows. 15 min par defaut ;
+    # le brief Tech & IA (redaction puis relecture) peut demander davantage.
+    [ValidateRange(5, 240)]
+    [int]$DureeMaxMinutes = 15
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +27,16 @@ if ($Mode -eq "premier_demarrage") {
     if ($Imprimante) {
         Write-Output "  imprimante: `"$Imprimante`""
     }
-    Write-Output "Jarvis imprimera en arriere-plan avec son premier brief du jour, une seule fois."
+    Write-Output "Jarvis imprimera en arriere-plan avec son premier brief du jour (une seule tentative par jour pour ce mode)."
+    # Ce mode ne retire pas une tache horaire deja installee : on la signale
+    # sans la modifier, sinon le journal serait imprime deux fois chaque matin.
+    $tacheExistante = Get-ScheduledTask -TaskName $NomTache -ErrorAction SilentlyContinue
+    $argumentsTache = @($tacheExistante | ForEach-Object { $_.Actions } | ForEach-Object { $_.Arguments }) -join " "
+    if ($tacheExistante -and "$($tacheExistante.State)" -ne "Disabled" -and $argumentsTache -match '-Imprimer') {
+        Write-Warning "La tache planifiee '$NomTache' imprime deja Signal Matin chaque matin : avec premier_demarrage, le journal serait imprime deux fois."
+        Write-Warning "Pour la desactiver : Disable-ScheduledTask -TaskName `"$NomTache`""
+        Write-Warning "Pour la supprimer : Unregister-ScheduledTask -TaskName `"$NomTache`" -Confirm:`$false"
+    }
     exit 0
 }
 
@@ -52,7 +65,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -DontStopIfGoingOnBatteries `
     -WakeToRun `
     -MultipleInstances IgnoreNew `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+    -ExecutionTimeLimit (New-TimeSpan -Minutes $DureeMaxMinutes)
 $principal = New-ScheduledTaskPrincipal `
     -UserId "$env:USERDOMAIN\$env:USERNAME" `
     -LogonType Interactive `

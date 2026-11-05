@@ -2,18 +2,13 @@
 
 Le contenu reste sur le PC. Les connecteurs existants de Jarvis sont reutilises
 quand ils sont deja configures ; une source indisponible ne bloque pas le reste
-du journal. L'impression cible la file Windows configuree, sans la rendre
-obligatoirement imprimante par defaut.
+du journal. Ce module ne fait que collecter et mettre en forme : l'impression
+passe uniquement par ``core.signal_matin`` (``print --confirm``).
 """
 from __future__ import annotations
 
 import datetime as dt
-import json
 import logging
-import os
-import shutil
-import subprocess
-import tempfile
 import textwrap
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -111,7 +106,7 @@ def collecter_sections() -> list[tuple[str, str]]:
     try:
         from tools.mail import _mail_configure, lire_mails
         if _mail_configure() and bool(reglage("journal_matin.mails", True)):
-            sections.append(("MAILS A VOIR", _appel(lambda: lire_mails(5))))
+            sections.append(("MAILS A VOIR", _appel(lambda: lire_mails(5, memoriser=False))))
     except Exception:
         pass
 
@@ -183,137 +178,3 @@ def ecrire_journal(texte: str, maintenant: dt.datetime | None = None) -> Path:
     chemin = dossier / f"journal-{maintenant:%Y%m%d}.txt"
     chemin.write_text(texte, encoding="utf-8-sig")
     return chemin
-
-
-def _infos_imprimantes() -> list[dict[str, str]]:
-    """Interroge le spooler Windows sans imprimer ni modifier sa configuration."""
-    if os.name != "nt":
-        return []
-    commande = (
-        "Get-Printer | Select-Object Name,DriverName,PortName "
-        "| ConvertTo-Json -Compress"
-    )
-    try:
-        resultat = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", commande],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
-            check=False,
-        )
-        if resultat.returncode != 0 or not resultat.stdout.strip():
-            return []
-        donnees = json.loads(resultat.stdout)
-        if isinstance(donnees, dict):
-            donnees = [donnees]
-        return [
-            {str(cle): str(valeur or "") for cle, valeur in element.items()}
-            for element in donnees if isinstance(element, dict)
-        ]
-    except (OSError, ValueError, subprocess.SubprocessError) as erreur:
-        LOG.warning("Impossible de lire les imprimantes Windows: %s", erreur)
-        return []
-
-
-def _choisir_imprimante() -> dict[str, str]:
-    nom_demande = str(reglage("journal_matin.imprimante", "") or "").strip().lower()
-    imprimantes = _infos_imprimantes()
-    if nom_demande:
-        for imprimante in imprimantes:
-            if imprimante.get("Name", "").strip().lower() == nom_demande:
-                return imprimante
-        raise RuntimeError(f"Imprimante configuree introuvable : {nom_demande}")
-
-    candidates = [
-        p for p in imprimantes
-        if p.get("Name", "").lower() not in {
-            "fax", "microsoft print to pdf", "onenote (desktop)"
-        }
-    ]
-    if not candidates:
-        raise RuntimeError("Aucune imprimante Windows compatible n'a ete trouvee.")
-    if len(candidates) > 1:
-        raise RuntimeError(
-            "Plusieurs imprimantes sont disponibles. Renseigne journal_matin.imprimante."
-        )
-    return candidates[0]
-
-
-def imprimer(chemin: Path) -> dict[str, str]:
-    """Envoie un fichier texte a la file Windows choisie via son pilote."""
-    if os.name != "nt":
-        raise RuntimeError("L'impression du journal est disponible sur Windows uniquement.")
-    imprimante = _choisir_imprimante()
-    requis = (imprimante.get("Name"), imprimante.get("DriverName"), imprimante.get("PortName"))
-    if not all(requis):
-        raise RuntimeError("La file d'impression ne fournit pas nom, pilote et port.")
-    script = RACINE / "scripts" / "imprimer_texte_windows.ps1"
-    resultat = subprocess.run(
-        [
-            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(script), "-Fichier", str(chemin),
-            "-Imprimante", imprimante["Name"],
-        ],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90,
-        check=False,
-    )
-    if resultat.returncode != 0:
-        detail = (resultat.stderr or resultat.stdout).strip()
-        raise RuntimeError(
-            f"Le pilote Windows n'a pas accepte le travail ({resultat.returncode})"
-            + (f" : {detail}" if detail else ".")
-        )
-    return imprimante
-
-
-def preparer_et_imprimer(
-    maintenant: dt.datetime | None = None,
-    apercu: bool = False,
-) -> tuple[Path, dict[str, str] | None]:
-    """Genere le journal PDF, puis l'imprime sauf en mode apercu."""
-    maintenant = maintenant or dt.datetime.now().astimezone()
-    sections = collecter_sections()
-    texte = construire_texte(maintenant=maintenant, sections=sections)
-    chemin_txt = ecrire_journal(texte, maintenant=maintenant)
-    from core.journal_pdf import generer_pdf
-    chemin = _chemin("journal_matin.dossier_sortie", "logs/journal_matin") / (
-        f"journal-{maintenant:%Y%m%d}.pdf")
-    generer_pdf(chemin, maintenant, sections)
-    if apercu:
-        return chemin, None
-    imprimante = _choisir_imprimante()
-    if os.name != "nt":
-        raise RuntimeError("L'impression du journal est disponible sur Windows uniquement.")
-    pdftoppm = shutil.which("pdftoppm")
-    if not pdftoppm:
-        raise RuntimeError("pdftoppm est requis pour imprimer la maquette PDF.")
-    with tempfile.TemporaryDirectory(prefix="jarvis-journal-") as dossier_tmp:
-        prefixe = str(Path(dossier_tmp) / "page")
-        rendu = subprocess.run(
-            [pdftoppm, "-png", "-r", "150", str(chemin), prefixe],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90,
-            check=False,
-        )
-        if rendu.returncode != 0:
-            raise RuntimeError(f"Rendu PDF impossible : {rendu.stderr.strip()}")
-        pages = sorted(Path(dossier_tmp).glob("page-*.png"))
-        if not pages:
-            raise RuntimeError("Le rendu PDF n'a produit aucune page.")
-        for page in pages:
-            _imprimer_image(page, imprimante)
-    return chemin, imprimante
-
-
-def _imprimer_image(chemin: Path, imprimante: dict[str, str]) -> None:
-    """Imprime une page PNG via le pilote Windows, en la centrant sur le papier."""
-    script = RACINE / "scripts" / "imprimer_image_windows.ps1"
-    resultat = subprocess.run(
-        [
-            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(script), "-Image", str(chemin),
-            "-Imprimante", imprimante["Name"],
-        ],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90,
-        check=False,
-    )
-    if resultat.returncode != 0:
-        detail = (resultat.stderr or resultat.stdout).strip()
-        raise RuntimeError(f"Impression de la page impossible : {detail}")

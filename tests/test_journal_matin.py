@@ -14,13 +14,13 @@ class JournalMatinTests(unittest.TestCase):
         moment = dt.datetime(2026, 9, 25, 7, 0)
         texte = construire_texte(
             maintenant=moment,
-            sections=[("METEO", "A Yerres, il fait 18 degres."),
+            sections=[("METEO", "A Lyon, il fait 18 degres."),
                       ("AGENDA DU JOUR", "A 10h reunion.")],
         )
 
         self.assertIn("SIGNAL MATIN - LE JOURNAL ANTI-SCROLL", texte)
         self.assertIn("vendredi 25 septembre 2026", texte)
-        self.assertIn("A Yerres, il fait 18 degres.", texte)
+        self.assertIn("A Lyon, il fait 18 degres.", texte)
         self.assertIn("AGENDA DU JOUR", texte)
 
     def test_wrappe_les_lignes_trop_longues(self):
@@ -44,6 +44,28 @@ class JournalMatinTests(unittest.TestCase):
             )
             self.assertTrue(chemin.exists())
             self.assertGreater(chemin.stat().st_size, 1000)
+
+    def test_les_textes_longs_de_l_ancien_pipeline_sont_tronques(self):
+        from core.journal_pdf import _legacy_edition
+
+        actualites = "\n".join(f"- Source {numero} : {'t' * 241}" for numero in range(14))
+        edition = _legacy_edition(
+            dt.datetime(2026, 9, 25, 7, 0).astimezone(),
+            [("METEO", "m" * 421), ("AGENDA DU JOUR", "a" * 301),
+             ("ACTUALITES", actualites), ("ECHEANCES", "e" * 601)],
+        )
+        self.assertEqual(len(edition.agenda[0].note), 300)
+        self.assertEqual(len(edition.weather.summary), 420)
+        self.assertEqual(len(edition.personal.note), 600)
+        self.assertEqual(len(edition.news.lead.title), 240)
+        self.assertEqual(len(edition.news.world), 12)
+
+    def test_la_facade_historique_n_imprime_plus(self):
+        # L'impression passe uniquement par core.signal_matin et sa confirmation.
+        import core.journal_matin as journal
+        for nom in ("imprimer", "preparer_et_imprimer", "_imprimer_image",
+                    "_choisir_imprimante", "_infos_imprimantes"):
+            self.assertFalse(hasattr(journal, nom), nom)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import socket
+import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
@@ -55,6 +56,19 @@ class _ArticleParser(HTMLParser):
             self.current.append(data)
 
 
+def _adresse_publique(address: str) -> bool:
+    """Vrai pour une adresse routable sur Internet (ni LAN, ni CGNAT/Tailscale, ni multicast)."""
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    # is_reserved reste exige : le prefixe NAT64 (64:ff9b::/96) est « global »
+    # pour Python alors qu'il peut viser 127.0.0.1.
+    return (
+        ip.is_global and not ip.is_multicast
+        and not ip.is_unspecified and not ip.is_reserved
+    )
+
+
 def _public_http_url(value: str) -> bool:
     try:
         parsed = urllib.parse.urlparse(value)
@@ -67,15 +81,20 @@ def _public_http_url(value: str) -> bool:
             addresses = {row[4][0] for row in socket.getaddrinfo(host, None)}
         except OSError:
             return False
-        return bool(addresses) and all(
-            not ipaddress.ip_address(address).is_private
-            and not ipaddress.ip_address(address).is_loopback
-            and not ipaddress.ip_address(address).is_link_local
-            and not ipaddress.ip_address(address).is_reserved
-            for address in addresses
-        )
+        return bool(addresses) and all(_adresse_publique(address) for address in addresses)
     except (ValueError, TypeError):
         return False
+
+
+class _RedirectionSure(urllib.request.HTTPRedirectHandler):
+    """Revalide chaque redirection : une page publique ne mene jamais au LAN."""
+
+    max_redirections = 5
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _public_http_url(newurl):
+            raise urllib.error.URLError(f"redirection refusee vers une adresse non publique ({code})")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _download(url: str, timeout: float = 18) -> str:
@@ -83,7 +102,9 @@ def _download(url: str, timeout: float = 18) -> str:
         url,
         headers={"User-Agent": "Signal-Matin/1.0 (+local personal digest)"},
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    # Opener local (pas d'install_opener) : le reste de Jarvis n'est pas touche.
+    opener = urllib.request.build_opener(_RedirectionSure)
+    with opener.open(request, timeout=timeout) as response:
         content_type = str(response.headers.get("Content-Type") or "")
         if "text/" not in content_type and "json" not in content_type:
             return ""
@@ -163,6 +184,8 @@ def enrichir_actualites(
         })
     if not documents:
         return items
+    # Seuls les id reellement envoyes au modele peuvent recevoir une synthese.
+    fournis = {int(document["id"]) for document in documents}
 
     systeme = (
         "Tu es secretaire de redaction d'un quotidien francais. Redige des syntheses "
@@ -190,7 +213,8 @@ def enrichir_actualites(
                 if paragraph.strip()
             )[:3200]
             for row in _json_payload(response)
-            if str(row.get("id", "")).isdigit() and str(row.get("developpe") or "").strip()
+            if str(row.get("id", "")).isdigit() and int(row["id"]) in fournis
+            and str(row.get("developpe") or "").strip()
         }
     except Exception as error:
         LOG.warning("Signal Matin : syntheses detaillees indisponibles: %s", error)

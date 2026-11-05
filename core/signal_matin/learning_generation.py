@@ -104,7 +104,7 @@ def generer_termes_mots_croises(
         "Tu crees des mots croises francais pedagogiques. Reponds uniquement par "
         "un objet JSON {\"terms\":[{\"answer\":\"...\",\"clue\":\"...\"}]}. "
         "Chaque reponse est un mot francais courant ou un terme tech utile, sans "
-        "nom propre, sans espace ni tiret, de 3 a 14 lettres. Les definitions sont "
+        "nom propre, sans espace ni tiret, de 3 a 13 lettres. Les definitions sont "
         "courtes, exactes et ne contiennent pas la reponse."
     )
     prompt = (
@@ -125,7 +125,8 @@ def generer_termes_mots_croises(
             continue
         answer = _normalise(str(row.get("answer") or ""))
         clue = " ".join(str(row.get("clue") or "").split())
-        if not 3 <= len(answer) <= 18 or not clue or answer in seen:
+        # 13 lettres au plus : c'est la taille de la grille imprimee.
+        if not 3 <= len(answer) <= 13 or not clue or answer in seen:
             continue
         terms.append((answer, clue[:220]))
         seen.add(answer)

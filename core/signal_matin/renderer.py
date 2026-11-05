@@ -8,7 +8,6 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import html
-import mimetypes
 import re
 from pathlib import Path
 
@@ -20,6 +19,13 @@ from .models import (
 ROOT = Path(__file__).resolve().parents[2]
 CSS_PATH = ROOT / "web" / "signal_matin.css"
 PAGINATION_PATH = ROOT / "web" / "signal_matin_pagination.js"
+# Seul dossier dont une illustration peut etre embarquee dans l'edition.
+ILLUSTRATIONS_DIR = ROOT / "web" / "illustrations"
+ILLUSTRATION_MAX_OCTETS = 5_000_000
+ILLUSTRATION_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
+}
 WEEKDAYS = ("Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche")
 MONTHS = ("janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
           "aout", "septembre", "octobre", "novembre", "decembre")
@@ -66,18 +72,37 @@ def section_header(title: str, eyebrow: str = "") -> str:
     return f'<header class="section-header">{meta}<h2>{_e(title)}</h2></header>'
 
 
+def _illustration_locale(value: str) -> tuple[Path, str] | None:
+    """Chemin et type MIME d'une image du dossier dedie, sinon None.
+
+    Le JSON d'edition peut venir d'une autre automatisation : seul un fichier
+    image place dans ``web/illustrations`` peut etre embarque, jamais un autre
+    fichier local (configuration, notes, cles).
+    """
+    try:
+        base = ILLUSTRATIONS_DIR.resolve()
+        path = Path(value)
+        path = (path if path.is_absolute() else ROOT / path).resolve()
+        mime = ILLUSTRATION_TYPES.get(path.suffix.lower())
+        if not mime or not path.is_relative_to(base) or not path.is_file():
+            return None
+        if path.stat().st_size > ILLUSTRATION_MAX_OCTETS:
+            return None
+        return path, mime
+    except (OSError, ValueError):
+        return None
+
+
 def illustration_block(item: NewsItem) -> str:
     illustration = item.illustration
     if not illustration:
         return ""
     image = ""
-    if illustration.path:
-        path = Path(illustration.path)
-        path = path if path.is_absolute() else ROOT / path
-        if path.is_file():
-            mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-            image = f'<img src="data:{mime};base64,{encoded}" alt="{_e(illustration.alt)}">'
+    locale = _illustration_locale(illustration.path) if illustration.path else None
+    if locale:
+        path, mime = locale
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        image = f'<img src="data:{mime};base64,{encoded}" alt="{_e(illustration.alt)}">'
     if not image:
         image = """
         <svg viewBox="0 0 720 270" role="img" aria-label="Nature morte matinale dessinee au trait">
@@ -137,9 +162,13 @@ def weather_block(edition: MorningEdition) -> str:
     if weather is None:
         return ""
     temp = "--" if weather.temperature_c is None else f"{weather.temperature_c:g}°"
-    range_text = ""
-    if weather.low_c is not None or weather.high_c is not None:
-        range_text = f"Min {weather.low_c:g} / Max {weather.high_c:g} deg"
+    # Chaque borne est formatee seule : une prevision partielle n'en donne qu'une.
+    parts = []
+    if weather.low_c is not None:
+        parts.append(f"Min {weather.low_c:g}")
+    if weather.high_c is not None:
+        parts.append(f"Max {weather.high_c:g}")
+    range_text = " / ".join(parts) + " deg" if parts else ""
     return f"""
     <section class="weather-block ruled-block">
       {section_header("Meteo", weather.location)}

@@ -24,6 +24,10 @@ WordGenerator = Callable[[dt.date, frozenset[str]], WordOfTheDay | None]
 CrosswordTermGenerator = Callable[
     [dt.date, frozenset[str]], list[tuple[str, str]]
 ]
+# Une reponse plus longue que la grille ne peut jamais y etre posee.
+CROSSWORD_SIZE = 13
+# Termes generes non encore utilises, conserves pour les grilles suivantes.
+CROSSWORD_RESERVE_MAX = 200
 
 
 @dataclass(frozen=True)
@@ -217,13 +221,15 @@ def _can_place(
 def _crossword(
     date: dt.date, nonce: int = 0, terms: list[_Term] | None = None,
 ) -> CrosswordPuzzle:
-    size = 13
+    size = CROSSWORD_SIZE
     seed = date.toordinal() + nonce * 1_000_003
 
     # Deux banques disjointes alternent d'un jour a l'autre. Ainsi, deux grilles
     # consecutives ne recyclent aucun mot, tout en restant entierement locales et
     # reproductibles pour une date donnee.
     pool = list(terms) if terms is not None else list(TERMS[seed % 2::2])
+    # Un mot plus long que la grille serait pose hors des cases (colonne -1).
+    pool = [term for term in pool if 2 <= len(_normalise(term.answer)) <= size]
     if not pool:
         return CrosswordPuzzle(size=size, entries=[])
     best: list[tuple[_Term, str, int, int, str]] = []
@@ -242,6 +248,10 @@ def _crossword(
             first_row = (size - len(first_word)) // 2
             first_column = size // 2 + centre_shift
         dr, dc = (0, 1) if first_direction == "across" else (1, 0)
+        last_row = first_row + dr * (len(first_word) - 1)
+        last_column = first_column + dc * (len(first_word) - 1)
+        if min(first_row, first_column) < 0 or max(last_row, last_column) >= size:
+            continue
         grid = {
             (first_row + dr * index, first_column + dc * index): letter
             for index, letter in enumerate(first_word)
@@ -397,15 +407,41 @@ def _unique_math(date: dt.date, used: set[str]) -> MathChallenge:
     raise RuntimeError("Impossible de produire un nouveau calcul mental unique.")
 
 
+def _read_reserve(history: dict) -> list[_Term]:
+    """Reserve de termes generes ; une entree illisible est simplement ignoree."""
+    rows = history.get("reserve")
+    terms: list[_Term] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        answer, clue = str(row.get("answer") or ""), str(row.get("clue") or "").strip()
+        if answer and clue:
+            terms.append(_Term(answer, clue[:220]))
+    return terms
+
+
 def _unique_crossword(
     date: dt.date,
     used_signatures: set[str],
     used_answers: set[str],
     term_generator: CrosswordTermGenerator | None,
-) -> CrosswordPuzzle | None:
+    reserve: list[_Term] | None = None,
+) -> tuple[CrosswordPuzzle | None, list[_Term]]:
+    """Renvoie la grille du jour et la reserve generee qui reste a utiliser."""
     available = [
         term for term in TERMS if _normalise(term.answer) not in used_answers
     ]
+    known = {_normalise(term.answer) for term in available} | used_answers
+    # Les termes generes les jours precedents passent avant tout nouvel appel au
+    # modele : une panne du generateur ne supprime plus la grille du lendemain.
+    remaining: list[_Term] = []
+    for term in reserve or []:
+        normalized = _normalise(term.answer)
+        if not 2 <= len(normalized) <= CROSSWORD_SIZE or normalized in known:
+            continue
+        remaining.append(_Term(normalized, term.clue))
+        known.add(normalized)
+    available.extend(remaining)
     # Demander assez tot une reserve generee : six mots quelconques ne
     # garantissent pas une grille connectee et lisible.
     if len(available) < 24 and term_generator is not None:
@@ -414,12 +450,16 @@ def _unique_crossword(
         except Exception as error:
             LOG.warning("Signal Matin : nouveaux mots croises indisponibles: %s", error)
             generated = []
-        known = {_normalise(term.answer) for term in available} | used_answers
         for answer, clue in generated:
             normalized = _normalise(answer)
-            if not 2 <= len(normalized) <= 18 or not clue.strip() or normalized in known:
+            if (
+                not 2 <= len(normalized) <= CROSSWORD_SIZE
+                or not clue.strip() or normalized in known
+            ):
                 continue
-            available.append(_Term(normalized, clue.strip()[:220]))
+            term = _Term(normalized, clue.strip()[:220])
+            available.append(term)
+            remaining.append(term)
             known.add(normalized)
 
     if len(available) < 6:
@@ -427,7 +467,7 @@ def _unique_crossword(
             "Signal Matin : moins de six reponses nouvelles disponibles ; "
             "mots croises omis plutot que recycles."
         )
-        return None
+        return None, remaining
 
     for nonce in range(100_000):
         candidate = _crossword(date, nonce, available)
@@ -437,12 +477,12 @@ def _unique_crossword(
             and answers.isdisjoint(used_answers)
             and _crossword_signature(candidate) not in used_signatures
         ):
-            return candidate
+            return candidate, [term for term in remaining if term.answer not in answers]
     LOG.warning(
         "Signal Matin : aucune grille entierement nouvelle ; rubrique omise "
         "plutot que de reutiliser un ancien mot."
     )
-    return None
+    return None, remaining
 
 
 def construire_apprentissage_du_jour(
@@ -485,13 +525,15 @@ def construire_apprentissage_du_jour(
         except Exception as error:
             LOG.warning("Signal Matin : nouveau mot indisponible: %s", error)
 
+    crossword, reserve = _unique_crossword(
+        date,
+        used_crosswords,
+        used_crossword_answers,
+        crossword_term_generator,
+        _read_reserve(history),
+    )
     page = LearningPage(
-        crossword=_unique_crossword(
-            date,
-            used_crosswords,
-            used_crossword_answers,
-            crossword_term_generator,
-        ),
+        crossword=crossword,
         tech_word=TECH_WORDS[seed % len(TECH_WORDS)],
         # Une rubrique absente vaut mieux qu'un doublon silencieux si aucun
         # generateur local/cloud n'est disponible apres epuisement du stock.
@@ -499,5 +541,9 @@ def construire_apprentissage_du_jour(
         math=_unique_math(date, used_math),
     )
     history["days"][key] = page.model_dump(mode="json")
+    history["reserve"] = [
+        {"answer": term.answer, "clue": term.clue}
+        for term in reserve[:CROSSWORD_RESERVE_MAX]
+    ]
     _write_history(history_path, history)
     return page
