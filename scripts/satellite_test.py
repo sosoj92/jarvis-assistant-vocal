@@ -20,6 +20,7 @@ Usage :
 import argparse
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -64,12 +65,21 @@ def _pcm_depuis_wav(chemin):
 
 
 def _generer_wav(texte, sortie):
-    """Génère un WAV de `texte` via la voix Windows (SAPI)."""
-    ps = ("Add-Type -AssemblyName System.Speech; "
+    """Génère un WAV de `texte` via la voix Windows (SAPI).
+
+    Le texte passe par l'entrée standard (lue en UTF-8) et le chemin par une
+    variable d'environnement, jamais dans -Command : une apostrophe française
+    (« qu'est-ce que ») cassait le littéral PowerShell. Même motif que
+    jarvis14._dire_sapi.
+    """
+    ps = ("[Console]::InputEncoding = [Text.Encoding]::UTF8; "
+          "$t = [Console]::In.ReadToEnd(); "
+          "Add-Type -AssemblyName System.Speech; "
           "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-          f"$s.SetOutputToWaveFile('{sortie}'); $s.Speak('{texte}'); $s.Dispose()")
+          "$s.SetOutputToWaveFile($env:JARVIS_SAT_TEST_WAV); $s.Speak($t); $s.Dispose()")
     subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True,
-                   capture_output=True)
+                   capture_output=True, input=texte.encode("utf-8"),
+                   env={**os.environ, "JARVIS_SAT_TEST_WAV": str(sortie)})
     return sortie
 
 

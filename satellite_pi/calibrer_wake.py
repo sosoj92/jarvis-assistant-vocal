@@ -13,6 +13,10 @@ import yaml
 from openwakeword.model import Model
 from scipy.signal import resample_poly
 
+# Meme choix de micro que le satellite (nom, index ou liste de noms par ordre de
+# preference) : la calibration mesure le micro que le satellite ouvrira.
+from jarvis_satellite import _resoudre_micro
+
 
 RACINE = Path(__file__).resolve().parent
 TAUX = 16_000
@@ -27,7 +31,7 @@ def main():
     gains = [float(v) for v in args.gains.split(",") if v.strip()]
 
     conf = yaml.safe_load((RACINE / "config.yaml").read_text(encoding="utf-8")) or {}
-    appareil = conf.get("micro", None)
+    appareil = _resoudre_micro(conf.get("micro", None))
     info = sd.query_devices(appareil, "input")
     taux_capture = int(round(info.get("default_samplerate") or TAUX))
     bloc_capture = int(round(BLOC * taux_capture / TAUX))

@@ -173,15 +173,23 @@ class ActionsLocales:
             return False, f"Commande impossible sur le poste principal : {str(exc)[:160]}"
         return False, "Action distante non prise en charge."
 
-    def _outil_local(self, nom, args):
-        if nom not in OUTILS_LOCAUX or not isinstance(args, dict):
-            return False, "Outil local interdit."
+    def _preparer_depot(self):
+        """Rend le dépôt importable et pointe la configuration sur celle de l'agent."""
         if str(DEPOT) not in sys.path:
             sys.path.insert(0, str(DEPOT))
-        from core import config, registre
+        from core import config
         # Cette configuration ne contient que les réglages matériels du poste.
         # Elle désactive implicitement tout nouveau routage distant et évite une boucle.
         config._CONFIG = self.conf
+        # Hors de main() aussi : un outil qui écrit un réglage (config.definir)
+        # doit viser desktop_agent/config.yaml, jamais le config.yaml du dépôt.
+        config.FICHIER = RACINE / "config.yaml"
+
+    def _outil_local(self, nom, args):
+        if nom not in OUTILS_LOCAUX or not isinstance(args, dict):
+            return False, "Outil local interdit."
+        self._preparer_depot()
+        from core import registre
         registre.charger_outils()
         outil = registre.get(nom)
         if outil is None:
@@ -192,14 +200,23 @@ class ActionsLocales:
     def _astra_action(self, args):
         action = str(args.get("action", "") or "").lower()
         if action in {"cliquer", "double_cliquer"}:
-            ok, resultat = self._outil_local("cliquer_ecran", {
-                "x": int(args.get("x", -1)), "y": int(args.get("y", -1)),
-                "double": action == "double_cliquer",
-            })
+            self._preparer_depot()
+            from tools.ecran import geometrie_figee
+            # Repère de la capture vue par Astra (envoyé par H24) : une capture
+            # faite entre-temps ne décale pas le clic. Absent ou invalide : sans effet.
+            with geometrie_figee(args.get("geometrie")):
+                ok, resultat = self._outil_local("cliquer_ecran", {
+                    "x": int(args.get("x", -1)), "y": int(args.get("y", -1)),
+                    "double": action == "double_cliquer",
+                })
             return ok, resultat
         if action == "taper":
             import keyboard
-            keyboard.write(str(args.get("texte", "") or "")[:500], delay=0.01)
+            # Caractères de contrôle retirés (comme tools/astra_pc._taper) : un
+            # « \n » envoyé par Astra deviendrait une vraie touche Entrée.
+            texte = "".join(c for c in str(args.get("texte", "") or "")
+                            if ord(c) >= 32)[:500]
+            keyboard.write(texte, delay=0.01)
             return True, "texte saisi"
         if action == "touche":
             import keyboard
@@ -412,6 +429,24 @@ async def session(conf, actions):
             actions.agent_pret.clear()
 
 
+def avertissements_clair(conf):
+    """Une ligne par connexion configuree en ws:// : le jeton, les commandes et
+    l'audio y passent en clair, et rien ne prouve que le serveur est le bon. Un
+    appareil du reseau pourrait se faire passer pour lui et envoyer des commandes
+    a ce PC. Avertissement seulement : la connexion n'est pas refusee."""
+    canaux = [("serveur_url", conf.get("serveur_url"), "jeton et commandes")]
+    audio = dict(conf.get("audio", {}) or {})
+    if bool(audio.get("actif", False)):
+        canaux.append(("audio.pc_url", audio.get("pc_url"), "jeton et audio"))
+    return [
+        f"[securite] {cle} en ws:// : {contenu} passent EN CLAIR sur le reseau et "
+        "le serveur n'est pas authentifie (un appareil du reseau peut se faire passer "
+        "pour lui). Passe en wss:// avec « certificat: » (voir docs/satellite.md)."
+        for cle, url, contenu in canaux
+        if str(url or "").strip().lower().startswith("ws://")
+    ]
+
+
 async def boucle(conf, actions):
     prevenu = False
     while True:
@@ -439,6 +474,9 @@ def main():
                  if not str(conf.get(nom, "") or "").strip()]
     if manquants:
         raise SystemExit("Configuration manquante : " + ", ".join(manquants))
+    # Une seule fois au demarrage (pas dans boucle(), relancee toutes les 3 s).
+    for avertissement in avertissements_clair(conf):
+        print(avertissement)
     # Les outils matériels qui modifient un réglage écrivent dans la config privée
     # de l'agent, jamais dans la configuration (et les secrets) du serveur.
     if str(DEPOT) not in sys.path:

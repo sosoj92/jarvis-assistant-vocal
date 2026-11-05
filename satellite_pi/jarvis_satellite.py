@@ -547,8 +547,15 @@ def _jouer_pcm(pcm, freq):
         print("  [audio] lecture impossible:", e)
 
 
-async def _session(url, satellite, token, file_audio, occupe, micro, tls=None):
-    """Une connexion au PC : envoie les énoncés de la file, joue les réponses."""
+class RefusServeur(Exception):
+    """Le PC a refusé le hello (jeton renouvelé, satellite retiré de la config)."""
+
+
+async def _session(url, satellite, token, file_audio, occupe, micro, tls=None,
+                   sur_pret=None):
+    """Une connexion au PC : envoie les énoncés de la file, joue les réponses.
+    Lève RefusServeur si le PC refuse le hello ; ``sur_pret`` est appelé dès que
+    le PC accepte la connexion."""
     import websockets
     options = {"ssl": tls} if tls is not None else {}
     async with websockets.connect(url, max_size=None, **options) as ws:
@@ -557,9 +564,12 @@ async def _session(url, satellite, token, file_audio, occupe, micro, tls=None):
         while True:
             m = await ws.recv()
             if isinstance(m, str) and json.loads(m).get("type") == "pret":
-                print("  [pc] connecté."); break
+                print("  [pc] connecté.")
+                if sur_pret is not None:
+                    sur_pret()
+                break
             if isinstance(m, str) and json.loads(m).get("type") == "erreur":
-                print("  [pc] refusé:", json.loads(m).get("message")); return
+                raise RefusServeur(json.loads(m).get("message"))
 
         if bool(CONF.get("brief_au_demarrage", False)):
             pret = CONF.get("_poste_pret_event")
@@ -652,13 +662,39 @@ async def _session(url, satellite, token, file_audio, occupe, micro, tls=None):
             tache_emet.cancel()
 
 
+RECUL_REFUS_MIN = 3     # s : premier délai après un hello refusé
+RECUL_REFUS_MAX = 60    # s : plafond du délai, doublé à chaque refus
+
+
 async def _boucle(url, satellite, token, file_audio, occupe, micro, tls=None):
-    """Reconnexion automatique tant que le PC n'est pas joignable."""
+    """Reconnexion automatique tant que le PC n'est pas joignable.
+
+    Un hello refusé (jeton renouvelé, satellite retiré) ne se règle pas en
+    réessayant : sans pause, le client se reconnectait en boucle serrée et
+    remplissait les journaux des deux côtés. Délai croissant de 3 s à 60 s, remis
+    à zéro dès que le PC accepte la connexion, message une seule fois par série.
+    Une panne réseau garde 3 s : la reprise après un redémarrage du PC reste rapide.
+    """
     prevenu = False
+    recul = 0
+
+    def accepte():
+        nonlocal recul
+        recul = 0
+
     while True:
         try:
-            await _session(url, satellite, token, file_audio, occupe, micro, tls=tls)
+            await _session(url, satellite, token, file_audio, occupe, micro, tls=tls,
+                           sur_pret=accepte)
             prevenu = False
+        except RefusServeur as e:
+            micro.fermer_relance()
+            occupe.clear()
+            if not recul:
+                print(f"  [pc] refusé: {e} — vérifie satellite_id et token ; "
+                      "nouvelle tentative de plus en plus espacée…")
+            recul = min(RECUL_REFUS_MAX, recul * 2 if recul else RECUL_REFUS_MIN)
+            await asyncio.sleep(recul)
         except Exception as e:
             micro.fermer_relance()
             occupe.clear()
