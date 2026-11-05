@@ -69,6 +69,40 @@ _URL_INSTA_TIKTOK = re.compile(
     r"(instagram\.com/(?:p|reel|tv)/([A-Za-z0-9_-]+))"
     r"|(tiktok\.com/[^/]+/video/(\d+))", re.I)
 
+# Garde de l'ingestion a distance : l'URL est extraite du texte partage, puis
+# l'HOTE et le CHEMIN sont verifies (une recherche du motif n'importe ou dans la
+# chaine laissait passer http://192.168.x.x/instagram.com/p/x).
+_URL_DANS_TEXTE = re.compile(r"https?://[^\s<>\"']+", re.I)
+_CHEMINS_INSPIRATION = {
+    "instagram.com": re.compile(r"/(?:p|reel|tv)/[A-Za-z0-9_-]+(?:/.*)?"),
+    "tiktok.com": re.compile(r"/[^/]+/video/\d+(?:/.*)?"),
+}
+
+
+def url_inspiration_valide(texte: str) -> str:
+    """URL Instagram/TikTok extraite du texte partage, ou "" si refusee.
+
+    Le texte qui entoure le lien (feuille de partage iOS) est tolere ; seule
+    l'URL extraite et validee doit etre transmise au telechargeur.
+    """
+    m = _URL_DANS_TEXTE.search(str(texte or ""))
+    if not m:
+        return ""
+    url = m.group(0).rstrip(".,;:!?)]}")     # ponctuation de la phrase
+    try:
+        from urllib.parse import urlparse
+        morceaux = urlparse(url)
+        hote = (morceaux.hostname or "").lower()
+    except ValueError:
+        return ""
+    if morceaux.scheme.lower() not in ("http", "https"):
+        return ""
+    for domaine, chemin in _CHEMINS_INSPIRATION.items():
+        if (hote == domaine or hote.endswith("." + domaine)) \
+                and chemin.fullmatch(morceaux.path or ""):
+            return url
+    return ""
+
 
 # ------------------------------------------------------------------ chemins
 
@@ -415,11 +449,14 @@ def ingerer_inspiration(url: str, commentaire: str = "") -> dict:
         _LOGH.error("Vault introuvable : %s", vault)
         return {"ok": False, "message": f"Vault introuvable : {vault}"}
     # SÉCURITÉ : déclenchable à distance (/api/inbox). On n'ingère QUE des URL
-    # Instagram/TikTok reconnues -> pas de fetch d'une cible arbitraire (SSRF vers
-    # localhost/LAN/metadata) par le downloader côté hôte.
-    if not _URL_INSTA_TIKTOK.search(str(url or "")):
-        _LOGH.warning("inspiration refusee (URL non Insta/TikTok) : %s", url)
+    # Instagram/TikTok reconnues (hôte et chemin vérifiés) -> pas de fetch d'une
+    # cible arbitraire (SSRF vers localhost/LAN/metadata) par le downloader côté
+    # hôte. Seule l'URL validée part vers ingest.py, jamais le texte brut.
+    url_validee = url_inspiration_valide(url)
+    if not url_validee:
+        _LOGH.warning("inspiration refusee (URL non Insta/TikTok) : %r", str(url or "")[:200])
         return {"ok": False, "message": "Lien non reconnu : seuls Instagram et TikTok sont acceptés."}
+    url = url_validee
     try:
         fiche = _ingerer_brut(url, vault)
     except Exception as e:

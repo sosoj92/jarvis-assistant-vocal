@@ -19,6 +19,7 @@ Trois vues (une seule page a onglets) :
 """
 import json
 import logging
+import os
 import re
 import shutil
 import socket
@@ -593,15 +594,36 @@ def _port_listen(port):
         return False
 
 
+def _mcp_port():
+    """Port du serveur MCP (meme reglage que jarvis.mcp_server)."""
+    try:
+        return int(reglage("mcp.port", 8765))
+    except (TypeError, ValueError):
+        return 8765
+
+
+def _mcp_jeton():
+    """Jeton du serveur MCP, lu comme jarvis.mcp_server._jeton_mcp SANS importer ce
+    module (son import charge truststore, Hue et construit le serveur). Jamais
+    journalise ni renvoye au navigateur."""
+    return str(os.environ.get("JARVIS_MCP_TOKEN") or reglage("mcp.token", "") or "").strip()
+
+
 def _mcp_repond():
-    """Le serveur MCP repond-il ? (GET /mcp -> 400/406 = vivant)."""
+    """Le serveur MCP repond-il ? GET /mcp -> 400/406/405 = vivant ("ok") ; 401 =
+    vivant mais jeton absent ou refuse ("jeton") ; sinon muet (""). Le jeton
+    configure est envoye en Authorization: Bearer (sinon 401 des que mcp.token est defini)."""
+    jeton = _mcp_jeton()
+    entetes = {"Authorization": f"Bearer {jeton}"} if jeton else {}
     try:
         import requests
-        r = requests.get("http://127.0.0.1:8765/mcp", timeout=5)
-        return r.status_code in (400, 406, 405)
+        code = requests.get(f"http://127.0.0.1:{_mcp_port()}/mcp",
+                            headers=entetes, timeout=5).status_code
     except Exception as e:
         code = getattr(getattr(e, "response", None), "status_code", None)
-        return code in (400, 406, 405)
+    if code in (400, 406, 405):
+        return "ok"
+    return "jeton" if code == 401 else ""
 
 
 def _docker_up():
@@ -642,11 +664,23 @@ def _etat():
             tunnel = getattr(serveur, "_URL", None) or ""
         except Exception:
             tunnel = ""
+    # Meme port que celui sur lequel le serveur unifie ecoute (avec les replis
+    # pont_iphone.port / appels.port_stream de serveur.port_effectif()).
+    try:
+        from core import serveur
+        port_web = serveur.port_effectif()
+    except Exception:
+        port_web = int(reglage("serveur.port", 8790))
+    port_mcp = _mcp_port()
+    etat_mcp = _mcp_repond() if _port_listen(port_mcp) else ""
+    detail_mcp = "outils domotique/PC (loopback)"
+    if etat_mcp == "jeton":
+        detail_mcp += " - repond, mais refuse le jeton (verifie mcp.token / JARVIS_MCP_TOKEN)"
     chaine = [
         {"cle": "jarvis", "nom": "Serveur Jarvis (web unifie)",
-         "up": _port_listen(int(reglage("serveur.port", 8790))), "detail": "pont iPhone / Twilio"},
-        {"cle": "mcp", "nom": "Serveur MCP Jarvis :8765",
-         "up": _port_listen(8765) and _mcp_repond(), "detail": "outils domotique/PC (loopback)"},
+         "up": _port_listen(port_web), "detail": "pont iPhone / Twilio"},
+        {"cle": "mcp", "nom": f"Serveur MCP Jarvis :{port_mcp}",
+         "up": bool(etat_mcp), "detail": detail_mcp},
         {"cle": "tunnel", "nom": "Tunnel ngrok", "up": bool(tunnel),
          "detail": tunnel or "aucune URL publique"},
         {"cle": "gateway", "nom": "Gateway Hermes :8642",
@@ -783,7 +817,7 @@ def _reconnecter_mcp():
     exe = shutil.which("hermes")
     if not exe:
         return {"ok": False, "message": "CLI 'hermes' introuvable dans le PATH du serveur."}
-    url = "http://127.0.0.1:8765/mcp"
+    url = f"http://127.0.0.1:{_mcp_port()}/mcp"
     try:
         subprocess.run([exe, "mcp", "remove", "jarvis"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         p = subprocess.run([exe, "mcp", "add", "jarvis", "--url", url],
@@ -822,11 +856,19 @@ def _permissions():
                 montages.append(a)
     except Exception:
         pass
+    # Surface reelle du pont iPhone (cf. core.pont_iphone) : la liste domotique_distante
+    # vient de config.yaml, elle n'est PAS verrouillee dans le code -> on l'affiche.
+    domo = [str(n) for n in (reglage("pont_iphone.domotique_distante", []) or [])]
     return {
         "regle_n3": "N3 (critique) : confirmation TOUJOURS, jamais memorisable en 'toujours', "
-                    "jamais a distance. Le pont iPhone ne declenche QUE des N1 (mcp_expose ET "
-                    "sans confirmation) ; toute action a confirmation (N2/N3) est refusee a "
-                    "distance, et le 'toujours autoriser' n'ouvre RIEN a distance. [verrouille dans le code]",
+                    "jamais a distance [verrouille dans le code]. Pont iPhone : il n'execute "
+                    "que les N1 exposes au MCP (mcp_expose ET sans confirmation), plus les "
+                    "outils listes dans pont_iphone.domotique_distante, choisis dans "
+                    "config.yaml et executes SANS confirmation (un N2 place dans cette liste "
+                    "perd sa confirmation a distance ; un N3 reste refuse). Liste actuelle : "
+                    + (", ".join(domo) if domo else "vide") + ". Apres un contenu externe, "
+                    "toute action autre qu'une lecture est refusee a distance. Le 'toujours "
+                    "autoriser' n'ouvre RIEN a distance.",
         "outils": outils,
         "compte": {"total": len(outils),
                    "mcp_expose": sum(1 for o in outils if o["mcp_expose"]),
@@ -921,6 +963,11 @@ def monter_routes(app):
         return garde(request) or _reglages()
 
     # -- ecriture (sans danger : modeles + reconnexion) --
+    # Le corps se lit en async, mais le travail bloquant (requetes Ollama jusqu'a
+    # 2 x 120 s, rmtree, CLI Hermes, ecriture config) part dans le threadpool :
+    # sinon toute l'app unifiee (pont iPhone, Twilio /stream, satellites) gele.
+    from starlette.concurrency import run_in_threadpool
+
     async def _corps(request):
         try:
             return await request.json()
@@ -932,43 +979,44 @@ def monter_routes(app):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _ollama_pull(str(d.get("nom", "")).strip()) if d.get("nom") \
-            else JSONResponse({"ok": False, "message": "nom manquant."}, 400)
+        return await run_in_threadpool(_ollama_pull, str(d.get("nom", "")).strip()) \
+            if d.get("nom") else JSONResponse({"ok": False, "message": "nom manquant."}, 400)
 
     @app.post("/api/panneau/ollama/supprimer")
     async def api_suppr(request: Request):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _ollama_supprimer(str(d.get("nom", "")).strip())
+        return await run_in_threadpool(_ollama_supprimer, str(d.get("nom", "")).strip())
 
     @app.post("/api/panneau/ollama/tester")
     async def api_test(request: Request):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _ollama_tester(str(d.get("nom", "")).strip())
+        return await run_in_threadpool(_ollama_tester, str(d.get("nom", "")).strip())
 
     @app.post("/api/panneau/whisper/pull")
     async def api_wpull(request: Request):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _whisper_installer(str(d.get("nom", "")).strip())
+        return await run_in_threadpool(_whisper_installer, str(d.get("nom", "")).strip())
 
     @app.post("/api/panneau/whisper/supprimer")
     async def api_wsuppr(request: Request):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _whisper_supprimer(str(d.get("nom", "")).strip())
+        return await run_in_threadpool(_whisper_supprimer, str(d.get("nom", "")).strip())
 
     @app.post("/api/panneau/modele-actif")
     async def api_actif(request: Request):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _definir_actif(
+        return await run_in_threadpool(
+            _definir_actif,
             d.get("backend"), str(d.get("modele", "")).strip(),
             profil=str(d.get("profil", "hybride")).strip().lower(),
             fournisseur=str(d.get("fournisseur", "")).strip().lower())
@@ -978,7 +1026,8 @@ def monter_routes(app):
         if (r := garde(request)):
             return r
         d = await _corps(request)
-        return _definir_reglage(str(d.get("cle", "")).strip(), d.get("valeur"))
+        return await run_in_threadpool(
+            _definir_reglage, str(d.get("cle", "")).strip(), d.get("valeur"))
 
     @app.post("/api/panneau/tester-voix")
     def api_tester_voix(request: Request):
@@ -986,6 +1035,10 @@ def monter_routes(app):
             return r
         try:
             from core import voix
+            if not voix.disponible():
+                # Aucune voix branchee dans ce processus : pas de faux succes.
+                return {"ok": False, "message": "Aucune voix dans ce processus : "
+                        "lance le test depuis le Jarvis qui parle."}
             threading.Thread(
                 target=voix.parler,
                 args=("Test de la voix Jarvis. La voix selectionnee est active.",),

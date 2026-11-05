@@ -100,10 +100,11 @@ naturel (mains libres) ; le second est le filet de sécurité.
 > le nom), l'invite prend le relais → **jamais** de commande vide postée.
 
 La phrase (« éteins les lumières », « mode film ») est traitée par Jarvis à la maison
-**comme du vocal**, mais — **doctrine du pont** — **seuls les outils sûrs** (domotique/PC)
-s'exécutent à distance : toute action sensible (mail, réservation, appel, suppression…) est
-**refusée** avec « à faire à la voix à la maison ». **Jamais de « toujours autoriser » depuis
-le distant** : un token volé ne peut qu'allumer/éteindre des lumières.
+**comme du vocal**, mais — **doctrine du pont** — seuls les outils ouverts à distance
+s'exécutent : les outils N1 exposés au MCP, plus ceux que tu listes dans
+`pont_iphone.domotique_distante` (voir **🛡️ Sécurité** plus bas). Toute action critique
+(mail, réservation, appel, suppression…) est **refusée** avec « à faire à la voix à la
+maison ». **Jamais de « toujours autoriser » depuis le distant.**
 
 **c) La formulation Siri la plus fiable**
 
@@ -219,9 +220,33 @@ risque de faute de frappe. C'est ainsi que « Note à Jarvis » a été réparé
 
 ## 🛡️ Sécurité (important)
 
-Une **commande à distance ne peut déclencher que des actions sûres** (lumières,
-ambiances/scènes, OBS, minuteurs, stats — les outils domotique/PC). Toute action
-sensible (mail, réservation, appel, suppression…) est **refusée** avec « à faire à la
-voix à la maison ». Ainsi, **même si ton token était volé**, personne ne pourrait
-réserver un resto, envoyer un mail ou passer un appel avec — juste allumer/éteindre
-des lumières. Garde quand même ton token secret, et régénère-le au moindre doute.
+Une **commande à distance** ne peut déclencher que deux familles d'outils :
+
+- les outils **N1 exposés au MCP** (sans confirmation) : par exemple les minuteurs,
+  l'arrêt d'un enregistrement OBS, les statistiques et le budget en lecture, la
+  recherche dans tes inspirations, mais aussi la **génération d'idées de contenu par
+  Hermes** (délégation qui coûte des tokens) et l'**ingestion d'une vidéo YouTube**
+  (téléchargement et transcription sur la machine de Jarvis) ;
+- les outils que tu listes toi-même dans `pont_iphone.domotique_distante` (lumières,
+  scènes…). Ils s'exécutent **sans confirmation** depuis l'iPhone : un outil N2 placé
+  dans cette liste **perd sa confirmation à distance**. N'y mets que des actions
+  physiques réversibles. Un N3 y reste toujours refusé.
+
+```yaml
+pont_iphone:
+  token: "colle-ton-token-ici"
+  domotique_distante: []      # ex. [allumer_lumiere, regler_luminosite] ; vide par défaut
+```
+
+Toute action critique (N3 : mail, réservation, appel, suppression, extinction…) est
+**refusée** avec « à faire à la voix à la maison », quel que soit ce réglage. Après la
+lecture d'un **contenu externe** (par exemple une inspiration sauvegardée), son texte
+est balisé comme donnée non fiable et toute action autre qu'une simple lecture est
+refusée dans la même commande. Le nombre d'appels d'outils par commande est plafonné
+(`assistant.max_appels_outils`, 12 par défaut).
+
+Ce que permet donc un **token volé** : tout ce qui précède, y compris des coûts
+(appels au modèle, délégation à Hermes), l'ajout de notes et l'envoi d'inspirations à
+télécharger et indexer. Mais ni mail, ni appel, ni réservation, ni suppression. Garde
+ton token secret, et régénère-le au moindre doute. L'onglet **Permissions** du panneau
+local affiche la liste `domotique_distante` en vigueur.

@@ -29,11 +29,22 @@ LOG = logging.getLogger("jarvis")
 _APP = None
 _SERVEUR = None
 _URL = None
+_UVICORN = None     # instance uvicorn.Server du serveur unifie (cf. _ecoute)
+# Demarrage et url_publique() (appels Twilio) peuvent ouvrir le tunnel depuis deux
+# threads : un seul a la fois, et un echec n'efface jamais une URL valide.
+_VERROU_TUNNEL = threading.Lock()
+
+
+def port_effectif():
+    """Port d'ecoute du serveur unifie : serveur.port, puis les replis historiques
+    pont_iphone.port et appels.port_stream, puis 8790. A reutiliser partout (HUD,
+    panneau, gestes) pour ne jamais viser un autre port que celui ecoute."""
+    return int(reglage("serveur.port",
+                       reglage("pont_iphone.port", reglage("appels.port_stream", 8790))))
 
 
 def _port():
-    return int(reglage("serveur.port",
-                       reglage("pont_iphone.port", reglage("appels.port_stream", 8790))))
+    return port_effectif()
 
 
 def app():
@@ -82,9 +93,17 @@ def _port_ouvert(port, timeout=0.3):
         return False
 
 
+def _ecoute():
+    """Vrai seulement si NOTRE uvicorn ecoute. _port_ouvert() ne suffit pas : un autre
+    processus qui tiendrait deja le port y repondrait a sa place, et le tunnel ngrok
+    publierait alors ce processus etranger."""
+    return bool(_UVICORN is not None and getattr(_UVICORN, "started", False)
+                and _SERVEUR is not None and _SERVEUR.is_alive())
+
+
 def demarrer():
     """Lance le serveur unifie en tache de fond (idempotent). Attend qu'il ecoute."""
-    global _SERVEUR
+    global _SERVEUR, _UVICORN
     port = _port()
     if _SERVEUR and _SERVEUR.is_alive():
         return
@@ -100,23 +119,33 @@ def demarrer():
     def run():
         try:
             serveur.run()   # uvicorn n'installe pas les handlers de signaux hors main thread
-        except Exception:
-            LOG.exception("serveur web")
+        except BaseException:
+            # Port deja pris : uvicorn fait sys.exit(STARTUP_FAILURE). Ce SystemExit
+            # n'est pas une Exception : sans ce filet, le thread mourait sans trace.
+            LOG.exception("serveur web : uvicorn n'a pas pu ecouter sur %s:%s", hote, port)
 
+    _UVICORN = serveur
     _SERVEUR = threading.Thread(target=run, daemon=True, name="serveur-web")
     _SERVEUR.start()
-    for _ in range(40):                # attend l'ouverture du port (max ~6 s)
-        if _port_ouvert(port):
+    for _ in range(40):                # attend que NOTRE uvicorn ecoute (max ~6 s)
+        if serveur.started or not _SERVEUR.is_alive():
             break
         time.sleep(0.15)
     # Listener LAN séparé : il ne contient QUE /satellite et /desktop-agent. Le serveur unifié
     # reste en loopback, donc panneau/cockpit/inbox/Twilio ne gagnent aucun accès
-    # réseau lorsqu'un Raspberry Pi est configuré.
+    # réseau lorsqu'un Raspberry Pi est configuré. Il est indépendant du port ci-dessus :
+    # on le lance même si le serveur unifié n'a pas démarré.
     try:
         from core.satellite import demarrer_lan
         demarrer_lan()
     except Exception:
         LOG.exception("demarrage du listener satellite LAN")
+    if not _ecoute():
+        LOG.error("serveur web NON demarre sur le port %s (port deja utilise ou erreur "
+                  "de demarrage) : tunnel ngrok non ouvert", port)
+        print(f"Serveur web NON demarre : port {port} deja utilise ou erreur de "
+              "demarrage (voir le journal). Tunnel ngrok non ouvert.")
+        return
     # Ouvre le tunnel ngrok automatiquement (si authtoken configure et pas d'URL
     # manuelle) pour que l'endpoint soit joignable des le demarrage.
     try:
@@ -133,37 +162,45 @@ def _ouvrir_tunnel():
     global _URL
     if reglage("serveur.public_url", "") or reglage("twilio.public_url", ""):
         return                          # tu geres ton tunnel toi-meme (CLI)
+    if not _ecoute():
+        # Notre serveur n'ecoute pas : ne jamais publier ce qui tiendrait le port
+        # (couvre aussi l'appel paresseux de url_publique()).
+        return
     if _URL:
         return
     tok = reglage("serveur.ngrok_authtoken", "") or reglage("twilio.ngrok_authtoken", "")
     if not tok:
         return
     from pyngrok import ngrok
-    try:
-        ngrok.set_auth_token(tok)
-        domaine = reglage("serveur.ngrok_domaine", "")
-        options = {"domain": domaine} if domaine else {}
-        # Adresse explicite : un port seul devient « localhost:port », que Windows
-        # peut resoudre en IPv6 (::1) alors que le serveur n'ecoute qu'en 127.0.0.1
-        # (ngrok repond alors ERR_NGROK_8012 / HTTP 502).
-        _URL = ngrok.connect(f"127.0.0.1:{_port()}", "http", **options).public_url
-        LOG.info("tunnel ngrok ouvert : %s", _URL)
-        print(f"Tunnel ngrok ouvert : {_URL}")
-    except Exception as e:
-        _URL = None
-        msg = str(e)
-        if "certificate" in msg or "x509" in msg or "unknown authority" in msg:
-            # Cas connu : un antivirus (Avast Web Shield) intercepte et BLOQUE ngrok
-            # avec un certificat "Untrusted Root" -> l'agent ne peut pas s'authentifier.
-            LOG.error("tunnel ngrok bloque par l'antivirus (certificat non fiable). "
-                      "Ajoute une exception Avast pour connect.ngrok-agent.com et *.ngrok-free.app, "
-                      "ou utilise un tunnel lance a la main (serveur.public_url). Voir docs/iphone.md.")
-            print("ATTENTION : le tunnel ngrok est bloque par l'antivirus (Avast). "
-                  "Le serveur local tourne mais n'est pas joignable de l'exterieur. "
-                  "Ajoute une exception Avast (voir docs/iphone.md) puis relance.")
-        else:
-            LOG.exception("ouverture du tunnel ngrok")
-            print(f"Tunnel ngrok indisponible : {msg[:120]}")
+    with _VERROU_TUNNEL:
+        if _URL:
+            return                      # un autre thread vient de l'ouvrir
+        try:
+            ngrok.set_auth_token(tok)
+            domaine = reglage("serveur.ngrok_domaine", "")
+            options = {"domain": domaine} if domaine else {}
+            # Adresse explicite : un port seul devient « localhost:port », que Windows
+            # peut resoudre en IPv6 (::1) alors que le serveur n'ecoute qu'en 127.0.0.1
+            # (ngrok repond alors ERR_NGROK_8012 / HTTP 502).
+            _URL = ngrok.connect(f"127.0.0.1:{_port()}", "http", **options).public_url
+            LOG.info("tunnel ngrok ouvert : %s", _URL)
+            print(f"Tunnel ngrok ouvert : {_URL}")
+        except Exception as e:
+            # Pas de « _URL = None » : dans ce chemin _URL n'a jamais ete rempli, et
+            # l'ecraser effacerait une URL ouverte entre-temps par un autre thread.
+            msg = str(e)
+            if "certificate" in msg or "x509" in msg or "unknown authority" in msg:
+                # Cas connu : un antivirus (Avast Web Shield) intercepte et BLOQUE ngrok
+                # avec un certificat "Untrusted Root" -> l'agent ne peut pas s'authentifier.
+                LOG.error("tunnel ngrok bloque par l'antivirus (certificat non fiable). "
+                          "Ajoute une exception Avast pour connect.ngrok-agent.com et *.ngrok-free.app, "
+                          "ou utilise un tunnel lance a la main (serveur.public_url). Voir docs/iphone.md.")
+                print("ATTENTION : le tunnel ngrok est bloque par l'antivirus (Avast). "
+                      "Le serveur local tourne mais n'est pas joignable de l'exterieur. "
+                      "Ajoute une exception Avast (voir docs/iphone.md) puis relance.")
+            else:
+                LOG.exception("ouverture du tunnel ngrok")
+                print(f"Tunnel ngrok indisponible : {msg[:120]}")
 
 
 def url_publique():
