@@ -33,6 +33,17 @@ def _joignable(ip):
         return False
 
 
+def _appliquer(activer, mode):
+    """Applique un mode sans jamais tuer la boucle ; journalise un echec."""
+    try:
+        resultat = str(activer(mode) or "")
+    except Exception:
+        LOG.exception("presence: echec du mode %s", mode)
+        return
+    if not resultat.endswith(" active."):
+        LOG.warning("presence: mode %s non applique : %s", mode, resultat)
+
+
 def _boucle():
     ip = reglage("presence.ip", "")
     intervalle = int(reglage("presence.intervalle", 60))
@@ -46,29 +57,38 @@ def _boucle():
     off_declenche = False
 
     while True:
-        if _ETAT["actif"]:
-            # Deux essais : les iPhone dorment parfois cote wifi.
-            present = _joignable(ip) or _joignable(ip)
-            maintenant = time.time()
+        try:
+            if _ETAT["actif"]:
+                # Deux essais : les iPhone dorment parfois cote wifi.
+                present = _joignable(ip) or _joignable(ip)
+                maintenant = time.time()
 
-            if present:
-                if _ETAT["present"] is False:
-                    LOG.info("presence: iPhone de retour")
-                    if mode_retour:
-                        activer(mode_retour)
-                _ETAT["present"] = True
-                _ETAT["absent_depuis"] = None
-                off_declenche = False
-            else:
-                if _ETAT["absent_depuis"] is None:
-                    _ETAT["absent_depuis"] = maintenant
-                    LOG.info("presence: iPhone absent")
-                elif (not off_declenche
-                      and maintenant - _ETAT["absent_depuis"] >= seuil):
-                    LOG.info("presence: absence > %ds, mode %s", seuil, mode_absence)
-                    activer(mode_absence)
-                    off_declenche = True
-                _ETAT["present"] = False
+                if present:
+                    # Le retour ne suit qu'une vraie absence (mode off applique).
+                    # Un ping manque, souvent le wifi de l'iPhone en veille, n'a
+                    # rien eteint : il ne doit donc rien rallumer.
+                    if _ETAT["present"] is False and off_declenche:
+                        LOG.info("presence: iPhone de retour")
+                        if mode_retour:
+                            _appliquer(activer, mode_retour)
+                    elif _ETAT["present"] is False:
+                        LOG.debug("presence: absence courte ignoree")
+                    _ETAT["present"] = True
+                    _ETAT["absent_depuis"] = None
+                    off_declenche = False
+                else:
+                    if _ETAT["absent_depuis"] is None:
+                        _ETAT["absent_depuis"] = maintenant
+                        LOG.info("presence: iPhone absent")
+                    elif (not off_declenche
+                          and maintenant - _ETAT["absent_depuis"] >= seuil):
+                        LOG.info("presence: absence > %ds, mode %s", seuil, mode_absence)
+                        _appliquer(activer, mode_absence)
+                        off_declenche = True
+                    _ETAT["present"] = False
+        except Exception:
+            # Filet : une erreur imprevue ne doit pas arreter la detection.
+            LOG.exception("presence: iteration")
 
         time.sleep(intervalle)
 

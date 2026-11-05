@@ -526,15 +526,15 @@ class MediaRoutingTests(unittest.TestCase):
 
     def test_playlist_personnelle_exacte_passe_avant_la_recherche_publique(self):
         with patch("tools.spotify._playlist_id",
-                   return_value="playlist-trajet") as personnelle, \
+                   return_value="playlist-chill") as personnelle, \
                 patch.object(spotify, "requests") as requetes:
-            resultat = spotify._chercher_media("trajet", "playlist")
+            resultat = spotify._chercher_media("chill", "playlist")
 
         self.assertEqual(resultat, {
-            "uri": "spotify:playlist:playlist-trajet",
-            "name": "trajet",
+            "uri": "spotify:playlist:playlist-chill",
+            "name": "chill",
         })
-        personnelle.assert_called_once_with("trajet", creer=False)
+        personnelle.assert_called_once_with("chill", creer=False)
         requetes.get.assert_not_called()
 
     def test_spotify_connect_lance_le_resultat_exact(self):

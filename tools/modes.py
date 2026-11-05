@@ -24,9 +24,21 @@ def _norm(s):
     return " ".join(sans_accents(s).replace("'", " ").split())
 
 
-def _resoudre(nom):
+def _resoudre(nom, modes=None):
     """Ramene une formulation libre a un nom de mode."""
     n = _norm(nom)
+    modes = _modes() if modes is None else modes
+    # 1) Nom exact d'un mode (preset ou sur mesure), avant tout mot-cle : un mode
+    # « office » ne doit pas etre detourne vers « off » par sous-chaine.
+    noms = {_norm(str(cle)): cle for cle in modes}
+    if n in noms:
+        return noms[n]
+    # 2) Mode sur mesure cite en mots entiers (« active le mode office »).
+    cadre = f" {n} "
+    for norme in sorted(noms, key=len, reverse=True):
+        if norme and noms[norme] not in _MODES_DEFAUT and f" {norme} " in cadre:
+            return noms[norme]
+    # 3) Intentions libres vers les presets.
     if any(k in n for k in ("retour", "rentre", "reviens", "je reviens")):
         return "retour"
     if any(k in n for k in ("film", "cinema", "movie")):
@@ -43,28 +55,60 @@ def _modes():
     return {**_MODES_DEFAUT, **(reglage("modes", {}) or {})}
 
 
-def activer(nom):
-    """Applique un mode (helper reutilise par la detection de presence)."""
-    from tools.lumieres import allumer_lumiere, changer_couleur, regler_luminosite
+def _appliquer(nom):
+    """Applique un mode. Renvoie (cle, nombre d'actions, echecs) ; cle None si
+    le mode est inconnu. Les fonctions Hue ne levent pas : elles renvoient un
+    texte, compare ici aux debuts de messages d'echec connus."""
+    from tools.lumieres import (PREFIXES_ECHEC, allumer_lumiere, changer_couleur,
+                                regler_luminosite)
 
-    cle = _resoudre(nom)
     modes = _modes()
+    cle = _resoudre(nom, modes)
     etapes = modes.get(cle)
     if etapes is None:
-        return f"Mode inconnu : {nom}. Modes disponibles : {', '.join(modes)}."
+        return None, 0, []
+
+    actions, echecs = 0, []
+
+    def noter(resultat):
+        nonlocal actions
+        actions += 1
+        if str(resultat).startswith(PREFIXES_ECHEC):
+            echecs.append(str(resultat))
 
     for etape in etapes:
         piece = etape.get("piece", "toutes")
         if etape.get("eteindre"):
-            allumer_lumiere(piece, False)
+            noter(allumer_lumiere(piece, False))
             continue
         if etape.get("couleur"):
-            changer_couleur(piece, etape["couleur"])
+            noter(changer_couleur(piece, etape["couleur"]))
         elif etape.get("allumer", True):
-            allumer_lumiere(piece, True)
+            noter(allumer_lumiere(piece, True))
         if "luminosite" in etape:
-            regler_luminosite(piece, etape["luminosite"])
-    return f"Mode {cle} active."
+            noter(regler_luminosite(piece, etape["luminosite"]))
+    return cle, actions, echecs
+
+
+def appliquer(nom):
+    """Applique un mode et renvoie (cle, echecs) : liste vide = tout a reussi.
+
+    Pour les scenes qui annoncent le resultat (« lumieres eteintes ») : elles ne
+    doivent le dire que si echecs est vide. cle vaut None si le mode est inconnu.
+    """
+    cle, _actions, echecs = _appliquer(nom)
+    return cle, echecs
+
+
+def activer(nom):
+    """Applique un mode (helper reutilise par la detection de presence)."""
+    cle, actions, echecs = _appliquer(nom)
+    if cle is None:
+        return f"Mode inconnu : {nom}. Modes disponibles : {', '.join(_modes())}."
+    if not echecs:
+        return f"Mode {cle} active."
+    etat = "non applique" if len(echecs) >= actions else "partiellement applique"
+    return f"Mode {cle} {etat} — {echecs[0]}"
 
 
 @outil(

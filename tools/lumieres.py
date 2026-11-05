@@ -19,6 +19,11 @@ PIECE_NUIT = reglage("assistant.piece_nuit", "chambre")
 # Pieces connues du pont, remplies au demarrage : {nom_normalise: (id, nom)}.
 _PIECES_HUE = {}
 
+# Debuts des messages d'echec des outils ci-dessous, qui ne levent jamais :
+# tools/modes s'en sert pour ne pas annoncer un succes quand Hue n'a rien fait.
+PREFIXES_ECHEC = ("Piece inconnue", "Hue injoignable", "Le pont a refuse",
+                  "Couleur inconnue")
+
 # Couleurs par nom francais -> (teinte, saturation) au format Hue.
 # La teinte va de 0 a 65535, la saturation de 0 (blanc) a 254 (couleur vive).
 _COULEURS_HUE = {
@@ -222,7 +227,13 @@ def allumer_si_nuit():
 
     « Nuit » = avant le lever ou apres le coucher du soleil, calcule pour ta
     position et la date du jour (donc plus tard en ete, plus tot en hiver).
+    Jamais sur le serveur sans peripheriques : il redemarre seul, parfois en
+    pleine nuit (mise a jour, relance a distance), et allumerait la chambre.
     """
+    if (reglage("poste_principal.actif", False)
+            and reglage("poste_principal.serveur_sans_peripheriques", False)):
+        print("  [auto] Mode serveur : pas d'allumage automatique.")
+        return
     from tools.meteo import il_fait_nuit
     if not PIECE_NUIT or not (HUE_PONT and HUE_CLE):
         return

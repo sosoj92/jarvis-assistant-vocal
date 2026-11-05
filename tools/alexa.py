@@ -16,6 +16,7 @@ réutilisé ensuite. Credentials dans config.yaml (jamais en dur). Voir docs/ale
 Niveaux : etat/media/annoncer = N1 ; routine = N2 (une routine peut être impactante).
 """
 import asyncio
+import concurrent.futures
 import json
 import logging
 import re
@@ -47,8 +48,21 @@ def _boucle():
     return _LOOP
 
 
+_MSG_DELAI = ("Alexa ne répond pas à temps. L'action a peut-être quand même été "
+              "prise en compte : vérifie avant de répéter.")
+
+
 def _run(coro, timeout=40):
-    return asyncio.run_coroutine_threadsafe(coro, _boucle()).result(timeout=timeout)
+    fut = asyncio.run_coroutine_threadsafe(coro, _boucle())
+    try:
+        return fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        # result(timeout) arrête seulement d'attendre : sans cancel(), la coroutine
+        # continuerait sur alexa-loop et déclencherait la routine après l'échec
+        # annoncé. L'annulation ne rattrape pas une requête déjà partie, d'où un
+        # message prudent plutôt que « rien n'a été fait ».
+        fut.cancel()
+        raise TimeoutError(_MSG_DELAI) from None
 
 
 # ------------------------------------------------------ config / login
@@ -565,7 +579,8 @@ def _resoudre_routine(automations, appareil, on):
     """Trouve la routine correspondant à (appareil, on/off). Renvoie (nom, message)."""
     app_mots = [m for m in sans_accents(appareil).lower().split() if len(m) >= 2]
     cible = _MOTS_ON if on else _MOTS_OFF
-    exact, appareil_seul = [], []
+    opposee = _MOTS_OFF if on else _MOTS_ON
+    exact, appareil_seul, inverse = [], [], []
     for a in automations:
         if not isinstance(a, dict):
             continue
@@ -576,14 +591,25 @@ def _resoudre_routine(automations, appareil, on):
         blob_mots = blob.replace("-", " ").split()
         if app_mots and not all(_appareil_present(m, blob, blob_mots) for m in app_mots):
             continue                                   # pas le bon appareil
-        (exact if set(blob_mots) & cible else appareil_seul).append(nom)
+        if set(blob_mots) & cible:
+            exact.append(nom)
+        elif set(blob_mots) & opposee:
+            inverse.append(nom)                        # fait l'inverse : jamais lancée
+        else:
+            appareil_seul.append(nom)
     if exact:
         return exact[0], None
-    if len(appareil_seul) == 1:                         # une seule routine (bascule)
+    # Une routine Alexa fixe un état, elle n'inverse rien : seule une routine
+    # neutre (sans mot on/off) peut servir quand le sens demandé n'existe pas.
+    if len(appareil_seul) == 1:
         return appareil_seul[0], None
     if appareil_seul:
         return None, ("Plusieurs routines Alexa pourraient correspondre. Précise "
                       "l'appareil ou la pièce, ou dis « lance la routine <nom> ».")
+    if inverse:
+        voulue = " ".join(app_mots or ["appareil"]) + (" on" if on else " off")
+        return None, (f"Je n'ai que la routine « {inverse[0]} », qui fait l'inverse : "
+                      f"je n'ai rien déclenché. Crée « {voulue} » dans l'app Alexa.")
     return None, ""
 
 
@@ -629,7 +655,9 @@ async def _media(action, cible, niveau):
 # ------------------------------------------------------ outils
 
 def _err(e):
-    return f"Alexa a échoué ({str(e)[:140]})."
+    if isinstance(e, TimeoutError):
+        return _MSG_DELAI           # jamais « Alexa a échoué (). » sur un délai
+    return f"Alexa a échoué ({(str(e) or type(e).__name__)[:140]})."
 
 
 @outil(

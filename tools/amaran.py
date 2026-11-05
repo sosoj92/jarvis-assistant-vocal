@@ -26,6 +26,9 @@ _COULEURS = {
     "bleu": 220, "indigo": 250, "violet": 275, "mauve": 285, "magenta": 300,
     "rose": 325, "blanc": None,   # blanc -> repasser en CCT
 }
+# Formes féminines (« passe-la en bleue ») ramenées à la clé du dictionnaire.
+_FEMININS = {"bleue": "bleu", "verte": "vert", "violette": "violet",
+             "blanche": "blanc"}
 
 
 def _configure():
@@ -86,14 +89,22 @@ def controler_amaran(etat: str = "", intensite: int = None,
 
         bri = max(0, min(100, int(intensite))) if intensite is not None else 80
         coul = sans_accents(couleur.lower()).strip()
-        if coul and coul in _COULEURS and _COULEURS[coul] is not None:
+        coul = _FEMININS.get(coul, coul)
+        if coul and coul not in _COULEURS and temperature is None:
+            # Rien n'est envoyé : annoncer « c'est fait » serait faux. (Avec une
+            # température, le passage en kelvin ci-dessous reste valable.)
+            return (f"Je ne connais pas la couleur « {couleur} » : je n'ai rien changé. "
+                    "Couleurs possibles : " + ", ".join(_COULEURS) + ".")
+        if coul and _COULEURS.get(coul) is not None:
             _post("/lights/all/hsi", {"intensity": bri, "hue": _COULEURS[coul],
                                       "sat": 100})
             faits.append(f"couleur {couleur}")
-        elif temperature is not None:
-            k = max(2500, min(7500, int(temperature)))
+        elif temperature is not None or coul == "blanc":
+            # « Blanc » sans température : on repasse en CCT à 5600 K (lumière du
+            # jour), sinon la lampe garderait sa couleur précédente.
+            k = max(2500, min(7500, int(temperature if temperature is not None else 5600)))
             _post("/lights/all/cct", {"intensity": bri, "kelvin": k, "gm": 0})
-            faits.append(f"{k} kelvin")
+            faits.append(f"{k} kelvin" if temperature is not None else "couleur blanc")
         elif intensite is not None:
             _post("/lights/all/brightness", {"value": bri})
             faits.append(f"{bri} pour cent")

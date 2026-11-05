@@ -542,10 +542,15 @@ def lancer_spotify(piece: str = "") -> str:
     # le seul repli universel. Il n'est utilisé qu'après l'ouverture et le délai.
     try:
         from tools.systeme import controler_media
-        controler_media("pause")
-        return "Spotify est lancé et j'ai envoyé la commande lecture."
+        res = str(controler_media("pause") or "")
     except Exception:
-        return "Spotify est lancé, mais je n'ai pas pu démarrer la lecture."
+        res = ""
+    # controler_media ne lève pas quand le poste principal échoue : il renvoie
+    # un texte. Liste blanche des succès : touche pressée en local (« Fait »)
+    # ou commande relayée par l'agent du poste (« … envoyée au poste principal »).
+    if res.startswith(("Fait", "C'est fait")) or "envoyée" in res:
+        return "Spotify est lancé et j'ai envoyé la commande lecture."
+    return "Spotify est lancé, mais je n'ai pas pu démarrer la lecture."
 
 
 @outil(
