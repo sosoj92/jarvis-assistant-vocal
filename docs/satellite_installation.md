@@ -84,7 +84,9 @@ satellites:
 satellite_lan:
   actif: true
   host: "0.0.0.0"
-  port: 8791
+  tls: true        # port chiffré (wss://), certificat créé dans certs/ (défaut)
+  port_tls: 8792
+  port: 8791       # port EN CLAIR, seulement le temps de la bascule (voir plus bas)
 ```
 
 Créer le token sur le PC ou le Pi :
@@ -93,8 +95,10 @@ Créer le token sur le PC ou le Pi :
 python -c "import secrets; print(secrets.token_urlsafe(24))"
 ```
 
-Redémarrer Jarvis, puis autoriser le port choisi dans le pare-feu **uniquement sur
-le profil réseau privé**.
+Redémarrer Jarvis, puis autoriser le port chiffré `8792` dans le pare-feu
+**uniquement sur le profil réseau privé**. Au premier démarrage, Jarvis crée dans
+`certs/` une clé privée et le certificat **public** `certs/jarvis-lan.crt`, que le
+satellite utilisera à l'étape suivante.
 
 ### 4. Configurer et tester le satellite
 
@@ -106,13 +110,26 @@ cp config.exemple.yaml config.yaml
 nano config.yaml
 ```
 
-Renseigner `pc_url`, `satellite_id` et `token`. L'URL ressemble à :
+Copier le certificat **public** du PC à côté de cette configuration, sous le nom
+`satellite_pi/jarvis-lan.crt` (clé USB, ou `scp` depuis le PC). Ne copier **jamais**
+`certs/jarvis-lan.key` : la clé privée ne quitte pas le PC.
+
+Renseigner ensuite `pc_url`, `certificat`, `satellite_id` et `token`. L'URL ressemble à :
 
 ```yaml
-pc_url: "ws://<ADRESSE_LAN_DU_PC>:8791/satellite"
+pc_url: "wss://<ADRESSE_LAN_DU_PC>:8792/satellite"
+certificat: "jarvis-lan.crt"
 satellite_id: "satellite-cuisine"
 token: "<LE_MEME_TOKEN_QUE_SUR_LE_PC>"
 ```
+
+Le satellite n'accepte que ce certificat : le token et l'audio ne passent pas en
+clair, et un autre appareil du Wi-Fi ne peut pas se faire passer pour le PC. L'ancien
+`ws://<ADRESSE_LAN_DU_PC>:8791/satellite` (en clair, sans certificat) n'est qu'un mode
+de transition déconseillé : il cesse de fonctionner dès que le PC passe
+`satellite_lan.clair: false` (voir [satellite.md](satellite.md#sécurité)). Si le
+client signale un certificat inutilisable, vérifier que le fichier est présent et
+qu'il s'agit bien de la copie actuelle de `certs/jarvis-lan.crt`.
 
 Lister les périphériques audio si les valeurs par défaut ne conviennent pas :
 

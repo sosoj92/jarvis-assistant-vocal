@@ -45,6 +45,7 @@ $arguments = @(
     "-o", "BatchMode=yes",
     "-o", "IdentitiesOnly=yes",
     "-o", "StrictHostKeyChecking=yes",
+    "-o", "ConnectTimeout=10",
     "-o", "ExitOnForwardFailure=yes",
     "-o", "ServerAliveInterval=30",
     "-o", "ServerAliveCountMax=3",
@@ -60,11 +61,28 @@ $process = Start-Process -FilePath "$env:WINDIR\System32\OpenSSH\ssh.exe" `
     -RedirectStandardOutput (Join-Path $logs "hermes-tunnel.log") `
     -RedirectStandardError (Join-Path $logs "hermes-tunnel.err.log")
 
-Start-Sleep -Seconds 2
-if ($process.HasExited) {
+# Un ssh encore vivant ne prouve rien (nom a resoudre, connexion, authentification
+# en cours) : on attend qu'il ECOUTE sur 8642, ce qu'il ne fait qu'une fois
+# authentifie. Sinon on l'arrete et on leve une erreur, pour que la boucle de
+# demarrer_jarvis_complet.ps1 reessaie pendant le demarrage de la VM.
+$ecoute = $false
+$limite = (Get-Date).AddSeconds(25)
+while (-not $process.HasExited -and (Get-Date) -lt $limite) {
+    $ecoute = [bool](Get-NetTCPConnection -State Listen -LocalPort 8642 `
+        -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -eq $process.Id })
+    if ($ecoute) { break }
+    Start-Sleep -Milliseconds 500
+}
+# Les retours -R sont confirmes juste apres : avec ExitOnForwardFailure, ssh peut
+# encore s'arreter dans la foulee.
+if ($ecoute) { Start-Sleep -Seconds 2 }
+if (-not $ecoute -or $process.HasExited) {
+    if (-not $process.HasExited) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
     $detail = Get-Content (Join-Path $logs "hermes-tunnel.err.log") `
         -Tail 10 -ErrorAction SilentlyContinue
-    throw "Le tunnel Hermes n'a pas demarre. $detail"
+    throw "Le tunnel Hermes n'a pas demarre (ssh arrete ou port 8642 jamais ouvert). $detail"
 }
 
 $process.Id | Set-Content -Encoding ascii (Join-Path $logs "hermes-tunnel.pid")

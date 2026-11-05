@@ -51,6 +51,20 @@ API_SERVER_KEY=<une-cle-aleatoire-longue>
 
 Ne place jamais cette clé dans Git, une capture d'écran ou une commande partagée.
 
+### Jeton du serveur MCP (`mcp.token`)
+
+Si `mcp.token` (ou la variable `JARVIS_MCP_TOKEN`) est renseigné côté Windows, le
+serveur MCP exige `Authorization: Bearer <jeton>` sur chaque requête, même arrivée par
+le tunnel en loopback. Le gabarit `hermes-config.yaml` fourni n'envoie pas cet
+en-tête : Hermes reçoit alors `401`, ne voit plus aucun outil, et le refus apparaît
+côté Windows dans `logs/mcp.log` (« requete MCP refusee : jeton absent ou invalide »).
+
+Avec le gabarit tel quel, laisse donc `mcp.token` vide : le serveur MCP n'écoute que
+sur `127.0.0.1` et la VM ne l'atteint que par le tunnel SSH. Activer un jeton demande
+d'ajouter cet en-tête à `mcp_servers.jarvis`, alimenté par une variable de
+`hermes-api.env` (droits `600`) et jamais écrit en clair dans le gabarit, puis de le
+valider avec l'image Hermes épinglée. Détails : [mcp.md](mcp.md).
+
 ## Clé SSH et tunnel Windows
 
 Crée une clé dédiée sans réutiliser une clé personnelle, copie seulement sa partie

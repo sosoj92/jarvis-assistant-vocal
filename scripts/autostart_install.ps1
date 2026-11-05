@@ -41,8 +41,19 @@ $cmd = Join-Path $startup "JarvisAutostart.cmd"
   'rem Demarrage auto de Jarvis (sans admin) : delai reseau puis wrapper idempotent.',
   'timeout /t 30 /nobreak >nul',
   ('powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $script + '"')
-) | Set-Content -Encoding ascii $cmd
-if (Test-Path $cmd) {
+) | Set-Content -Encoding Oem $cmd
+# Oem = page de code de cmd.exe (850 en France). En ascii, un profil accentue
+# (C:\Users\Helene avec accents) devenait "H?l?ne" et le demarrage echouait sans
+# bruit : on relit donc le fichier et on compare le chemin avant d'annoncer OK.
+$relu = if (Test-Path $cmd) { Get-Content -Encoding Oem -Raw $cmd } else { "" }
+if ($relu -and -not $relu.Contains($script)) {
+  Remove-Item $cmd -Force -ErrorAction SilentlyContinue
+  Write-Host "ECHEC : cmd.exe ne sait pas lire ce chemin (caractere hors de sa page de code) :" -ForegroundColor Red
+  Write-Host "  $script" -ForegroundColor Red
+  Write-Host "Demarrage automatique NON installe : lance ce script en administrateur (tache planifiee)." -ForegroundColor Red
+  exit 1
+}
+if ($relu) {
   Write-Host "OK : lancement au démarrage installé (dossier Démarrage, sans admin)." -ForegroundColor Green
   Write-Host "  -> $cmd"
   Write-Host "Tester maintenant : & `"$script`""

@@ -103,6 +103,11 @@ def _nouveau_login(oauth=None):
         oauth=(oauth or {}))
 
 
+# Le proxy sert des pages pré-remplies avec le mot de passe Amazon : jamais hors
+# de ce PC (sur une machine sans écran, passer par un tunnel ssh -L 3000:127.0.0.1:3000).
+HOTE_PROXY = "127.0.0.1"
+
+
 def _proxy_totp_frais(login, base_url):
     """AlexaProxy qui régénère le code TOTP à CHAQUE remplissage de page.
 
@@ -201,9 +206,11 @@ async def _login_navigateur():
     _activer_debug()
     port = int(reglage("alexa.proxy_port", 3000))
     login = _nouveau_login()
-    proxy = _proxy_totp_frais(login, f"http://127.0.0.1:{port}")
+    proxy = _proxy_totp_frais(login, f"http://{HOTE_PROXY}:{port}")
 
-    await proxy.start_proxy()
+    # Sans host, authcaptureproxy écoute sur 0.0.0.0 : tout le Wi-Fi recevrait la
+    # page Amazon pré-remplie (mot de passe + code 2FA frais). Boucle locale seulement.
+    await proxy.start_proxy(host=HOTE_PROXY)
     url_ouvrir = str(proxy.access_url())
     print("\n" + "=" * 64)
     print("  Ouvre CETTE adresse dans ton navigateur (sur ce PC) :")

@@ -16,7 +16,8 @@ def _module(nom):
 
 
 _module("cv2")
-_module("requests")
+# Pas de faux `requests` : le vrai est installé dans le venv principal, et le
+# remplacer ici casserait tous les tests collectés après celui-ci.
 mp = _module("mediapipe")
 tasks = _module("mediapipe.tasks")
 mp_python = _module("mediapipe.tasks.python")

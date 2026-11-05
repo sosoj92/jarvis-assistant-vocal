@@ -94,14 +94,32 @@ Pour un client qui n'est pas sur la meme machine, passe en HTTP dans
 ```yaml
 mcp:
   transport: "http"     # au lieu de "stdio"
-  host: "127.0.0.1"     # garde 127.0.0.1 : le transport HTTP n'a pas d'authentification
+  host: "127.0.0.1"     # garde 127.0.0.1 ; ailleurs, un jeton est obligatoire
   port: 8765
+  token: ""             # facultatif en local ; renseigne, il est exige de TOUT client
 ```
 
-Hors de `127.0.0.1`, n'importe quelle machine du reseau pourrait appeler les outils
-exposes, et la protection contre le DNS rebinding du SDK MCP est desactivee. Pour un
-client sur une autre machine, prefere un tunnel chiffre et authentifie (SSH,
-Tailscale) vers `127.0.0.1:8765`.
+Hors de `127.0.0.1`, la protection contre le DNS rebinding du SDK MCP est desactivee :
+le serveur refuse alors de demarrer sans jeton. Pour un client sur une autre machine,
+prefere de toute facon un tunnel chiffre et authentifie (SSH, Tailscale) vers
+`127.0.0.1:8765` : en HTTP simple, le jeton circule en clair.
+
+### Jeton d'acces (`mcp.token`)
+
+- Le jeton se regle dans `mcp.token` (`config.yaml`) ou dans la variable
+  d'environnement `JARVIS_MCP_TOKEN`, qui est prioritaire. C'est un secret : jamais
+  dans Git, une capture ou un chat. Pour en generer un :
+  `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+- Des qu'un jeton est defini, **chaque requete HTTP** doit porter l'en-tete
+  `Authorization: Bearer <jeton>`, **meme depuis 127.0.0.1**. Sans lui, le serveur
+  repond `401` (« jeton MCP requis ») et note « requete MCP refusee : jeton absent ou
+  invalide » dans `logs/mcp.log`.
+- Vide (defaut) : aucun controle, ce qui n'est accepte qu'en boucle locale
+  (`127.0.0.1`, `::1` ou `localhost`).
+- Le transport stdio (Claude Desktop, Hermes en local) n'est pas concerne.
+- Hermes dans la VM passe par le tunnel en loopback : le gabarit
+  `deploy/server/hermes-config.yaml` n'envoie pas encore cet en-tete. Voir
+  [hermes_server_vm.md](hermes_server_vm.md) avant d'activer un jeton.
 
 Le serveur ecoute alors en streamable-http ; le client se connecte a
 `http://<machine>:8765`. (Le transport stdio reste recommande pour les clients

@@ -38,9 +38,23 @@ class InstallateurTest(unittest.TestCase):
         attributs = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("*.bat text eol=crlf", attributs)
         for nom in ("INSTALLER_JARVIS.bat", "lancer_jarvis.bat", "mettre_a_jour_jarvis.bat",
-                    "scripts/trouver_uv.bat"):
+                    "scripts/trouver_uv.bat", "lancer_serveur_mcp.bat"):
             with self.subTest(nom=nom):
                 (ROOT / nom).read_bytes().decode("ascii")   # cmd.exe : pas d'accents
+
+    def test_uv_toujours_cherche_par_trouver_uv(self):
+        # winget installe uv ailleurs que dans .local\bin : seul trouver_uv.bat le sait.
+        lanceurs = sorted([*ROOT.glob("*.bat"), *(ROOT / "scripts").glob("*.bat")])
+        self.assertIn(ROOT / "lancer_serveur_mcp.bat", lanceurs)
+        for chemin in lanceurs:
+            if chemin.name == "trouver_uv.bat":
+                continue
+            with self.subTest(nom=chemin.name):
+                self.assertNotIn(b".local\\bin\\uv.exe", chemin.read_bytes().lower())
+        mcp = (ROOT / "lancer_serveur_mcp.bat").read_text(encoding="ascii")
+        self.assertIn('call "%~dp0scripts\\trouver_uv.bat"', mcp)
+        self.assertIn("if not defined UV", mcp)
+        self.assertIn('"%UV%" run python -m jarvis.mcp_server', mcp)
 
 
 if __name__ == "__main__":

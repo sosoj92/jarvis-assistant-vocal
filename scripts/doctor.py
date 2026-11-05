@@ -55,6 +55,15 @@ def reglage(chemin, defaut=None):
         return defaut
 
 
+def est_cle_factice(valeur):
+    """Vrai pour une valeur d'exemple de config.example.yaml (« sk-proj-... »,
+    « ta-cle-hue »...) : elle n'est pas vide mais ne vaut pas une vraie cle.
+    Meme regle que scripts/setup.py (scripts autonomes). Volontairement etroite :
+    une vraie cle ne contient jamais « ... » et ne commence pas par « ta-cle »."""
+    v = str(valeur or "").strip()
+    return "..." in v or v.lower().startswith("ta-cle")
+
+
 # ---------------------------------------------------------------- verifs
 
 def v_python():
@@ -152,7 +161,11 @@ def v_llm():
         provider = fournisseur()
         chemin = "openai.cle" if provider == "openai" else "anthropic.cle"
         libelle = "OpenAI" if provider == "openai" else "Anthropic (Claude)"
-        if reglage(chemin, ""):
+        cle = reglage(chemin, "")
+        if est_cle_factice(cle):
+            ko(f"cle {libelle} encore a la valeur d'exemple",
+               f"remplace {chemin} dans config.yaml par ta vraie cle.")
+        elif cle:
             ok(f"cle {libelle} presente")
         else:
             ko(f"cle {libelle} absente",
@@ -238,10 +251,21 @@ def v_micro():
     titre("Micro")
     try:
         import sounddevice as sd
-        idx = reglage("audio.micro", 1)
+        # Meme defaut que jarvis14.py : null (ou cle absente) = micro par defaut.
+        idx = reglage("audio.micro", None)
         entrees = [d for d in sd.query_devices() if d["max_input_channels"] > 0]
         if not entrees:
             ko("aucun micro detecte", "branche un micro.")
+            return
+        if idx is None:
+            ok(f"{len(entrees)} entree(s) audio ; micro configure : micro par defaut du systeme")
+            try:
+                # query_devices(None) renverrait la LISTE : on demande l'entree par defaut.
+                nom = sd.query_devices(kind="input")["name"]
+                print(f"{INFO} micro par defaut = {nom}")
+            except Exception:
+                warn("aucun micro par defaut defini dans le systeme",
+                     "choisis-en un dans Windows, ou mets son index dans audio.micro.")
             return
         ok(f"{len(entrees)} entree(s) audio ; micro configure : index {idx}")
         try:

@@ -2,7 +2,8 @@
 title Sauvegarder Jarvis
 rem Envoie tes dernieres modifications sur GitHub en un clic :
 rem ajoute tout, cree un commit date, puis pousse. Les fichiers sensibles
-rem (reglages_local.py, memoire.json, voix...) restent exclus via .gitignore.
+rem (config.yaml, .env, memoire.json, notes/, voix/...) restent exclus via
+rem .gitignore ; verifie quand meme le diff (git status) avant de pousser.
 cd /d "%~dp0"
 
 echo ============================================

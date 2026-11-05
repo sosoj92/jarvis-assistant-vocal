@@ -58,6 +58,7 @@ tmp/
 
 # Consignes locales d'agents IA (non versionnees)
 AGENTS.md
+.codex/
 
 # Profil navigateur persistant des reservations (cookies, sessions connectees)
 .profil_reservation/
@@ -84,3 +85,28 @@ finances/*
 
 # Pack de configuration Claude Code temporaire (supprime apres installation)
 _claude-setup/
+
+# Copies de sauvegarde des fichiers de secrets : copie de l'Explorateur
+# ("config - Copie.yaml"), .bak, .old... sauvegarder_jarvis.bat fait un
+# "git add -A" : sans ces filets, une copie de config.yaml partirait sur GitHub.
+config*.yaml
+config*.yml
+*.bak
+*.old
+*.orig
+*- Copie*
+*- Copy*
+Copie de *
+*.env
+*.crt
+CLAUDE.local.md
+# Temporaires d'ecriture atomique (.config.yaml.XXXX.tmp, .memory.json.XXXX.tmp,
+# .contenus.yaml.XXXX.tmp) : laisses par un arret brutal, ils contiennent des
+# secrets ou des donnees personnelles. Copies de la memoire, par prudence.
+.*.tmp
+memory.json.*
+# Exemples publics versionnes : negations TOUJOURS en dernier (attention a
+# l'orthographe francaise de satellite_pi/config.exemple.yaml).
+!config.example.yaml
+!desktop_agent/config.example.yaml
+!satellite_pi/config.exemple.yaml

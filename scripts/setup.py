@@ -9,7 +9,6 @@ une phrase de bienvenue prononcee par Jarvis.
 Concu pour etre lance meme sans dependances installees : il les installe puis se
 relance tout seul dans le bon environnement.
 """
-import os
 import shutil
 import subprocess
 import sys
@@ -64,28 +63,44 @@ def python_venv():
     return p if p.exists() else None
 
 
+def _exiger(resultat, etape):
+    """Arrete l'installateur si une etape indispensable echoue, au lieu de se
+    relancer puis de planter plus loin sur un module manquant."""
+    if resultat.returncode != 0:
+        print(f"\n(!) Echec de « {etape} » (code {resultat.returncode}). Rien n'est configure.")
+        print("    Jarvis exige Python 3.13+. Le plus simple : INSTALLER_JARVIS.bat (Windows)")
+        print("    ou uv (https://docs.astral.sh/uv/), qui installe lui-meme le bon Python.")
+        sys.exit(1)
+
+
 def installer_dependances():
     dire_titre("Installation des dependances")
     if shutil.which("uv"):
         print("uv detecte -> uv sync (recommande).")
-        subprocess.run(["uv", "sync"], cwd=RACINE, check=False)
+        _exiger(subprocess.run(["uv", "sync"], cwd=RACINE, check=False), "uv sync")
     else:
         print("uv absent -> creation d'un venv + pip install.")
         if not python_venv():
             subprocess.run([sys.executable, "-m", "venv", str(RACINE / ".venv")], check=False)
         py = python_venv() or Path(sys.executable)
-        subprocess.run([str(py), "-m", "pip", "install", "-r", str(RACINE / "requirements.txt")],
-                       check=False)
+        _exiger(subprocess.run([str(py), "-m", "pip", "install", "-r",
+                                str(RACINE / "requirements.txt")], check=False),
+                "pip install -r requirements.txt")
     print("\nInstallation de Chromium pour Playwright (reservations/navigateur)...")
     py = python_venv() or Path(sys.executable)
-    subprocess.run([str(py), "-m", "playwright", "install", "chromium"], cwd=RACINE, check=False)
+    r = subprocess.run([str(py), "-m", "playwright", "install", "chromium"], cwd=RACINE,
+                       check=False)
+    if r.returncode != 0:   # seuls les reservations et le navigateur en dependent
+        print("  (!) Chromium non installe ; plus tard : uv run playwright install chromium")
 
 
 def relancer_dans_venv():
     py = python_venv()
     if py and Path(py) != Path(sys.executable):
         print(f"\nRelancement dans l'environnement {py} ...\n")
-        os.execv(str(py), [str(py), __file__, "--suite"])
+        # subprocess.call et non os.execv : sous Windows, execv detache un nouveau
+        # processus et rend la main au terminal, qui se dispute alors les input().
+        sys.exit(subprocess.call([str(py), str(Path(__file__).resolve()), "--suite"]))
     if not deps_presentes():
         print("\nDependances installees. Relance ce script :")
         print(f"   {python_venv() or 'python'} scripts/setup.py")
@@ -94,9 +109,24 @@ def relancer_dans_venv():
 
 # --------------------------------------------------------------- config
 
+def est_cle_factice(valeur):
+    """Vrai pour une valeur d'exemple de config.example.yaml (« sk-proj-... »,
+    « ta-cle-hue »...). Meme regle que scripts/doctor.py (scripts autonomes)."""
+    v = str(valeur or "").strip()
+    return "..." in v or v.lower().startswith("ta-cle")
+
+
 def charger_exemple():
     import yaml
-    return yaml.safe_load((RACINE / "config.example.yaml").read_text(encoding="utf-8")) or {}
+    conf = yaml.safe_load((RACINE / "config.example.yaml").read_text(encoding="utf-8")) or {}
+    # Une cle d'exemple non vide passerait pour une vraie : Jarvis appellerait le
+    # fournisseur avec « sk-proj-... » (401 a chaque demande) et doctor la dirait
+    # presente. On vide donc les cles LLM factices ; la vraie est demandee ensuite.
+    for section in ("openai", "anthropic"):
+        bloc = conf.get(section)
+        if isinstance(bloc, dict) and est_cle_factice(bloc.get("cle")):
+            bloc["cle"] = ""
+    return conf
 
 
 def ecrire_config(conf):
@@ -122,12 +152,18 @@ def config_cloud(conf):
         val = lire_cle("  colle la cle (laisse vide pour ignorer) : ")
         if val:
             conf.setdefault(section, {})[champ] = val
+            if section == "anthropic":
+                # Ce mode annonce Claude : sans ce choix explicite, l'exemple
+                # laisserait cloud.fournisseur: openai, sans cle OpenAI.
+                conf["cloud"] = {**(conf.get("cloud") or {}), "fournisseur": "anthropic"}
         elif requis:
             print("  (!) sans cle Claude, l'assistant ne pourra pas repondre — tu pourras "
-                  "la mettre plus tard dans config.yaml.")
+                  "la mettre plus tard dans config.yaml (anthropic.cle, avec "
+                  "cloud.fournisseur: anthropic).")
     if oui("\nConfigurer les lumieres Philips Hue maintenant ?", False):
         pont = demander("  IP du pont Hue (ex. 192.168.1.20)")
-        cle = demander("  cle Hue (voir docs/hue.md pour la generer)")
+        # Saisie masquee comme les cles cloud : le terminal est parfois copie tel quel.
+        cle = lire_cle("  cle Hue (voir docs/hue.md pour la generer) : ")
         if pont:
             conf.setdefault("hue", {}).update({"pont": pont, "cle": cle})
     print("\nLes autres integrations (Agenda, Discord, Twilio...) se configurent dans "
@@ -206,8 +242,11 @@ def test_micro_et_bienvenue():
 def main():
     dire_titre("Installation de Jarvis")
     v = sys.version_info
-    if v < (3, 10):
-        print(f"Python {v.major}.{v.minor} trop ancien. Installe Python 3.10+ (3.13 recommande).")
+    if v < (3, 13):
+        # pyproject exige 3.13 (audioop-lts n'existe pas avant) : pip echouerait.
+        print(f"Python {v.major}.{v.minor} trop ancien : Jarvis exige Python 3.13+.")
+        print("Le plus simple : INSTALLER_JARVIS.bat (Windows), ou avec uv :")
+        print("   uv run python scripts/setup.py   (uv installe lui-meme Python 3.13)")
         sys.exit(1)
     print(f"Python {v.major}.{v.minor}.{v.micro} OK.")
 

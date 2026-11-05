@@ -9,6 +9,9 @@
 > [Gemini](https://gemini.google.com) free web versions all work — then follow the
 > conversation.** The AI will ask you questions and guide you step by step. You run the
 > commands it gives you and tell it what you see (especially errors). It handles the rest.
+>
+> **Never paste an API key, a Hue key or a password into the AI**: if what you copy from
+> the terminal contains one, replace it with `***` before pasting.
 
 ---
 
@@ -27,6 +30,9 @@ me anyway (you can translate as needed).
 - Go **step by step**, wait for my reply between each step. Don't overwhelm me.
 - Explain in plain language, no jargon. If an error appears, help me understand and fix
   it before moving on.
+- **Never** ask me to paste an API key, a Hue key or a password: `scripts/setup.py`
+  reads them without displaying them. If some output I paste contains one (including the
+  answer of the `curl` in `docs/hue.md`), tell me to mask it.
 
 **Start by asking me:**
 1. My operating system (Windows, Mac, Linux?).
@@ -35,12 +41,15 @@ me anyway (you can translate as needed).
    **local** (100% free and offline, but needs a decent PC with a graphics card).
 
 **Then guide me in this order:**
-1. Install **Python 3.10+** if missing (`python --version` to check).
+1. Install **Python 3.13+** if missing (`python --version` to check: 3.12 or older is
+   not enough, the dependencies require 3.13). Simpler: install **uv**, which downloads
+   the right Python by itself.
 2. Install **git** if missing, then `git clone https://github.com/sosoj92/jarvis-assistant-vocal`
    and enter the folder.
-3. Run the **automatic installer**: `python scripts/setup.py` — it installs
-   dependencies, asks for my keys (cloud mode) or checks Ollama (local mode), tests
-   everything, and ends with a spoken welcome message.
+3. Run the **automatic installer**: on Windows, double-click `INSTALLER_JARVIS.bat`;
+   otherwise `uv run python scripts/setup.py` (or `python scripts/setup.py` with
+   Python 3.13+) — it installs dependencies, asks for my keys (cloud mode) or checks
+   Ollama (local mode), tests everything, and ends with a spoken welcome message.
 4. If the installer gets stuck, diagnose with `python scripts/doctor.py`.
 5. Launch the assistant: `uv run python jarvis14.py` (or `python jarvis14.py`), then say
    "Hey Jarvis".
@@ -81,6 +90,7 @@ Start now: ask me my OS, my level, and the mode I want.
 git clone https://github.com/sosoj92/jarvis-assistant-vocal
 cd jarvis-assistant-vocal
 python scripts/setup.py     # interactive installer: walks you through everything
+                            # (needs Python 3.13+; with uv: uv run python scripts/setup.py)
 ```
 
 Trouble later? `python scripts/doctor.py` diagnoses everything.

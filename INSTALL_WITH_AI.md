@@ -10,6 +10,9 @@
 > conversation.** L'IA va te poser des questions et te guider pas à pas. Tu copies les
 > commandes qu'elle te donne, tu les colles dans ton terminal, et tu lui dis ce qui
 > s'affiche (surtout les erreurs). Elle s'occupe du reste.
+>
+> **Ne colle jamais une clé API, une clé Hue ou un mot de passe dans l'IA** : si ce que
+> tu copies du terminal en contient un, remplace-le par `***` avant de le coller.
 
 ---
 
@@ -28,6 +31,9 @@ débutant complet.
 - Avance **étape par étape**, attends ma réponse entre chaque étape. Ne me submerge pas.
 - Explique en langage simple, sans jargon. Si une erreur apparaît, aide-moi à la
   comprendre et à la corriger avant de continuer.
+- Ne me demande **jamais** de te coller une clé API, une clé Hue ou un mot de passe :
+  `scripts/setup.py` les lit sans les afficher. Si une sortie que je te colle en
+  contient une (y compris la réponse du `curl` de `docs/hue.md`), dis-moi de la masquer.
 
 **Commence par me demander :**
 1. Mon système d'exploitation (Windows, Mac, Linux ?).
@@ -37,12 +43,16 @@ débutant complet.
    avec carte graphique).
 
 **Ensuite, guide-moi dans cet ordre :**
-1. Installer **Python 3.10+** si absent (`python --version` pour vérifier).
+1. Installer **Python 3.13+** si absent (`python --version` pour vérifier : 3.12 ou plus
+   ancien ne suffit pas, les dépendances exigent 3.13). Plus simple : installer **uv**,
+   qui télécharge lui-même le bon Python.
 2. Installer **git** si absent, puis `git clone https://github.com/sosoj92/jarvis-assistant-vocal`
    et entrer dans le dossier.
-3. Lancer l'**installateur automatique** : `python scripts/setup.py` — il installe les
-   dépendances, me demande mes clés (mode cloud) ou vérifie Ollama (mode local), teste
-   tout, et finit par une phrase de bienvenue.
+3. Lancer l'**installateur automatique** : sous Windows, double-clic sur
+   `INSTALLER_JARVIS.bat` ; sinon `uv run python scripts/setup.py` (ou
+   `python scripts/setup.py` avec Python 3.13+) — il installe les dépendances, me demande
+   mes clés (mode cloud) ou vérifie Ollama (mode local), teste tout, et finit par une
+   phrase de bienvenue.
 4. Si l'installateur bloque, diagnostiquer avec `python scripts/doctor.py`.
 5. Lancer l'assistant : `uv run python jarvis14.py` (ou `python jarvis14.py`), puis dire
    « Hey Jarvis ».
@@ -84,6 +94,7 @@ Commence maintenant : demande-moi mon OS, mon niveau et le mode souhaité.
 git clone https://github.com/sosoj92/jarvis-assistant-vocal
 cd jarvis-assistant-vocal
 python scripts/setup.py     # installateur interactif : t'accompagne de A à Z
+                            # (Python 3.13+ requis ; avec uv : uv run python scripts/setup.py)
 ```
 
 Un souci après coup ? `python scripts/doctor.py` diagnostique tout.

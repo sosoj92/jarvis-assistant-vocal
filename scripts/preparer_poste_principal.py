@@ -6,6 +6,7 @@ import argparse
 import secrets
 import shutil
 import socket
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -30,6 +31,23 @@ def _charger(chemin):
     return yaml.safe_load(chemin.read_text(encoding="utf-8")) or {}
 
 
+def _sauvegarder(chemin, nom):
+    """Copie horodatee dans logs/ (ignore par Git), a CHAQUE passage : un second
+    passage ne doit jamais laisser sans copie ce qui a change entre-temps."""
+    if not chemin.exists():
+        return None
+    dossier = RACINE / "logs"
+    dossier.mkdir(parents=True, exist_ok=True)
+    horodatage = datetime.now().strftime("%Y%m%d-%H%M%S")
+    copie = dossier / f"{nom}-{horodatage}.yaml"
+    n = 1
+    while copie.exists():   # deux passages dans la meme seconde
+        n += 1
+        copie = dossier / f"{nom}-{horodatage}-{n}.yaml"
+    shutil.copy2(chemin, copie)
+    return copie
+
+
 def _entree(liste, identifiant):
     for entree in liste:
         if isinstance(entree, dict) and str(entree.get("id", "")) == identifiant:
@@ -48,11 +66,7 @@ def main():
     identifiant = str(args.agent).strip() or "bureau"
 
     serveur = _charger(CONFIG_SERVEUR)
-    if CONFIG_SERVEUR.exists():
-        sauvegarde = RACINE / "logs" / "config-avant-poste-principal.yaml"
-        sauvegarde.parent.mkdir(parents=True, exist_ok=True)
-        if not sauvegarde.exists():
-            shutil.copy2(CONFIG_SERVEUR, sauvegarde)
+    copie_serveur = _sauvegarder(CONFIG_SERVEUR, "config-avant-poste-principal")
     serveur["poste_principal"] = {
         "actif": True,
         "agent": identifiant,
@@ -111,13 +125,20 @@ def main():
             "duree_max": 20,
         },
     }
+    copie_agent = _sauvegarder(CONFIG_AGENT, "desktop-agent-config-avant-poste-principal")
     CONFIG_AGENT.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_AGENT.write_text(
         yaml.safe_dump(config_agent, allow_unicode=True, sort_keys=False),
         encoding="utf-8")
     print("Configuration serveur mise a jour.")
+    if copie_serveur:
+        # safe_dump reecrit tout le fichier : les commentaires ne survivent que dans la copie.
+        print("(!) config.yaml a ete reecrit sans ses commentaires ; version d'origine : "
+              f"logs/{copie_serveur.name}")
     print("Configuration privee du nouveau PC creee dans desktop_agent/config.yaml.")
-    print("Les secrets n'ont pas ete affiches et ces deux fichiers sont ignores par Git.")
+    if copie_agent:
+        print(f"Ancienne desktop_agent/config.yaml copiee dans logs/{copie_agent.name}")
+    print("Les secrets n'ont pas ete affiches et ces fichiers sont ignores par Git.")
 
 
 if __name__ == "__main__":

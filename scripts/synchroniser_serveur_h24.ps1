@@ -350,12 +350,15 @@ Get-Content -LiteralPath `$journal -Tail 4000 -Encoding UTF8 |
 if ($Action -eq 'redemarrer_jarvis') {
     # Arrete Jarvis vocal et le serveur MCP (ancien code en memoire), puis relance le
     # wrapper habituel DANS la session Windows de l'utilisatrice via une tache ponctuelle
-    # (meme compte que la tache Signal Matin), supprimee aussitot apres.
+    # (meme compte que la tache Signal Matin), supprimee aussitot apres. La tache modele
+    # est lue AVANT tout arret : si elle manque, rien n'est arrete (tour sans ecran).
     Invoke-ServeurH24 @"
 `$ErrorActionPreference = 'Stop'
 `$repo = $projetLitteral
 `$wrapper = Join-Path `$repo 'scripts\demarrer_jarvis_complet.ps1'
 if (-not (Test-Path -LiteralPath `$wrapper)) { throw 'Wrapper de demarrage introuvable.' }
+`$modele = Get-ScheduledTask -TaskName 'Jarvis - Signal Matin' -ErrorAction SilentlyContinue
+if (-not `$modele) { throw 'Tache modele Jarvis - Signal Matin absente : aucun processus arrete.' }
 `$anciens = @(Get-CimInstance Win32_Process -Filter "Name like 'python%' or Name like 'uv%'" |
     Where-Object { [string]`$_.CommandLine -match 'jarvis14\.py|jarvis\.mcp_server' })
 foreach (`$p in `$anciens) { Stop-Process -Id `$p.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -368,7 +371,6 @@ foreach (`$p in `$tunnels) { Stop-Process -Id `$p.ProcessId -Force -ErrorAction 
 Write-Output ('tunnels ngrok de Jarvis arretes=' + `$tunnels.Count)
 Start-Sleep -Seconds 3
 
-`$modele = Get-ScheduledTask -TaskName 'Jarvis - Signal Matin'
 `$nom = 'Jarvis - redemarrage ponctuel'
 `$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + `$wrapper + '"') -WorkingDirectory `$repo
 `$reglages = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
@@ -670,8 +672,8 @@ exit `$code
 if ($Action -eq 'activer_brief') {
     # Modification chirurgicale de config.yaml (jamais affiche) : seules les cles
     # signal_matin.brief_tech et signal_matin.modele_brief changent ; le resultat est
-    # relu et compare a l'ancienne configuration avant ecriture ; copie de sauvegarde
-    # hors du depot.
+    # relu et compare a l'ancienne configuration avant ecriture ; fins de ligne (CRLF)
+    # conservees ; copie de sauvegarde hors du depot.
     Invoke-ServeurH24 @"
 `$ErrorActionPreference = 'Stop'
 `$repo = $projetLitteral
@@ -682,7 +684,9 @@ import yaml
 
 VALEURS = {"brief_tech": True, "modele_brief": "gpt-5.6-terra"}
 chemin = Path("config.yaml")
-texte = chemin.read_text(encoding="utf-8")
+# Octets bruts : read_text convertirait les CRLF en LF et tout le fichier serait
+# reecrit en LF (nl vaudrait toujours "\n").
+texte = chemin.read_bytes().decode("utf-8")
 nl = "\r\n" if "\r\n" in texte else "\n"
 avant = yaml.safe_load(texte) or {}
 lignes = texte.splitlines(keepends=True)

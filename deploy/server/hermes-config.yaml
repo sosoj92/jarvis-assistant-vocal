@@ -45,6 +45,9 @@ platform_toolsets:
 # Hermes ne voit qu'un sous-ensemble N1 explicitement autorise. Les outils qui
 # pilotent le corps de Jarvis (lumieres, OBS, minuteur/voix, camera, micro, etc.)
 # restent exclus meme s'ils existent sur le serveur MCP local.
+# Aucun en-tete Authorization n'est envoye : si mcp.token (ou JARVIS_MCP_TOKEN) est
+# defini cote Windows, le MCP repond 401 et Hermes perd ses outils (refus visible
+# dans logs/mcp.log cote Windows). Voir docs/hermes_server_vm.md.
 mcp_servers:
   jarvis:
     url: http://127.0.0.1:8765/mcp
