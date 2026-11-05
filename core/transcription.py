@@ -103,11 +103,17 @@ class TranscripteurCloud:
         if 0.0 < secondes < 0.3:
             return [], None
         from core import cloud
-        client = cloud.client_openai()
-        if client is None:
+        try:
+            client = cloud.client_openai()
+            if client is None:
+                return [], None
+            reponse = client.audio.transcriptions.create(
+                model=self.modele, file=("phrase.wav", donnees, "audio/wav"), language=language)
+        except Exception as e:
+            # Reseau coupe, quota, cle refusee... : la phrase est perdue, pas Jarvis.
+            # Seul le type est journalise (jamais l'audio ni la cle).
+            LOG.warning("transcription cloud en echec : %s", type(e).__name__)
             return [], None
-        reponse = client.audio.transcriptions.create(
-            model=self.modele, file=("phrase.wav", donnees, "audio/wav"), language=language)
         texte = str(getattr(reponse, "text", "") or "").strip()
         try:
             from core import budget

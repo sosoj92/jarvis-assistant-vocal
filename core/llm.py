@@ -190,10 +190,49 @@ class ClaudeProvider(ProviderLLM):
         import anthropic
         cle = reglage("anthropic.cle", "")
         self.modele = modele or reglage("anthropic.modele", "claude-haiku-4-5")
-        self.client = anthropic.Anthropic(api_key=cle) if cle else None
+        # Memes delais que le client OpenAI : sans eux, le SDK attend jusqu'a
+        # 600 s par essai (3 essais) et un appel bloque fige la voix.
+        self.client = anthropic.Anthropic(
+            api_key=cle,
+            timeout=float(reglage("anthropic.timeout", 90)),
+            max_retries=int(reglage("anthropic.max_retries", 1)),
+        ) if cle else None
 
     def disponible(self):
         return self.client is not None
+
+    @staticmethod
+    def _outils_historique(historique):
+        """Definitions des outils deja appeles dans l'historique ([] s'il n'y en a pas).
+
+        L'API refuse un historique qui contient des blocs tool_use/tool_result
+        si la requete ne definit aucun outil. Les vrais schemas sont repris du
+        registre quand il les connait, sinon une definition minimale suffit."""
+        noms, present = [], False
+        for message in historique:
+            contenu = message.get("content")
+            if isinstance(contenu, str):
+                continue
+            for bloc in contenu or []:
+                if isinstance(bloc, dict):
+                    type_, nom = bloc.get("type"), bloc.get("name")
+                else:   # bloc du SDK ou Bloc
+                    type_, nom = getattr(bloc, "type", None), getattr(bloc, "name", None)
+                if type_ in ("tool_use", "tool_result"):
+                    present = True
+                if type_ == "tool_use" and nom and nom not in noms:
+                    noms.append(nom)
+        if not present:
+            return []
+        try:
+            from core import registre
+            connus = {s["name"]: s for s in registre.schemas_api()}
+        except Exception:
+            connus = {}
+        return [connus.get(nom) or {
+            "name": nom, "description": "Outil deja utilise dans la conversation.",
+            "input_schema": {"type": "object", "properties": {}},
+        } for nom in (noms or ["outil_precedent"])]
 
     def repondre(self, systeme, historique, outils):
         # La reponse native Anthropic a deja la bonne forme (.stop_reason/.content).
@@ -206,6 +245,13 @@ class ClaudeProvider(ProviderLLM):
         }
         if outils:
             kwargs["tools"] = outils
+        else:
+            # Phrase sans outil (« merci ») apres un tour qui en a utilise un :
+            # on redeclare ces outils mais le tour reste sans action.
+            deja_utilises = self._outils_historique(historique)
+            if deja_utilises:
+                kwargs["tools"] = deja_utilises
+                kwargs["tool_choice"] = {"type": "none"}
         rep = self.client.messages.create(**kwargs)
         # Comptabilite (N9) : tokens + cout estime, par jour, cote Jarvis.
         try:

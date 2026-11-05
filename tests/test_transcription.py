@@ -89,6 +89,24 @@ class TranscripteurCloudTest(unittest.TestCase):
         self.assertEqual(segments, [])
         client.audio.transcriptions.create.assert_not_called()
 
+    def test_erreur_reseau_ne_fait_pas_tomber_jarvis(self):
+        import httpx
+        import openai
+        client = MagicMock()
+        client.audio.transcriptions.create.side_effect = openai.APIConnectionError(
+            request=httpx.Request("POST", "https://api.openai.invalid/v1/audio/transcriptions"))
+        with patch.object(transcription, "reglage", reglages(**AVEC_CLE)), \
+                patch("core.routage.mode_actuel", return_value="hybride"), \
+                patch("core.cloud.client_openai", return_value=client), \
+                patch("core.budget.enregistrer_stt") as budget, \
+                self.assertLogs("jarvis.transcription", "WARNING") as journal:
+            resultat = transcription.TranscripteurCloud().transcribe(
+                np.zeros(transcription.TAUX, dtype=np.float32), language="fr")
+        self.assertEqual(resultat, ([], None))       # « rien compris », pas un arret
+        budget.assert_not_called()
+        self.assertIn("APIConnectionError", "\n".join(journal.output))
+        self.assertNotIn("cle-de-test", "\n".join(journal.output))
+
 
 class IntegrationTest(unittest.TestCase):
     def test_jarvis_ne_charge_plus_faster_whisper_au_demarrage(self):

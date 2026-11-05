@@ -53,14 +53,15 @@ def remember(categorie: str, contenu: str, cle: str = "") -> str:
     cat = _CATEGORIES.get(sans_accents(categorie).strip(), "facts")
     cle = (cle or "").strip()
 
-    m = memoire.charger()
-    if cat == "facts":
-        if contenu not in m["facts"]:
-            m["facts"].append(contenu)
-    else:
-        etiquette = cle or contenu[:40]
-        m[cat][etiquette] = contenu
-    memoire.sauver(m)
+    with memoire.VERROU:        # pas de remember/forget concurrent entre lecture et ecriture
+        m = memoire.charger()
+        if cat == "facts":
+            if contenu not in m["facts"]:
+                m["facts"].append(contenu)
+        else:
+            etiquette = cle or contenu[:40]
+            m[cat][etiquette] = contenu
+        memoire.sauver(m)
     return "C'est note."
 
 
@@ -114,18 +115,22 @@ def forget(sujet: str) -> str:
     if not besoin:
         return "Quoi oublier ?"
 
-    m = memoire.charger()
-    retires = 0
-    for cat in ("preferences", "people", "projects"):
-        for cle in list(m[cat]):
-            if besoin in sans_accents(f"{cle} {m[cat][cle]}"):
-                del m[cat][cle]
-                retires += 1
-    avant = len(m["facts"])
-    m["facts"] = [f for f in m["facts"] if besoin not in sans_accents(f)]
-    retires += avant - len(m["facts"])
+    with memoire.VERROU:
+        m = memoire.charger()
+        retires = 0
+        for cat in ("preferences", "people", "projects"):
+            for cle in list(m[cat]):
+                if besoin in sans_accents(f"{cle} {m[cat][cle]}"):
+                    del m[cat][cle]
+                    retires += 1
+        avant = len(m["facts"])
+        m["facts"] = [f for f in m["facts"] if besoin not in sans_accents(f)]
+        retires += avant - len(m["facts"])
 
-    if retires == 0:
-        return "Je n'ai rien la-dessus."
-    memoire.sauver(m)
+        if retires == 0:
+            return "Je n'ai rien la-dessus."
+        # Copie dans logs/memory.json.bak : un sujet trop court ou mal entendu
+        # peut effacer bien plus que prevu, l'ancienne memoire reste recuperable.
+        memoire.sauvegarder()
+        memoire.sauver(m)
     return f"Oublie : {retires} element(s)."
