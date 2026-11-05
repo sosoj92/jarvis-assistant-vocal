@@ -25,7 +25,8 @@ regarde dans l'app Hue → Paramètres → Ponts. Note l'adresse `192.168.x.x`.
    ```bash
    curl -X POST http://<IP_DU_PONT>/api -d "{\"devicetype\":\"jarvis#pc\"}"
    ```
-   La réponse contient `"username": "..."` → c'est ta `cle`.
+   La réponse contient `"username": "..."` → c'est ta `cle`. Ne partage jamais
+   cette réponse (ni dans une IA, ni dans une capture d'écran) : c'est la clé du pont.
 3. Mets l'IP et la clé dans `config.yaml`.
 
 Sans ces réglages, les outils Hue se désactivent proprement (le reste fonctionne).

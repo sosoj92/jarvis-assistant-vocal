@@ -83,6 +83,12 @@ def _trouver(devices, appareil):
     return None
 
 
+def _resume_erreur(e):
+    """Code HTTP de la reponse, sinon le type de l'erreur (le detail reste au journal)."""
+    return (getattr(getattr(e, "response", None), "status_code", None)
+            or type(e).__name__)
+
+
 # ---------------------------------------------------------------------- outils
 
 @outil(
@@ -100,7 +106,9 @@ def google_home_etat() -> str:
         devices = _appareils()
     except Exception as e:
         LOG.exception("google_home: etat")
-        return f"Je n'accède pas à Google Home ({e}). Vérifie la config (docs/google_home.md)."
+        # Code HTTP ou type d'erreur seulement : jamais l'URL SDM brute (voix, LLM).
+        return (f"Je n'accède pas à Google Home ({_resume_erreur(e)}). "
+                "Vérifie la config (docs/google_home.md).")
     if not devices:
         return "Aucun appareil Google Home / Nest enregistré (côté API SDM)."
     lignes = []
@@ -141,7 +149,8 @@ def google_home_allumer(appareil: str, actif: bool = True) -> str:
     try:
         dev = _trouver(_appareils(), appareil)
     except Exception as e:
-        return f"Je n'accède pas à Google Home ({e})."
+        LOG.exception("google_home: appareils")
+        return f"Je n'accède pas à Google Home ({_resume_erreur(e)})."
     if dev is None:
         return f"Appareil introuvable dans Google Home : {appareil}."
     # SDM n'expose pas de trait OnOff générique (lumières/prises tierces).

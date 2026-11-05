@@ -60,6 +60,13 @@ _MAX_UTTERANCE = TAUX * 2 * 30    # garde-fou : 30 s d'audio max par énoncé (o
 _APP_LAN = None
 _SERVEUR_LAN = None
 _RESEAU_TAILSCALE_V4 = ipaddress.ip_network("100.64.0.0/10")
+_RESEAU_TAILSCALE_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
+_DELAI_HELLO = 8.0                # s pour s'authentifier (comme /desktop-agent)
+# Une action en attente de confirmation n'est valable que pendant la fenêtre de
+# réponse : lecture de la question, relance (12 s), énoncé (30 s max). Large
+# marge : c'est un filet, le vrai verrou est l'annulation sur un nouveau réveil.
+_DELAI_CONFIRMATION = 120.0
+_MAX_HISTORIQUE = 40              # messages gardés pour le LLM (comme le PC)
 
 
 def _origine_locale_ou_lan(ws) -> bool:
@@ -86,13 +93,16 @@ def _origine_locale_ou_lan(ws) -> bool:
 
 
 def _hors_maison(ws) -> bool:
-    """Vrai si la connexion vient du reseau Tailscale (donc potentiellement de loin)."""
+    """Vrai si la connexion vient du reseau Tailscale (donc potentiellement de loin),
+    en IPv4 (100.64/10) comme en IPv6 (fd7a:115c:a1e0::/48)."""
     client = getattr(ws, "client", None)
     hote = str(getattr(client, "host", "") or "").split("%", 1)[0]
     try:
-        return ipaddress.ip_address(hote) in _RESEAU_TAILSCALE_V4
+        adresse = ipaddress.ip_address(hote)
     except ValueError:
         return True
+    adresse = getattr(adresse, "ipv4_mapped", None) or adresse   # ::ffff:100.x -> 100.x
+    return adresse in _RESEAU_TAILSCALE_V4 or adresse in _RESEAU_TAILSCALE_V6
 
 
 def _choix_tableau(valeur):
@@ -183,6 +193,7 @@ class _Session:
         self.audio = bytearray()
         self.historique = []
         self.en_attente = None     # (Outil, args) N3 à confirmer, ou None
+        self.echeance_attente = 0.0  # time.monotonic() au-delà duquel en_attente est périmée
         self.relances_restantes = 0
         self.apres_reveil = False  # la prochaine phrase suit un « Hey Jarvis » (pas une relance)
         self.actions_critiques = False  # N3 permis ? fixe a l'authentification
@@ -464,30 +475,54 @@ def _refus_satellite(session, nom):
     return None
 
 
-def _executer_outil(nom, args):
-    if nom in _INTERDITS_SATELLITE:
-        return _MESSAGE_ASTRA_SATELLITE
-    """Exécute un outil après application de la politique de confirmation."""
-    from core import registre
-    outil = registre.get(nom)
-    if outil is None:
-        return f"Outil inconnu : {nom}"
+def _poste(session):
+    """Nom lisible du poste pour les journaux."""
+    return getattr(session, "piece", "") or getattr(session, "satellite", "") or "?"
+
+
+def _executer_outil(nom, args, piece=None):
+    """Exécute un outil après application de la politique de confirmation.
+
+    Chaque appel est journalisé (outil, pièce, durée, issue), jamais ses arguments
+    ni son résultat : ils peuvent contenir des données personnelles."""
+    debut = time.monotonic()
+    issue = "erreur"
     try:
-        return str(registre.executer(outil, args or {}))
-    except Exception:
-        LOG.exception("satellite: outil %s", nom)
-        return "Erreur pendant l'action."
+        if nom in _INTERDITS_SATELLITE:
+            issue = "refuse"
+            return _MESSAGE_ASTRA_SATELLITE
+        from core import registre
+        outil = registre.get(nom)
+        if outil is None:
+            issue = "inconnu"
+            return f"Outil inconnu : {nom}"
+        try:
+            resultat = str(registre.executer(outil, args or {}))
+        except Exception:
+            LOG.exception("satellite: outil %s", nom)
+            return "Erreur pendant l'action."
+        issue = "ok"
+        return resultat
+    finally:
+        LOG.info("satellite %s: outil %s -> %s (%.3fs)", piece or "?", nom, issue,
+                 time.monotonic() - debut)
 
 
 def _executer_decision_prioritaire(session, decision):
     """Exécute sur un satellite une décision du routeur partagé."""
     from core import registre
 
+    pour_historique = None              # version balisee si texte de tiers
     if decision.type == "astra":
         texte = _MESSAGE_ASTRA_SATELLITE
     elif decision.type == "vision":
         from tools.ecran import analyser_ecran
         texte = analyser_ecran(decision.tache)
+        # Resume de l'ecran = texte de tiers (comme capture_screen) : balise dans
+        # l'historique, prononce brut. Le drapeau de contenu externe est local au
+        # tour, qui s'arrete ici : le balisage protege les tours suivants.
+        if texte:
+            pour_historique = registre.baliser_externe("capture_screen", texte)
     elif decision.type == "hermes":
         from tools.deleguer_a_hermes import deleguer_en_fond
         texte = deleguer_en_fond(
@@ -510,16 +545,30 @@ def _executer_decision_prioritaire(session, decision):
                 annonce = o.annonce(args) if o.annonce else None
             except Exception:
                 annonce = None
-            niveau = registre.niveau(nom)
             suffixe = " Tu confirmes ? (oui / non)"
-            if niveau == "N2":
+            if registre.memorisable(nom):
                 suffixe += " Tu peux aussi dire oui, toujours."
-            return {"reponse": (annonce or f"Je vais exécuter {nom}.") + suffixe,
-                    "attente_confirmation": True}
-        texte = _executer_outil(nom, args)
+            question = (annonce or f"Je vais exécuter {nom}.") + suffixe
+            session.historique.append({"role": "assistant", "content": question})
+            return {"reponse": question, "attente_confirmation": True}
+        texte = _executer_outil(nom, args, piece=_poste(session))
 
-    session.historique.append({"role": "assistant", "content": texte})
+    session.historique.append({"role": "assistant", "content": pour_historique or texte})
     return {"reponse": texte, "attente_confirmation": False}
+
+
+def _tronquer_historique(historique, maximum=_MAX_HISTORIQUE):
+    """Borne l'historique d'une session (connectée parfois des jours), comme
+    jarvis14._tronquer : la coupe s'arrête sur un vrai tour utilisateur (texte),
+    donc ne sépare jamais un tool_use de son tool_result."""
+    if len(historique) > maximum:
+        del historique[:len(historique) - maximum]
+        # Les fournisseurs cloud exigent un vrai premier tour utilisateur.
+        while historique and not (
+            historique[0]["role"] == "user"
+            and isinstance(historique[0]["content"], str)
+        ):
+            historique.pop(0)
 
 
 def traiter_texte(session, phrase):
@@ -528,6 +577,11 @@ def traiter_texte(session, phrase):
     {reponse, attente_confirmation(bool)}."""
     from core import registre
     session.historique.append({"role": "user", "content": phrase})
+    _tronquer_historique(session.historique)
+
+    # Bascule budget : retour au mode normal le lendemain, meme sans depense cloud.
+    from core.routage import verifier_nouveau_jour
+    verifier_nouveau_jour()
 
     from core.routage_intentions import decider_prioritaire
     decision = decider_prioritaire(phrase, piece=session.piece)
@@ -577,13 +631,16 @@ def traiter_texte(session, phrase):
             return {"reponse": texte or ("C'est fait." if faits else "D'accord."),
                     "attente_confirmation": False}
 
-        session.historique.append({"role": "assistant", "content": rep.content})
         nouveaux = [b for b in rep.content if getattr(b, "type", None) == "tool_use"]
         if numero_tour >= max_tours or appels + len(nouveaux) > max_appels:
             LOG.warning("satellite: limite d'outils atteinte (tours=%s, appels=%s)",
                         numero_tour, appels)
-            return {"reponse": "J'arrête ici pour éviter une boucle d'actions.",
-                    "attente_confirmation": False}
+            # Les tool_use refusés ne vont pas dans l'historique (comme le PC) :
+            # un tool_use sans tool_result ferait rejeter toutes les requêtes suivantes.
+            arret = "J'arrête ici pour éviter une boucle d'actions."
+            session.historique.append({"role": "assistant", "content": arret})
+            return {"reponse": arret, "attente_confirmation": False}
+        session.historique.append({"role": "assistant", "content": rep.content})
         appels += len(nouveaux)
         resultats = []
         for b in rep.content:
@@ -600,7 +657,9 @@ def traiter_texte(session, phrase):
             if o is not None and registre.confirmation_requise(b.name, contenu_externe):
                 session.en_attente = (b.name, b.input or {})
                 q = None
-                if not o.confirmation:
+                # N1, ou N2 memorise retenu seulement parce qu'un contenu externe
+                # a ete lu : on dit pourquoi la question revient.
+                if not o.confirmation or registre.est_autorise(b.name):
                     q = registre.annonce_prudence(o, b.input or {})
                 elif getattr(o, "annonce", None):
                     try:
@@ -608,40 +667,59 @@ def traiter_texte(session, phrase):
                     except Exception:
                         q = None
                 suffixe = " Tu confirmes ? (oui / non)"
-                if registre.niveau(b.name) == "N2":
+                if registre.memorisable(b.name):
                     suffixe += " Tu peux aussi dire oui, toujours."
-                return {"reponse": (q or "C'est une action sensible.") + suffixe,
-                        "attente_confirmation": True}
-            res = _executer_outil(b.name, b.input or {})
+                question = (q or "C'est une action sensible.") + suffixe
+                # Chaque tool_use du message reçoit son tool_result (résultat réel,
+                # attente ou non exécuté), sinon l'API rejette la requête suivante.
+                deja = {r["tool_use_id"] for r in resultats}
+                for autre in nouveaux:
+                    if autre.id in deja:
+                        continue
+                    texte_attente = ("En attente de la confirmation vocale de "
+                                     "l'utilisateur." if autre is b else "Non exécuté.")
+                    resultats.append({"type": "tool_result", "tool_use_id": autre.id,
+                                      "content": texte_attente})
+                session.historique.append({"role": "user", "content": resultats})
+                session.historique.append({"role": "assistant", "content": question})
+                return {"reponse": question, "attente_confirmation": True}
+            res = _executer_outil(b.name, b.input or {}, piece=_poste(session))
             faits.append(b.name)
             resultats.append({"type": "tool_result", "tool_use_id": b.id,
                               "content": registre.baliser_externe(b.name, str(res))})
-            if b.name in registre.SOURCES_EXTERNES:
+            if b.name in registre.SOURCES_EXTERNES or b.name in registre.SORTIES_TIERCES:
                 contenu_externe = True
         session.historique.append({"role": "user", "content": resultats})
     return {"reponse": "Commande trop longue à traiter.", "attente_confirmation": False}
 
 
 def _resoudre_confirmation(session, phrase):
-    """L'utilisateur répond oui/non à une action sensible en attente."""
+    """L'utilisateur répond oui/non à une action sensible en attente.
+
+    La réponse et son issue entrent dans l'historique, pour que le LLM sache ce
+    qui a été fait (ou annulé) au tour suivant."""
     from core import registre
     from core.confirmation_vocale import NON, TOUJOURS, interpreter_confirmation
     nom, args = session.en_attente
     session.en_attente = None
     # Meme regle stricte que le PC : accord en mot entier, toute negation annule.
-    decision = interpreter_confirmation(phrase)
+    # Une action N3 exige un accord sans condition ni question.
+    decision = interpreter_confirmation(phrase, strict=registre.est_n3(nom))
     if decision == NON:
-        return "D'accord, j'annule."
-    refus = _refus_satellite(session, nom)
-    if refus:
-        return refus
-    resultat = _executer_outil(nom, args)
-    if decision == TOUJOURS and registre.niveau(nom) != "N1":
-        if registre.autoriser_toujours(nom):
-            resultat += " Je ne te le redemanderai plus pour cette action."
-        else:
-            resultat += (" Mais c'est une action critique : je te demanderai "
-                         "toujours confirmation.")
+        resultat = "D'accord, j'annule."
+    else:
+        resultat = _refus_satellite(session, nom)
+    executee = resultat is None
+    if executee:
+        resultat = _executer_outil(nom, args, piece=_poste(session))
+        if decision == TOUJOURS:
+            resultat = str(resultat) + registre.suffixe_toujours(nom)
+    session.historique.append({"role": "user", "content": phrase})
+    # Copie pour le modele seulement : un resultat qui reprend du texte de tiers
+    # (appel, reservation, page) y est balise ; la reponse prononcee reste nette.
+    copie = (registre.baliser_externe(nom, str(resultat)) if executee
+             else resultat)
+    session.historique.append({"role": "assistant", "content": copie})
     return resultat
 
 
@@ -732,9 +810,23 @@ def monter_routes(app):
             if duree:
                 await envoyer({"type": "relance", "secondes": duree})
 
+        # Un client doit s'authentifier vite (comme /desktop-agent) : une connexion
+        # muette ou qui ne fait que des ping ne reste pas ouverte indéfiniment.
+        echeance_hello = boucle_ws.time() + _DELAI_HELLO
         try:
             while True:
-                msg = await ws.receive()
+                if sess.satellite is None:
+                    try:
+                        msg = await asyncio.wait_for(
+                            ws.receive(),
+                            timeout=max(0.0, echeance_hello - boucle_ws.time()))
+                    except asyncio.TimeoutError:
+                        LOG.warning("satellite: pas de hello en %.0f s, connexion fermee",
+                                    _DELAI_HELLO)
+                        await ws.close(code=1008)
+                        return
+                else:
+                    msg = await ws.receive()
                 # 1) trame binaire = audio PCM
                 if "bytes" in msg and msg["bytes"] is not None:
                     if sess.satellite is None:      # pas encore authentifié
@@ -757,8 +849,11 @@ def monter_routes(app):
                 if typ == "hello":
                     sid = str(data.get("satellite", ""))
                     conf = cfg.get(sid)
+                    # Comparaison en octets UTF-8 : un jeton non ASCII donne un
+                    # refus, pas un TypeError.
                     if not conf or not conf["token"] or not secrets.compare_digest(
-                            str(data.get("token", "")), conf["token"]):
+                            str(data.get("token") or "").encode("utf-8"),
+                            str(conf["token"]).encode("utf-8")):
                         await envoyer({"type": "erreur", "message": "satellite inconnu ou token invalide"})
                         await ws.close(code=1008)
                         return
@@ -779,6 +874,11 @@ def monter_routes(app):
                     await etat("veille")
 
                 elif typ == "reveil" and sess.satellite:
+                    # Un nouveau « Hey Jarvis » ouvre une nouvelle conversation : une
+                    # action restée sans réponse ne doit jamais être confirmée par la
+                    # phrase qui suit (le poste n'écoute pas le mot d'activation pendant
+                    # sa fenêtre de réponse, donc un vrai « oui » n'arrive jamais ici).
+                    sess.en_attente = None
                     from core.arbitrage_micro import reserver_reveil
                     try:
                         score = float(data.get("score", 0.0))
@@ -836,6 +936,12 @@ def monter_routes(app):
                     await etat("veille")
 
                 elif typ == "fin_parole" and sess.satellite:
+                    if sess.en_attente and time.monotonic() > sess.echeance_attente:
+                        # Réponse arrivée hors de la fenêtre de confirmation : l'action
+                        # est abandonnée et la phrase est traitée comme une demande.
+                        LOG.info("satellite %s: confirmation perimee, action abandonnee",
+                                 _poste(sess))
+                        sess.en_attente = None
                     audio = bytes(sess.audio)
                     sess.audio = bytearray()
                     await etat("reflexion")
@@ -876,7 +982,10 @@ def monter_routes(app):
                         await etat("veille")
                         continue
                     if sess.en_attente:                         # réponse à une confirmation N3
-                        rep = _resoudre_confirmation(sess, phrase)
+                        # Dans un thread, comme traiter_texte : un outil du poste
+                        # principal attend une réponse que seule cette boucle (wss
+                        # partagé avec /desktop-agent) peut recevoir.
+                        rep = await asyncio.to_thread(_resoudre_confirmation, sess, phrase)
                         await parler(rep)
                         await proposer_relance()
                         await etat("veille")
@@ -905,6 +1014,7 @@ def monter_routes(app):
                         await envoyer({"type": "texte", "texte": r["reponse"]})
                         await etat("attente_confirmation")
                         await envoyer_audio(r["reponse"])
+                        sess.echeance_attente = time.monotonic() + _DELAI_CONFIRMATION
                         await proposer_relance(12.0, obligatoire=True)
                     else:
                         await parler(r["reponse"])
@@ -913,7 +1023,9 @@ def monter_routes(app):
 
                 elif typ == "reveil_sans_suite" and sess.satellite:
                     # « Hey Jarvis » sans question : le poste revient au repos (relevé
-                    # et tuiles du tableau de bord compris).
+                    # et tuiles du tableau de bord compris). Une action en attente
+                    # est abandonnée, comme sur un réveil.
+                    sess.en_attente = None
                     sess.mettre_en_veille()
                     await etat("veille")
 

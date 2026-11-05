@@ -221,6 +221,7 @@ Trust is built in, not bolted on:
 - **Secrets & personal data are never committed** (`config.yaml`, memory, logs, call transcripts, OAuth tokens — all gitignored).
 - The assistant only confirms, by phone, what you validated **before** the call.
 - **N1/N2/N3 permissions** keep safe reads separate from sensitive and critical actions; N3 always requires a fresh local spoken confirmation and is never remotely executable.
+- **iPhone bridge**: remotely, only the exposed safe (N1) tools run without confirmation, plus the ones you list yourself in `pont_iphone.domotique_distante` (empty by default; an N2 placed there loses its remote confirmation, an N3 is always refused). Keep that list to reversible physical actions (lights, scenes).
 - **Hermes isolation** allows read-only safe tools and bounded draft output, never credentials or direct physical control.
 
 ## 🗺️ Roadmap

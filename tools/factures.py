@@ -22,24 +22,8 @@ _INDICES_LOGIN = ("mot de passe", "se connecter", "connexion", "identifiant",
                   "s'identifier", "login", "sign in", "password")
 
 
-@outil(
-    nom="factures_statut",
-    description="Lit ton tableau de bord facture.net et résume ta facturation : "
-                "factures IMPAYÉES, montants dus, relances à faire. LECTURE SEULE, "
-                "aucune action. Pour « où j'en suis sur mes factures », « mes "
-                "impayés », « qui me doit de l'argent », « statut facturation ».",
-    parametres={"type": "object", "properties": {}},
-    lent=True,
-    phrase_attente="Je regarde tes factures, un instant.",
-    mcp_expose=False,
-)
-def factures_statut() -> str:
-    url = (reglage("factures.url", "") or "").strip()
-    if not url:
-        return ("Je ne sais pas où est ton tableau de bord facture.net. Renseigne "
-                "factures.url dans config.yaml (l'URL de ta page, une fois connecté "
-                "dans le profil Chrome « ChromeJarvis »).")
-
+def _lire_tableau(url):
+    """(texte, url finale) du tableau de bord, ou un message d'erreur (str)."""
     from tools.navigateur import _connexion, _contexte
     browser = _connexion()
     if browser is None:
@@ -61,6 +45,33 @@ def factures_statut() -> str:
                 page.close()
         except Exception:
             pass
+    return texte, url_finale
+
+
+@outil(
+    nom="factures_statut",
+    description="Lit ton tableau de bord facture.net et résume ta facturation : "
+                "factures IMPAYÉES, montants dus, relances à faire. LECTURE SEULE, "
+                "aucune action. Pour « où j'en suis sur mes factures », « mes "
+                "impayés », « qui me doit de l'argent », « statut facturation ».",
+    parametres={"type": "object", "properties": {}},
+    lent=True,
+    phrase_attente="Je regarde tes factures, un instant.",
+    mcp_expose=False,
+)
+def factures_statut() -> str:
+    url = (reglage("factures.url", "") or "").strip()
+    if not url:
+        return ("Je ne sais pas où est ton tableau de bord facture.net. Renseigne "
+                "factures.url dans config.yaml (l'URL de ta page, une fois connecté "
+                "dans le profil Chrome « ChromeJarvis »).")
+
+    # Tout le travail Playwright sur son thread dedie (voir core.playwright_partage).
+    from tools.navigateur import _via_playwright
+    lecture = _via_playwright(_lire_tableau, url)
+    if isinstance(lecture, str):
+        return lecture
+    texte, url_finale = lecture
 
     bas = texte.lower()
     # Session expirée : redirigé vers une page de connexion, ou page courte de login.

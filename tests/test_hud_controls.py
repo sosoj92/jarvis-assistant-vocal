@@ -86,6 +86,43 @@ class HudControlsTests(unittest.TestCase):
         self.assertNotIn("secret-anthropic", brut)
         self.assertNotIn("secret-eleven", brut)
 
+    def test_tester_voix_sans_parleur_ne_promet_rien(self):
+        from core import voix
+        with patch.object(voix, "_parleur", None), \
+                patch.object(hud.threading, "Thread") as fil:
+            resultat = hud._appliquer_controle({"action": "tester_voix"})
+        self.assertFalse(resultat["ok"])
+        self.assertIn("Aucune voix", resultat["message"])
+        # Pas de renvoi vers un test qui jouerait sur une autre machine.
+        self.assertNotIn("panneau", resultat["message"])
+        self.assertIn("dis bonjour", resultat["message"])
+        fil.assert_not_called()
+
+    def test_tester_voix_avec_parleur_joue_une_seule_fois(self):
+        from core import voix
+        import threading
+        lance, libere = threading.Event(), threading.Event()
+        textes = []
+
+        def parleur(texte):
+            textes.append(texte)
+            lance.set()
+            libere.wait(2)
+
+        with patch.object(voix, "_parleur", parleur):
+            premier = hud._appliquer_controle({"action": "tester_voix"})
+            self.assertTrue(lance.wait(2))
+            second = hud._appliquer_controle({"action": "tester_voix"})
+            libere.set()
+            for _ in range(100):                 # le verrou se libere en fin de test
+                if not hud._TEST_VOIX.locked():
+                    break
+                threading.Event().wait(0.01)
+        self.assertTrue(premier["ok"])
+        self.assertFalse(second["ok"])             # un seul test a la fois
+        self.assertEqual(len(textes), 1)
+        self.assertFalse(hud._TEST_VOIX.locked())
+
 
 if __name__ == "__main__":
     unittest.main()

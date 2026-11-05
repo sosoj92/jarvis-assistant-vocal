@@ -113,11 +113,13 @@ si deux matériels ont des gains très différents.
 
 - **LAN ou tailnet privé uniquement** : jamais exposé via ngrok (la garde
   X-Forwarded rejette le trafic tunnelisé). Les adresses Tailscale
-  `100.64.0.0/10` sont acceptées, mais le port doit rester filtré par le pare-feu
+  `100.64.0.0/10` (et `fd7a:115c:a1e0::/48` en IPv6) sont acceptées, mais le port doit rester filtré par le pare-feu
   et les règles du tailnet. Le serveur principal reste sur `127.0.0.1:8790`. Lorsqu'un
   satellite est configuré, un listener dédié `0.0.0.0:8791` est lancé avec
   **uniquement** `/satellite` ; panneau, cockpit, inbox et Twilio n'y existent pas.
 - **Token par satellite** (`satellites[].token`), comparé en **timing-safe**.
+- **Délai d'authentification de 8 s** sur `/satellite` : le `hello` doit arriver
+  en premier et dans ce délai, sinon le serveur ferme la connexion (code `1008`).
 - **Chiffrement (wss://, port 8792)** : au premier démarrage, le serveur crée une
   clé et un certificat auto-signé dans `certs/` (jamais versionnés). Copie le
   certificat **public** `certs/jarvis-lan.crt` à côté de la config du client, puis :
@@ -132,9 +134,15 @@ si deux matériels ont des gains très différents.
 - **Droits = commande vocale à la maison** : N1 direct ; N2 demande une
   confirmation qui peut être mémorisée ; **N3 (mail, appel, extinction…) exige une
   CONFIRMATION vocale à chaque fois**. Le serveur passe en
-  `attente_confirmation` et attend un « oui » dans l'énoncé suivant. Un satellite
-  arrivé par Tailscale (donc potentiellement de loin) n'a jamais droit aux N3, et
+  `attente_confirmation` et attend un « oui » dans l'énoncé suivant, pendant la
+  fenêtre de relance uniquement ; un nouveau « Hey Jarvis » ou un réveil sans
+  suite annule l'action en attente. Un satellite
+  arrivé par Tailscale (donc potentiellement de loin, en IPv4 `100.64.0.0/10`
+  comme en IPv6 `fd7a:115c:a1e0::/48`) n'a jamais droit aux N3, et
   `satellites[].actions_critiques: false` les retire à un micro précis.
+- **Mode strict pour les N3** : une condition (« mais », « sauf », « plutôt »,
+  « d'abord », « avant », « après »), une question, ou « toujours » sans « oui »
+  annulent l'action ; « fais » ou « envoie » seuls ne suffisent plus.
 
 ## Tester sans matériel
 

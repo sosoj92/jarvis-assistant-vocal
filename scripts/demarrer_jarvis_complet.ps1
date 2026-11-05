@@ -19,7 +19,9 @@ function WaitPort($port, $timeout = 40) {
 Log "=== autostart ==="
 
 # uv est utilise par le MCP et par Jarvis vocal.
+# Meme ordre que scripts/trouver_uv.bat : installateur Astral, winget, puis le PATH.
 $uv = "$env:USERPROFILE\.local\bin\uv.exe"
+if (-not (Test-Path $uv)) { $uv = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\uv.exe" }
 if (-not (Test-Path $uv)) { $uv = "uv" }
 
 # 1) Serveur MCP local : seul point d'acces d'Hermes aux outils explicitement

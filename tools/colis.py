@@ -121,7 +121,7 @@ def _lire_entetes(jours):
     """En-tetes (expediteur, objet, date) des mails recus ces derniers jours, sans les marquer lus."""
     depuis = dt.date.today() - dt.timedelta(days=jours)
     critere = f'(SINCE "{depuis.day:02d}-{_MOIS_IMAP[depuis.month - 1]}-{depuis.year}")'
-    imap = imaplib.IMAP4_SSL(mail.IMAP_SERVEUR)
+    imap = imaplib.IMAP4_SSL(mail.IMAP_SERVEUR, timeout=mail.DELAI_MAIL_S)
     try:
         imap.login(mail.MAIL_ADRESSE, mail._mail_mdp())
         imap.select("INBOX", readonly=True)

@@ -245,7 +245,7 @@ La confiance est intégrée, pas rajoutée :
 - **Secrets & données perso jamais versionnés** (`config.yaml`, mémoire, logs, transcriptions d'appels, tokens OAuth — tous gitignorés).
 - Au téléphone, Jarvis ne confirme que ce que tu as validé **avant** l'appel.
 - **Niveaux de permission N1/N2/N3** : chaque outil a un niveau — **N1** sûr (auto, local + iPhone), **N2** sensible (confirmation ; « toujours autoriser » révocable), **N3** critique (confirmation à chaque fois, jamais mémorisable, **jamais à distance**). Extinction du PC, mails, appels, réservations = N3.
-- **Pont iPhone** : à distance, seuls les outils **sûrs (N1)** s'exécutent ; toute action sensible est refusée (« à faire à la voix à la maison »). Un token volé ne peut qu'allumer/éteindre des lumières.
+- **Pont iPhone** : à distance, s'exécutent sans confirmation les outils **sûrs (N1)** exposés, plus ceux que tu listes toi-même dans `pont_iphone.domotique_distante` (vide par défaut ; un N2 placé là perd sa confirmation à distance, un **N3 reste toujours refusé**). Toute autre action sensible est refusée (« à faire à la voix à la maison »), et après la lecture d'un contenu externe seules les lectures passent. Un token volé ne peut donc faire que ce que tu as ouvert : n'y mets que des actions physiques réversibles (lumières, ambiances).
 - **Cloisonnement Hermes** : Hermes lit le Vault et les outils **en lecture seule**, écrit uniquement des brouillons — **aucun credential** dans son environnement.
 
 ## 🗺️ Roadmap

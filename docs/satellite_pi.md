@@ -78,7 +78,9 @@ satellites:
 satellite_lan:
   actif: true
   host: "0.0.0.0"
-  port: 8791
+  tls: true        # facultatif (défaut) : port chiffré (wss://), certificat créé dans certs/
+  port_tls: 8792
+  port: 8791       # port EN CLAIR, seulement le temps de la bascule
 ```
 
 Générer un token avec :
@@ -88,8 +90,9 @@ python -c "import secrets; print(secrets.token_urlsafe(24))"
 ```
 
 Après redémarrage de Jarvis, le listener LAN dédié n'expose que la route
-`/satellite`. Le pare-feu doit autoriser le port choisi uniquement sur le profil
-réseau privé.
+`/satellite`. Le pare-feu doit autoriser le port chiffré `8792` uniquement sur le
+profil réseau privé. Au premier démarrage, Jarvis crée dans `certs/` une clé
+privée et le certificat **public** `certs/jarvis-lan.crt`.
 
 ## 4. Configurer le Pi
 
@@ -98,11 +101,21 @@ cp config.exemple.yaml config.yaml
 nano config.yaml
 ```
 
+Copier le certificat **public** du PC à côté de cette configuration, sous le nom
+`satellite_pi/jarvis-lan.crt` (clé USB, ou `scp` depuis le PC). Ne copier **jamais**
+`certs/jarvis-lan.key` : la clé privée ne quitte pas le PC.
+
 Renseigner obligatoirement :
 
-- `pc_url` : `ws://<ADRESSE_LAN_DU_PC>:8791/satellite` ;
+- `pc_url` : `wss://<ADRESSE_LAN_DU_PC>:8792/satellite` ;
+- `certificat` : `jarvis-lan.crt` ;
 - `satellite_id` : le même identifiant que dans la configuration du PC ;
 - `token` : le token associé à cet identifiant.
+
+Le satellite n'accepte que ce certificat : le token et l'audio ne passent pas en
+clair. L'ancien `ws://<ADRESSE_LAN_DU_PC>:8791/satellite` (en clair, sans
+certificat) n'est qu'un mode de transition déconseillé : il cesse de fonctionner
+dès que le PC passe `satellite_lan.clair: false`.
 
 Pour lister les périphériques audio :
 
@@ -189,6 +202,9 @@ Si le dossier est installé ailleurs, adapter `WorkingDirectory` et
   une entrée `satellites[]` côté PC.
 - **Serveur injoignable** : vérifier que les deux machines sont sur le même réseau,
   que `satellite_lan.actif` est activé et que le pare-feu autorise le port LAN.
+- **Certificat du serveur inutilisable** : le fichier `certificat` est absent ou
+  différent du certificat actuel du PC. Recopier `certs/jarvis-lan.crt` vers
+  `satellite_pi/jarvis-lan.crt` (jamais la clé `.key`).
 - **Coupures ou latence** : privilégier Ethernet ou un Wi-Fi stable, puis vérifier
   la charge du PC et les backends STT/LLM/TTS sélectionnés.
 - **Écho acoustique** : éloigner le micro du haut-parleur, réduire le volume ou

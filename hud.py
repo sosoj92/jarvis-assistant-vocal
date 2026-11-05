@@ -116,6 +116,12 @@ def _diffuser(evenement):
             _CLIENTS.discard(fil)
 
 
+def _client_actif(fil):
+    """Faux si la file a ete evincee (ou le client parti) : son flux doit se fermer."""
+    with _VERROU:
+        return fil in _CLIENTS
+
+
 # ---------------------------------------------------------------- API publique
 
 
@@ -333,8 +339,53 @@ def _etat_controles():
             "moteurs": ["auto", "elevenlabs", "piper", "kokoro", "windows"],
             "modeles_elevenlabs": ["eleven_flash_v2_5", "eleven_multilingual_v2"],
         },
-        "panneau_url": f"http://127.0.0.1:{int(reglage('serveur.port', 8790))}/panneau",
+        "panneau_url": f"http://127.0.0.1:{_port_serveur()}/panneau",
     }
+
+
+def _port_serveur():
+    """Port du serveur unifie, replis historiques compris (voir core.serveur)."""
+    try:
+        from core.serveur import port_effectif
+        return port_effectif()
+    except Exception:
+        from core.config import reglage
+        return int(reglage("serveur.port", 8790))
+
+
+# Un seul test vocal a la fois : plusieurs clics ne lancent pas plusieurs voix.
+_TEST_VOIX = threading.Lock()
+
+
+def _tester_voix():
+    """Lance un test vocal, ou dit honnetement qu'aucune voix n'est branchee ici."""
+    from core import voix
+
+    if not voix.disponible():
+        # Cas de l'agent du bureau : il sert le HUD mais la voix est synthetisee
+        # par le serveur Jarvis. Un « Test vocal lance » serait un faux succes, et
+        # le test du panneau du serveur jouerait sur la sortie audio du serveur,
+        # pas ici : on propose plutot un test a la voix depuis ce poste.
+        return {"ok": False, "message": (
+            "Aucune voix dans ce processus : le test vocal n'est pas disponible depuis "
+            "ce HUD. Pour l'entendre ici, dis simplement « Jarvis, dis bonjour ».")}
+    if not _TEST_VOIX.acquire(blocking=False):
+        return {"ok": False, "message": "Un test vocal est deja en cours."}
+
+    def _jouer():
+        try:
+            voix.parler("Test de la voix Jarvis. Tout fonctionne.")
+        except Exception as e:
+            print(f"[hud] test vocal en echec : {type(e).__name__}")
+        finally:
+            _TEST_VOIX.release()
+
+    try:
+        threading.Thread(target=_jouer, daemon=True, name="hud-test-voix").start()
+    except Exception:
+        _TEST_VOIX.release()
+        raise
+    return {"ok": True, "message": "Test vocal lance."}
 
 
 def _appliquer_controle(donnees):
@@ -360,14 +411,7 @@ def _appliquer_controle(donnees):
         resultat = panneau._definir_reglage(
             "elevenlabs.modele", donnees.get("valeur", ""))
     elif action == "tester_voix":
-        from core import voix
-        threading.Thread(
-            target=voix.parler,
-            args=("Test de la voix Jarvis. Tout fonctionne.",),
-            daemon=True,
-            name="hud-test-voix",
-        ).start()
-        resultat = {"ok": True, "message": "Test vocal lance."}
+        resultat = _tester_voix()
     else:
         return {"ok": False, "message": "Controle inconnu."}
 
@@ -419,7 +463,9 @@ class _Poignee(BaseHTTPRequestHandler):
         if self.headers.get("X-Jarvis-HUD") != "1":
             self._json({"ok": False, "message": "Requete HUD invalide."}, 403)
             return
-        if "application/json" not in self.headers.get("Content-Type", "").lower():
+        # Type exact (comme le panneau) : « text/plain; application/json » est refuse.
+        type_corps = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if type_corps != "application/json":
             self._json({"ok": False, "message": "Corps JSON requis."}, 415)
             return
         try:
@@ -509,12 +555,20 @@ class _Poignee(BaseHTTPRequestHandler):
             # qui garde la connexion (et detecte les clients partis). A chaque
             # battement, une page modifiee sur le disque est annoncee : la
             # fenetre ouverte se recharge sans redemarrage de Jarvis.
+            # Un client evince par _diffuser (file pleine, lecteur gele) n'est
+            # plus dans _CLIENTS : on ferme la connexion au lieu de l'entretenir
+            # par des battements. EventSource se reconnecte alors et recoit un
+            # instantane complet.
             version = _version_page()
-            while True:
+            while _client_actif(fil):
                 try:
                     donnees = fil.get(timeout=_BATTEMENT)
+                    if not _client_actif(fil):
+                        break
                     self._ecrire(donnees)
                 except queue.Empty:
+                    if not _client_actif(fil):
+                        break
                     actuelle = _version_page()
                     if actuelle and actuelle != version:
                         version = actuelle
@@ -536,8 +590,21 @@ class _Poignee(BaseHTTPRequestHandler):
 
 
 class _Serveur(ThreadingHTTPServer):
-    """Serveur HUD silencieux sur les deconnexions clientes (onglet ferme/rechargé)."""
+    """Serveur HUD silencieux sur les deconnexions clientes (onglet ferme/rechargé).
+
+    Port exclusif : sous Windows, SO_REUSEADDR (herite de HTTPServer) laisserait un
+    second HUD (demo, ancien agent) ecouter le meme port sans erreur. Poser a la
+    fois SO_REUSEADDR et SO_EXCLUSIVEADDRUSE est refuse par Winsock : sous Windows
+    seulement, on retire donc SO_REUSEADDR (ailleurs il evite d'attendre la fin de
+    TIME_WAIT apres un redemarrage)."""
     daemon_threads = True
+
+    def server_bind(self):
+        import socket
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.allow_reuse_address = False
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def handle_error(self, request, client_address):
         import sys
@@ -564,7 +631,14 @@ def demarrer(ouvrir=True, fenetre="navigateur", ecran=None, tableau_local=True):
     _MODE_FENETRE = "app" if str(fenetre).lower() == "app" else "navigateur"
     _ECRAN = ecran_demande(ecran)
 
-    _SERVEUR = _Serveur(("127.0.0.1", PORT), _Poignee)
+    try:
+        _SERVEUR = _Serveur(("127.0.0.1", PORT), _Poignee)
+    except OSError:
+        # Les appelants gardent leur contrat (jarvis14 avale l'erreur, l'agent
+        # affiche « [hud] indisponible ») ; le message dit enfin pourquoi.
+        print(f"[hud] indisponible : port {PORT} occupe "
+              "(autre HUD ou demo deja lance).")
+        raise
     _SERVEUR.daemon_threads = True
 
     thread = threading.Thread(target=_SERVEUR.serve_forever, daemon=True)
@@ -942,7 +1016,10 @@ def _scenario():
 
 
 if __name__ == "__main__":
-    demarrer(tableau_local=False)              # demo : tuiles factices uniquement
+    try:
+        demarrer(tableau_local=False)          # demo : tuiles factices uniquement
+    except OSError:
+        sys.exit(1)                            # message deja affiche par demarrer()
     print("Scenario de demonstration en boucle. Ctrl+C pour quitter.")
     try:
         _scenario()

@@ -12,6 +12,12 @@ def definir_parleur(fonction):
     _parleur = fonction
 
 
+def disponible():
+    """Vrai si une voix est branchee dans ce processus (jarvis14 l'enregistre ;
+    l'agent du bureau, qui sert aussi le HUD, n'en a pas)."""
+    return _parleur is not None
+
+
 def parler(texte):
     if _parleur is not None:
         _parleur(texte)

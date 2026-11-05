@@ -72,7 +72,9 @@ def _executer(outil, kwargs):
     # Les outils exposes renvoient du texte ; on aplati un eventuel dict image.
     if isinstance(resultat, dict) and resultat.get("image"):
         resultat = resultat.get("apercu", "(image)")
-    return str(resultat)
+    # Defense en profondeur pour Hermes : un contenu de tiers (ex. chercher_inspiration)
+    # arrive balise comme donnees non fiables, jamais comme consignes.
+    return registre.baliser_externe(outil.nom, str(resultat))
 
 
 def _enregistrer(outil):

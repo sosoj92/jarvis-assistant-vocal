@@ -31,11 +31,16 @@ Chaque abonnement : `service`, `montant` (€), `periodicite` (mensuel / annuel 
 trimestriel / semestriel / hebdomadaire), `jour` (jour du mois, pour le mensuel) **ou**
 `date` (AAAA-MM-JJ d'ancrage), `categorie`.
 
+- La périodicité **hebdomadaire** exige une `date` d'ancrage (`jour` n'est pas
+  utilisé) : sans elle, l'échéance reste calculée au mois.
+- Les montants acceptent `9.99`, `9,99` et `9,99 €`.
+- Une ligne illisible est ignorée, avec une alerte qui la signale.
+
 Le cockpit affiche :
 - **Total mensuel** (les annuels/trimestriels sont ramenés au mois) et l'équivalent annuel ;
 - **Timeline des prochaines échéances** (triée), avec « demain / dans N j » ;
 - **Alertes** : ⏰ **prélèvement demain**, 🔔 **montant changé** (comparé à la dernière
-  valeur vue) ;
+  valeur vue, affichée pendant 7 jours) ;
 - **Répartition par catégorie**.
 
 ### Détection automatique par mail (recommandé)

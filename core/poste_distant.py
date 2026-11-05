@@ -9,6 +9,7 @@ d'actions locales, jamais une commande shell ni un chemin arbitraire.
 # annotations differees, il ne le resout pas et refuse toute connexion (HTTP 403).
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import secrets
@@ -125,12 +126,28 @@ def executer_resultat(action, args=None, identifiant=None, timeout=15.0):
     if connexion is None:
         return (f"Le poste {identifiant} n'est pas connecté. Lance l'agent Jarvis "
                 "sur ce PC.")
+    # Appel depuis la boucle du poste elle-meme : attendre le resultat la
+    # bloquerait (la commande ne partirait qu'apres le delai). Refus immediat.
+    try:
+        courante = asyncio.get_running_loop()
+    except RuntimeError:
+        courante = None
+    if courante is connexion.boucle:
+        LOG.error("commande distante %s/%s appelee depuis la boucle du poste",
+                  identifiant, action)
+        return f"Le poste {identifiant} ne répond pas."
+    futur = None
     try:
         futur = asyncio.run_coroutine_threadsafe(
             _envoyer(identifiant, action, args or {}, float(timeout)),
             connexion.boucle,
         )
-        enveloppe = futur.result(timeout=float(timeout) + 1.0)
+        try:
+            enveloppe = futur.result(timeout=float(timeout) + 1.0)
+        except concurrent.futures.TimeoutError:
+            # Une commande deja annoncee en echec ne doit jamais partir en retard.
+            futur.cancel()
+            raise
         if not isinstance(enveloppe, dict):
             return "Le poste distant a renvoyé une réponse invalide."
         message = str(enveloppe.get("message", "") or "").strip()
@@ -189,7 +206,8 @@ def monter_routes(app):
             conf = agents_configures().get(identifiant)
             jeton = str(hello.get("token", "") or "")
             if (hello.get("type") != "hello" or not conf or not conf["token"]
-                    or not secrets.compare_digest(jeton, conf["token"])):
+                    or not secrets.compare_digest(
+                        jeton.encode("utf-8"), str(conf["token"]).encode("utf-8"))):
                 await ws.send_text(json.dumps({
                     "type": "erreur", "message": "agent inconnu ou token invalide"}))
                 await ws.close(code=1008)

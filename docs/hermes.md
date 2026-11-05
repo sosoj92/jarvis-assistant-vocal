@@ -10,11 +10,16 @@ dans [le guide du serveur Ubuntu/Hyper-V](hermes_server_vm.md).
   délégation utilise une session nommée et plusieurs tâches peuvent tourner en parallèle.
 - Phrases déclencheuses : « **délègue à Hermes** … », « **fais une recherche de fond sur** … »,
   « **lance Hermes sur** … ».
-- Les demandes explicites de **création de contenu** sont aussi routées
-  automatiquement : écrire ou améliorer un script, proposer des hooks/accroches,
-  trouver des idées vidéo ou analyser des inspirations. Hermes reçoit la demande
-  avec instruction d'utiliser le Vault pour respecter le ton existant. Une simple
-  mention (« j'ai tourné ma vidéo », « où en est mon script ? ») reste chez Jarvis.
+- Les demandes explicites de **production de contenu** sont aussi routées
+  automatiquement. Il faut à la fois un **objet créatif** (script, hook,
+  accroche, idée, angle, storyboard, carrousel, légende, voix off, inspiration)
+  et un **verbe de création** (écris, rédige, génère, propose, imagine, améliore,
+  analyse, trouve des idées…). Hermes reçoit la demande avec instruction
+  d'utiliser le Vault pour respecter le ton existant. Une simple mention
+  (« j'ai tourné ma vidéo », « où en est mon script ? ») et les consultations
+  (« donne-moi mes stats Instagram », « fais le point sur mes vidéos »,
+  « cherche mes inspirations sur… ») restent chez Jarvis, au LLM et à ses outils
+  instantanés.
 
 > Exemple : « Jarvis, délègue à Hermes : compare les 3 meilleurs micros pour le streaming en 2026. »
 > Jarvis : « Je délègue ça à Hermes. Je te préviens dès que c'est prêt. » … *(plus tard)* …

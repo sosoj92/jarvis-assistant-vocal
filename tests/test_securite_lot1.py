@@ -120,6 +120,30 @@ class ConfirmationsTest(unittest.TestCase):
                 self.assertTrue(registre.get(nom).confirmation)
         self.assertFalse(registre.est_autorise("ajouter_app"))   # jamais « toujours »
 
+    def test_clics_navigateur_et_ecran_jamais_memorises(self):
+        for nom in ("browser_interact", "cliquer_ecran"):
+            if registre.get(nom) is None:          # outil optionnel absent
+                continue
+            with self.subTest(outil=nom), \
+                    patch("core.config.reglage", return_value=[nom]), \
+                    patch("core.config.definir") as definir:
+                self.assertEqual(registre.niveau(nom), "N2")
+                self.assertFalse(registre.autoriser_toujours(nom))
+                definir.assert_not_called()
+                # Meme deja liste dans securite.toujours (ancienne config) : ignore.
+                self.assertFalse(registre.est_autorise(nom))
+                self.assertFalse(registre.memorisable(nom))
+                self.assertTrue(registre.confirmation_requise(nom))
+                self.assertTrue(registre.confirmation_requise(nom, apres_contenu_externe=True))
+
+    def test_oui_toujours_propose_seulement_pour_un_n2_non_memorise(self):
+        with patch.object(registre, "autorisations", return_value=[]):
+            self.assertTrue(registre.memorisable("start_record"))
+        with patch.object(registre, "autorisations", return_value=["start_record"]):
+            self.assertFalse(registre.memorisable("start_record"))   # deja dit
+        self.assertFalse(registre.memorisable("envoyer_mail"))         # N3
+        self.assertFalse(registre.memorisable("heure_et_date"))        # N1
+
     def test_annonces_completes(self):
         self.assertIn("C:\\jeu.exe", registre.get("ajouter_app").annonce({"nom": "jeu", "chemin": "C:\\jeu.exe"}))
         self.assertIn("ouvrir mes mails", registre.get("controle_pc_astra").annonce({"tache": "ouvrir mes mails"}))

@@ -49,12 +49,26 @@ $action = New-ScheduledTaskAction @actionParams
 
 $trigger = New-ScheduledTaskTrigger -Once -At $execution
 $trigger.EndBoundary = $execution.AddHours(1).ToString('s')
+# Meme duree maximale que la tache quotidienne (allongee pour le Brief Tech & IA) ;
+# 15 min si elle est absente, illisible ou illimitee (PT0S).
+$dureeMax = New-TimeSpan -Minutes 15
+$limiteSource = [string]$source.Settings.ExecutionTimeLimit
+if ($limiteSource) {
+    try {
+        $lue = [System.Xml.XmlConvert]::ToTimeSpan($limiteSource)
+        if ($lue -gt [TimeSpan]::Zero) {
+            $dureeMax = $lue
+        }
+    } catch {
+        # Valeur illisible : on garde 15 min.
+    }
+}
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -DeleteExpiredTaskAfter (New-TimeSpan -Minutes 10) `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+    -ExecutionTimeLimit $dureeMax
 
 Register-ScheduledTask `
     -TaskName $NomTache `

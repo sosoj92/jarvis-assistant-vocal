@@ -229,13 +229,15 @@ def eteindre_tout() -> str:
     if _touche_media("stop media"):
         faits.append("musique coupée")
 
-    # 2) Lumières off.
-    try:
-        from tools import modes
-        modes.activer("off")
-        faits.append("lumières éteintes")
-    except Exception:
-        pass
+    # 2) Lumières off (Hue). Annoncé seulement si le pont a vraiment répondu ;
+    # sans Hue configuré, l'étape est sautée sans rien annoncer.
+    if reglage("hue.pont", "") and reglage("hue.cle", ""):
+        try:
+            from tools import modes
+            _cle, echecs = modes.appliquer("off")
+            faits.append("lumières éteintes" if not echecs else f"lumières : {echecs[0]}")
+        except Exception:
+            pass
 
     # 3) OBS : pause de l'enregistrement s'il tourne (on NE coupe PAS un live en cours).
     try:

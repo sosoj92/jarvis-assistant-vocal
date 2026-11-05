@@ -118,6 +118,10 @@ actions visuelles.
 Le mode serveur sans périphériques empêche le Jarvis de l'ancien PC d'ouvrir son
 HUD, sa caméra, ses gestes ou son micro. Il ne tente donc jamais d'utiliser le
 moniteur secondaire du nouveau PC comme s'il était encore branché localement.
+L'allumage automatique de `assistant.piece_nuit` au démarrage n'a pas lieu non
+plus lorsque `poste_principal.actif` et `poste_principal.serveur_sans_peripheriques`
+sont vrais : le serveur redémarre parfois seul en pleine nuit et allumerait la
+pièce.
 
 ## Sécurité
 

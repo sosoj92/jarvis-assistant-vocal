@@ -85,7 +85,9 @@ def client_anthropic():
     if not cle:
         return None
     import anthropic
-    return anthropic.Anthropic(api_key=cle)
+    # Memes delais que client_openai et ClaudeProvider (sinon jusqu'a 600 s par essai).
+    return anthropic.Anthropic(api_key=cle, timeout=float(reglage("anthropic.timeout", 90)),
+                               max_retries=int(reglage("anthropic.max_retries", 1)))
 
 
 def disponible() -> bool:

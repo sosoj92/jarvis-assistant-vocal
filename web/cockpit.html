@@ -87,7 +87,13 @@
 const $=(s,e=document)=>e.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const eur=n=>esc((n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}))+' €';
-const api=async u=>{try{return await (await fetch(u,{headers:{'X-Jarvis-Panneau':'1'}})).json()}catch(e){return null}};
+// Serveur injoignable -> {hors_ligne:true} ; reponse HTTP en erreur -> {erreur_http:code}.
+const api=async u=>{
+  let r;
+  try{r=await fetch(u,{headers:{'X-Jarvis-Panneau':'1'}})}catch(e){return {hors_ligne:true}}
+  if(!r.ok) return {erreur_http:r.status};
+  try{return await r.json()}catch(e){return {erreur_http:r.status}}
+};
 
 document.querySelectorAll('nav button:not([disabled])').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
@@ -105,7 +111,8 @@ function dans(n){
 
 async function charger(){
   const d=await api('/api/cockpit/finances');
-  if(!d){$('#kpis').innerHTML='<span class="muted">Cockpit hors ligne.</span>';return;}
+  if(!d||d.hors_ligne){$('#kpis').innerHTML='<span class="muted">Cockpit hors ligne.</span>';return;}
+  if(d.erreur_http){$('#kpis').innerHTML=`<span class="muted">Erreur du cockpit (HTTP ${esc(d.erreur_http)}).</span>`;return;}
   $('#maj').textContent='maj '+new Date().toLocaleTimeString('fr-FR');
   // alertes
   $('#alertes').innerHTML=(d.alertes||[]).map(a=>{
@@ -118,6 +125,13 @@ async function charger(){
     <div class="kpi"><div class="v">${eur(d.total_annuel)}</div><div class="l">soit / an</div></div>
     <div class="kpi"><div class="v">${esc(d.nb)}</div><div class="l">abonnements actifs</div></div>`;
   // timeline
+  if(d.fichier==='invalide'){
+    // Fichier present mais illisible : ne pas inviter a le creer.
+    $('#vide').innerHTML='<span class="badge">finances/abonnements.yaml</span> est invalide : corrige-le.';
+  }else{
+    $('#vide').innerHTML='Aucun abonnement. Crée <span class="badge">finances/abonnements.yaml</span> '
+      +'(copie <span class="badge">finances/abonnements.example.yaml</span>).';
+  }
   $('#vide').style.display=d.nb?'none':'block';
   $('#timeline').innerHTML=(d.abonnements||[]).map(a=>`<tr>
     <td>${esc(a.service)}</td><td><span class="badge">${esc(a.categorie)}</span></td>

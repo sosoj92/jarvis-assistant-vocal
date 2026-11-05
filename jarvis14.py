@@ -398,7 +398,7 @@ RESIDUS = (
 )
 
 # Ce que Whisper invente quand il n'entend que du silence (liste partagee avec les satellites).
-from core.hallucinations import HALLUCINATIONS  # noqa: E402
+from core.hallucinations import est_hallucination  # noqa: E402
 
 # Mots qui coupent la parole PUIS relancent l'ecoute (tu veux redire quelque chose).
 MOTS_RELANCE = (
@@ -423,22 +423,22 @@ def type_arret(texte):
     return None
 
 
-def _est_oui(texte):
-    """Accord explicite en mot entier, sans negation ni hesitation (voir confirmation_vocale)."""
-    return interpreter_confirmation(texte) != NON
+def _est_oui(texte, strict=False):
+    """Accord explicite en mot entier, sans negation ni hesitation (voir confirmation_vocale).
+    strict=True pour un N3 : une condition, une question ou « toujours » sans oui annulent."""
+    return interpreter_confirmation(texte, strict=strict) != NON
 
 
-def _est_toujours(texte):
+def _est_toujours(texte, strict=False):
     """Accord avec 'toujours' (memoriser l'autorisation, N2) ; 'toujours pas' est un refus."""
-    return interpreter_confirmation(texte) == TOUJOURS
+    return interpreter_confirmation(texte, strict=strict) == TOUJOURS
 
 
 def nettoyer(texte):
     """Retire le residu du mot d'activation en tete de transcription."""
     t = texte.strip()
 
-    plat = sans_accents(t)
-    if any(h in plat for h in HALLUCINATIONS):
+    if est_hallucination(t):
         return ""
 
     # Cas "Avis, ouvre YouTube" ou "Jarvis : ouvre YouTube"
@@ -459,7 +459,10 @@ def nettoyer(texte):
     if mots and mots[0].lower().strip(",.:;!?") in RESIDUS:
         t = " ".join(mots[1:])
 
-    return t.strip()
+    # Les debuts d'hallucinations (« Sous-titres… », « Abonnez-vous ») sont ancres
+    # en tete : on reteste une fois le residu (« Jarvis, », « Avis. ») retire.
+    t = t.strip()
+    return "" if est_hallucination(t) else t
 
 
 # ---------------------------------------------------------------- parole en flux
@@ -529,6 +532,10 @@ def _executer_outils(blocs):
     confirmation en attente au lieu de les executer tout de suite.
     """
     resultats = []
+    # Un seul emplacement de confirmation : la premiere action a confirmer de la
+    # reponse est rangee, les suivantes ne sont ni executees ni rangees (le modele
+    # le sait et pourra les reproposer), au lieu d'ecraser la premiere sans le dire.
+    deja_en_attente = False
     for bloc in blocs:
         if getattr(bloc, "type", None) != "tool_use":
             continue
@@ -536,17 +543,25 @@ def _executer_outils(blocs):
         arguments = bloc.input or {}
         outil = registre.get(nom)
         debut_outil = time.monotonic()
+        execute = False
 
         if outil is None:
             resultat = f"Outil inconnu : {nom}"
         elif registre.confirmation_requise(nom, _CONTENU_EXTERNE_TOUR[0]):
-            # N2 memorise "toujours autoriser" -> on n'attend pas (est_autorise True).
+            # N2 memorise "toujours autoriser" -> on n'attend pas (est_autorise True),
+            # sauf apres la lecture d'un contenu externe dans ce tour.
             # Un N3 n'est jamais autorise d'avance : il repasse toujours par ici.
             # Apres la lecture d'un contenu externe, toute action non sure aussi.
-            annonce = (None if outil.confirmation
-                       else registre.annonce_prudence(outil, arguments))
-            resultat = registre.mettre_en_attente(outil, arguments, annonce=annonce)
+            if deja_en_attente:
+                resultat = registre.NON_EXECUTE_AUTRE_ATTENTE
+            else:
+                prudence = not outil.confirmation or registre.est_autorise(nom)
+                annonce = (registre.annonce_prudence(outil, arguments) if prudence
+                           else None)
+                resultat = registre.mettre_en_attente(outil, arguments, annonce=annonce)
+                deja_en_attente = True
         else:
+            execute = True
             try:
                 resultat = registre.executer(outil, arguments)
             except Exception:
@@ -572,9 +587,15 @@ def _executer_outils(blocs):
         else:
             print(f"  [outil] {nom} -> termine")
             _hud("outil", nom, "Action terminee")
-            contenu = registre.baliser_externe(nom, str(resultat))
-            if nom in registre.SOURCES_EXTERNES:
-                _CONTENU_EXTERNE_TOUR[0] = True
+            # Seul un resultat reellement produit par l'outil est balise (pas
+            # « En attente de la confirmation » ni « Non execute »).
+            contenu = (registre.baliser_externe(nom, str(resultat)) if execute
+                       else str(resultat))
+        # Hors de la branche texte : une capture d'ecran (resultat image) montre
+        # aussi du texte de tiers. Les sorties tierces (expediteurs, page resumee,
+        # reponse d'un interlocuteur) levent le drapeau comme les sources externes.
+        if nom in registre.SOURCES_EXTERNES or (execute and nom in registre.SORTIES_TIERCES):
+            _CONTENU_EXTERNE_TOUR[0] = True
 
         resultats.append({
             "type": "tool_result",
@@ -608,6 +629,7 @@ def _repondre_route_prioritaire_commune(historique):
         from core.routage_intentions import Decision
         decision = Decision("outil", "controle_pc_astra", {"tache": decision.tache})
 
+    pour_historique = None              # version balisee si texte de tiers
     if decision.type == "astra":
         texte = "Dis-moi quelle tache tu veux que je fasse sur le PC avec Astra."
         nom_outil = "controle_pc_astra"
@@ -622,6 +644,11 @@ def _repondre_route_prioritaire_commune(historique):
         texte = analyser_ecran(decision.tache)
         fil_vision.join()
         nom_outil = "capture_screen"
+        # Resume de l'ecran = texte de tiers, comme capture_screen par le LLM :
+        # balise dans l'historique (prononce brut) et drapeau de contenu externe.
+        _CONTENU_EXTERNE_TOUR[0] = True
+        if texte:
+            pour_historique = registre.baliser_externe(nom_outil, texte)
 
     elif decision.type == "hermes":
         from tools.deleguer_a_hermes import deleguer_en_fond
@@ -655,14 +682,15 @@ def _repondre_route_prioritaire_commune(historique):
         if annonce:
             _hud("etat", "parole")
             phrase = annonce + " Tu confirmes ?"
-            if registre.niveau(nom_outil) == "N2":
+            if registre.memorisable(registre.nom_en_attente() or ""):
                 phrase += " Tu peux dire oui, toujours."
             if not _INTERRUPTION.is_set():
                 dire(phrase, interruptible=False)
             return SENTINEL_CONFIRM
         texte = str(resultats[0]["content"] if resultats else "C'est fait.")
 
-    historique.append({"role": "assistant", "content": texte})
+    historique.append({"role": "assistant",
+                       "content": pour_historique or texte or "C'est fait."})
     _hud("outil", nom_outil, question[:60])
     _hud("etat", "parole")
     if texte and not _INTERRUPTION.is_set():
@@ -677,6 +705,14 @@ def repondre(historique):
     les outils a confirmation, prononce l'annonce et renvoie SENTINEL_CONFIRM
     (la suite est geree par traiter, qui capture la reponse oui/non).
     """
+    # Bascule budget : le retour au mode normal « le lendemain » ne doit pas
+    # attendre une depense cloud (il n'y en a plus apres une bascule en local).
+    from core.routage import verifier_nouveau_jour
+    verifier_nouveau_jour()
+    # Le drapeau « contenu externe lu » ne vaut que pour le tour en cours : la route
+    # prioritaire part de la phrase de l'utilisatrice, pas d'un contenu externe.
+    _CONTENU_EXTERNE_TOUR[0] = False
+
     prioritaire = _repondre_route_prioritaire_commune(historique)
     if prioritaire is not None:
         return prioritaire
@@ -686,11 +722,18 @@ def repondre(historique):
     if not fournisseur.disponible():
         mode = config.reglage("mode", "cloud")
         if mode == "local":
-            return ("Le modele local (Ollama) n'est pas joignable. Verifie qu'Ollama "
-                    "tourne et que le modele est telecharge.")
-        from core import cloud
-        return ("Ma cle OpenAI n'est pas configuree." if cloud.fournisseur() == "openai"
-                else "Ma cle Anthropic n'est pas configuree.")
+            message = ("Le modele local (Ollama) n'est pas joignable. Verifie qu'Ollama "
+                       "tourne et que le modele est telecharge.")
+        else:
+            from core import cloud
+            message = ("Ma cle OpenAI n'est pas configuree." if cloud.fournisseur() == "openai"
+                       else "Ma cle Anthropic n'est pas configuree.")
+        # Comme les autres erreurs du tour : prononcee et gardee dans l'historique.
+        historique.append({"role": "assistant", "content": message})
+        _hud("etat", "parole")
+        if not _INTERRUPTION.is_set():
+            dire(message)
+        return message
 
     fil_accuse = None
     accuse_donne = False
@@ -775,8 +818,9 @@ def repondre(historique):
                     fil_accuse.join()
                 _hud("etat", "parole")
                 phrase = annonce + " Tu confirmes ?"
-                # Pour un outil N2, rappeler qu'on peut memoriser l'autorisation.
-                if registre.niveau(registre.nom_en_attente() or "") == "N2":
+                # Pour un outil N2 memorisable (pas deja memorise), rappeler qu'on
+                # peut memoriser l'autorisation.
+                if registre.memorisable(registre.nom_en_attente() or ""):
                     phrase += " Tu peux dire oui, toujours."
                 if not _INTERRUPTION.is_set():
                     dire(phrase, interruptible=False)
@@ -790,7 +834,9 @@ def repondre(historique):
             b.text for b in reponse.content if getattr(b, "type", None) == "text"
         ).strip()
         texte = nettoyer_reponse_vocale(texte)
-        historique.append({"role": "assistant", "content": texte})
+        # Jamais de message assistant vide dans l'historique (Claude le refuse) :
+        # on y garde ce que traiter() prononcera dans ce cas.
+        historique.append({"role": "assistant", "content": texte or "C'est fait."})
         _hud("etat", "parole")
         if texte and not _INTERRUPTION.is_set():
             dire(texte)
@@ -1128,17 +1174,26 @@ def _confirmer(interrompu, relancer, whisper, historique, flux):
         reponse = nettoyer(" ".join(s.text for s in seg).strip())
     print(f"  [confirmation] {reponse or '(rien)'}")
 
-    memoriser = _est_toujours(reponse)
-    if _est_oui(reponse) or memoriser:
+    # Mode strict pour un N3, calcule AVANT executer_confirme/annuler_confirme
+    # (qui vident l'action en attente).
+    nom = registre.nom_en_attente()
+    strict = registre.est_n3(nom)
+    memoriser = _est_toujours(reponse, strict)
+    execute = _est_oui(reponse, strict) or memoriser
+    if execute:
         res = registre.executer_confirme(memoriser=memoriser)
     else:
         registre.annuler_confirme()
         res = "D'accord, j'annule."
+    res = "" if res is None else str(res)
 
     _hud("etat", "parole")
     if res and not _INTERRUPTION.is_set():
         dire(res)
-    historique.append({"role": "assistant", "content": res})
+    # Copie pour le modele seulement (jamais prononcee) : un resultat qui reprend
+    # du texte de tiers (appel, reservation, page) y est balise ; jamais de vide.
+    copie = registre.baliser_externe(nom, res) if execute else res
+    historique.append({"role": "assistant", "content": copie or "D'accord."})
     return res, False
 
 
@@ -1252,6 +1307,11 @@ def _installer_raccourci_micro():
         LOG.exception("micro: raccourci clavier")
 
 
+# Tours en echec de suite (transcription, son, outil) avant d'arreter Jarvis :
+# au-dela, la panne est durable et tourner a vide noierait le journal.
+_MAX_ECHECS_TOUR = 5
+
+
 def main():
     print("Chargement des modeles...")
 
@@ -1334,6 +1394,10 @@ def main():
         if config.reglage("mode", "cloud") == "local":
             print("ATTENTION : Ollama injoignable. Lance 'ollama serve' et verifie le "
                   "modele (config ollama.modele).")
+        elif getattr(config, "_ERREUR_CHARGEMENT", None):
+            # Fichier present mais illisible : ne pas laisser croire a une cle absente.
+            print(f"ATTENTION : {config._ERREUR_CHARGEMENT}. Corrige-le : "
+                  "l'assistant ne pourra pas repondre en attendant.")
         else:
             from core import cloud
             nom_cle = "openai.cle" if cloud.fournisseur() == "openai" else "anthropic.cle"
@@ -1462,11 +1526,14 @@ def main():
 
     tampon = deque(maxlen=6)
     enchainer = False
+    echecs_consecutifs = 0
 
     try:
         while True:
             suite = enchainer
             if not enchainer:
+                # Hors de la garde du tour : un micro perdu pour de bon arrete
+                # Jarvis proprement au lieu de tourner a vide.
                 bloc = lire_bloc(flux)
                 tampon.append(bloc)
 
@@ -1489,29 +1556,55 @@ def main():
                     continue
 
             enchainer = False
-            _hud("etat", "ecoute")
-            if not suite:
-                print("  [micro] Oui ?")
-                if config.reglage("hud.premier_plan_au_reveil", True):
-                    # Accuse visuel du mot d'activation : la fenetre du HUD passe
-                    # devant, en fond pour ne retarder ni le bip ni l'ecoute.
-                    threading.Thread(target=_hud, args=("mettre_au_premier_plan",),
-                                     daemon=True).start()
-                bip()
+            # Garde du tour : une erreur de transcription, de son ou d'outil ne doit
+            # pas arreter Jarvis. On journalise, on annule toute action en attente
+            # et on repasse en veille.
+            try:
+                _hud("etat", "ecoute")
+                if not suite:
+                    print("  [micro] Oui ?")
+                    if config.reglage("hud.premier_plan_au_reveil", True):
+                        # Accuse visuel du mot d'activation : la fenetre du HUD passe
+                        # devant, en fond pour ne retarder ni le bip ni l'ecoute.
+                        threading.Thread(target=_hud, args=("mettre_au_premier_plan",),
+                                         daemon=True).start()
+                    bip()
 
-            audio = capturer(flux, tampon)
-            if audio is None:
-                print("  (rien entendu)\n")
-                continue
+                audio = capturer(flux, tampon)
+                if audio is None:
+                    print("  (rien entendu)\n")
+                    echecs_consecutifs = 0
+                    continue
 
-            if traiter(audio, whisper, historique, flux, reveil):
-                enchainer = True
-                continue
+                if traiter(audio, whisper, historique, flux, reveil):
+                    enchainer = True
+                    echecs_consecutifs = 0
+                    continue
 
-            print(f"  [micro] J'ecoute encore {int(DUREE_SUITE)} s...")
-            enchainer = attendre_suite(flux, tampon)
-            if not enchainer:
+                print(f"  [micro] J'ecoute encore {int(DUREE_SUITE)} s...")
+                enchainer = attendre_suite(flux, tampon)
+                if not enchainer:
+                    _hud("etat", "veille")
+                echecs_consecutifs = 0
+            except Exception:
+                echecs_consecutifs += 1
+                LOG.exception("tour en echec (%d de suite)", echecs_consecutifs)
+                print("  [erreur] ce tour a echoue, je repasse en veille.")
+                registre.annuler_confirme()
+                _INTERRUPTION.clear()
+                enchainer = False
+                if echecs_consecutifs >= _MAX_ECHECS_TOUR:
+                    print(f"  [erreur] {echecs_consecutifs} tours en echec de suite : "
+                          "j'arrete. Consulte le journal.")
+                    break
+                try:
+                    # Le son peut etre justement ce qui a echoue.
+                    dire("Desole, j'ai eu un souci. Je repasse en veille.",
+                         interruptible=False)
+                except Exception:
+                    LOG.exception("annonce d'erreur du tour")
                 _hud("etat", "veille")
+                time.sleep(min(echecs_consecutifs, 5))
 
     except KeyboardInterrupt:
         print("\nAu revoir.")

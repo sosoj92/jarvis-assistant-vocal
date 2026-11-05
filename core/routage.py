@@ -16,6 +16,7 @@ Garde-fous (jamais de blocage silencieux) :
     Hermes non critiques jusqu'au lendemain (repris automatiquement le jour d'après).
 """
 import logging
+import re
 import subprocess
 
 from core.config import definir, reglage
@@ -64,25 +65,35 @@ def _hermes(args, timeout=25):
         return ""
 
 
-def _crons_noms():
-    """Noms des crons Hermes via `hermes cron list` (lignes « Name: … »)."""
-    noms = []
+_ETATS_INACTIFS = ("[paused]", "[disabled]", "[completed]")
+
+
+def _crons():
+    """Crons Hermes via `hermes cron list` : liste de (nom, actif). L'etat vient de
+    la ligne « <id> [active|paused|…] » qui precede « Name: … » ; inconnu = actif."""
+    crons, etat = [], ""
     for ligne in _hermes(["cron", "list"]).splitlines():
-        s = ligne.strip()
+        s = re.sub(r"\x1b\[[0-9;]*m", "", ligne).strip()     # couleurs ANSI eventuelles
         if s.startswith("Name:"):
-            noms.append(s.split(":", 1)[1].strip())
-    return noms
+            crons.append((s.split(":", 1)[1].strip(),
+                          not any(m in etat for m in _ETATS_INACTIFS)))
+            etat = ""
+        elif s.endswith("]") and "[" in s:
+            etat = s.lower()
+    return crons
 
 
 def suspendre_crons_non_critiques():
-    """Met en pause les crons Hermes sauf ceux listés dans budget.crons_critiques.
-    Renvoie la liste des crons suspendus (pour reprise le lendemain)."""
+    """Met en pause les crons Hermes actifs sauf ceux listés dans budget.crons_critiques.
+    Renvoie la liste des crons suspendus (pour reprise le lendemain) : un cron deja
+    en pause (par l'utilisatrice) n'y figure pas, la reprise ne le relance donc pas."""
     critiques = {str(x).lower() for x in (reglage("budget.crons_critiques", []) or [])}
     suspendus = []
-    for nom in _crons_noms():
-        if nom.lower() in critiques:
+    for nom, actif in _crons():
+        if not actif or nom.lower() in critiques:
             continue
-        if _hermes(["cron", "pause", nom], timeout=15) != "" or True:
+        sortie = _hermes(["cron", "pause", nom], timeout=15)
+        if sortie and "failed" not in sortie.lower():
             suspendus.append(nom)
     if suspendus:
         LOG.info("crons Hermes suspendus (plafond budget) : %s", suspendus)
@@ -112,6 +123,16 @@ def apres_depense():
         _basculer_si_plafond(e)
     except Exception:
         LOG.exception("routage: garde-fous")
+
+
+def verifier_nouveau_jour():
+    """Appelé au début de chaque tour : le retour au mode normal et la reprise des
+    crons « le lendemain » ne doivent pas attendre une dépense cloud, qui n'arrive
+    plus après une bascule en local. Best-effort, ne lève jamais."""
+    try:
+        _reprendre_si_nouveau_jour(None)
+    except Exception:
+        LOG.exception("routage: verification du nouveau jour")
 
 
 def _annoncer(texte):
@@ -163,6 +184,12 @@ def _reprendre_si_nouveau_jour(e):
     if not budget.jour_a_change():
         return
     budget.reset_signaux()                       # ré-arme alertes/bascule
+    # Le plafond MENSUEL survit au changement de jour : tant qu'il est dépassé, on
+    # reste en local, crons en pause et sans annonce (sinon l'annonce de reprise,
+    # dite en voix cloud, relancerait aussitôt la bascule, chaque jour du mois).
+    e = e or budget.etat()
+    if e.get("depasse"):
+        return
     noms = budget.crons_suspendus()
     if noms:
         reprendre_crons(noms)

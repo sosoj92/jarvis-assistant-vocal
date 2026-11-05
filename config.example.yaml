@@ -12,7 +12,7 @@ cloud:
   fournisseur: openai          # openai | anthropic (Claude) ; le profil memorise aussi son modele
 
 openai:
-  cle: "sk-proj-..."           # cle API Platform ; l'abonnement ChatGPT ne la remplace pas
+  cle: ""                      # cle API Platform (commence par sk-proj-) ; l'abonnement ChatGPT ne la remplace pas
   modele: "gpt-5.6-luna"       # mode hybride : choix quotidien economique recommande
   modele_qualite: "gpt-6-astra" # mode qualite : flagship GPT-6
   raisonnement: low            # none|low|medium|high|xhigh|max (selon le modele)
@@ -47,9 +47,11 @@ kokoro:                        # TTS local alternatif (voix FR unique ; uv add k
   voix_nom: "ff_siwis"         # voix francaise de Kokoro
 
 anthropic:                     # fournisseur Claude / Anthropic alternatif
-  cle: "sk-ant-..."            # https://console.anthropic.com/ , section API keys
+  cle: ""                      # https://console.anthropic.com/ , section API keys (commence par sk-ant-)
   modele: "claude-haiku-4-5"          # mode hybride : modele economique (reflexes + vision)
   modele_qualite: "claude-sonnet-4-5" # mode qualite : modele le plus fort
+  timeout: 90                  # secondes max par essai d'appel
+  max_retries: 1
 
 elevenlabs:                    # facultatif ; sans cle, Jarvis garde la voix Windows
   cle: ""                      # https://elevenlabs.io , profil -> API key (commence par sk_)
@@ -68,6 +70,7 @@ hue:                           # Philips Hue, API locale
 mail:                          # Gmail via IMAP/SMTP (facultatif)
   adresse: "ton.adresse@gmail.com"
   mot_de_passe_app: ""         # mot de passe d'application Google (2FA requise)
+  # delai_s: 30                # facultatif : delai d'attente reseau IMAP/SMTP, en secondes par operation
 
 colis:                          # suivi de colis lu dans les objets des mails (local, lecture seule)
   dans_brief: true              # ajoute « Côté colis : ... » au brief s'il y a un envoi en cours
@@ -167,6 +170,8 @@ appels:
   cout_par_minute: 0.11        # estimation EUR/min (ajuste selon les tarifs Twilio)
   dossier: "logs/calls"        # transcriptions + compteur (gitignore)
   # prefixes_interdits: ["089","3","118","10"]   # numeros surtaxes bloques (defaut fourni)
+  # prefixes_interdits_etrangers: ["+449", "+882"]   # surtaxes etrangers au format E.164 ;
+  #                            # sans cette cle, la liste par defaut du code s'applique (V1 et V2)
   # --- V2 (conversation temps reel) ---
   # port_stream : plus utilise -> le serveur unifie ecoute sur serveur.port
   seuil_voix: 400             # seuil RMS de detection de parole (baisse si peu sensible)
@@ -185,6 +190,7 @@ loopstr:                        # echeances de partenariats via flux iCal (voir 
 
 serveur:                       # UN serveur web pour TOUT (pont iPhone + webhook Twilio V2 + futures PWA)
   actif: false                 # true = lance le serveur au demarrage (requis pour le pont iPhone)
+  host: "127.0.0.1"            # interface d'ecoute ; ne passe a 0.0.0.0 qu'en connaissance de cause (voir SECURITY.md)
   port: 8790                   # port local unique ; UN seul tunnel ngrok le sert en entier
   # -- Deux facons d'exposer le port (choisis-en UNE) --
   # A) Jarvis ouvre le tunnel tout seul (pas besoin d'installer la commande ngrok) :
@@ -194,13 +200,19 @@ serveur:                       # UN serveur web pour TOUT (pont iPhone + webhook
   public_url: ""               # ex. "https://mon-truc.ngrok.app"
 
 pont_iphone:                   # notes/commandes depuis l'iPhone (Raccourcis) ; voir docs/iphone.md
+  actif: false                 # true = lance le serveur au demarrage pour le pont
   token: ""                    # SECRET : en-tete X-Jarvis-Token (genere une longue chaine aleatoire)
+  domotique_distante: []       # outils executes depuis l'iPhone SANS confirmation, pour qui detient le jeton.
+                               # Un N2 place ici perd sa confirmation a distance ; un N3 reste toujours refuse.
+                               # N'y mettre que des actions physiques reversibles (ex. allumer_lumiere).
 
 navigateur:                    # assistance sur TON Chrome (voir docs/navigateur.md)
   prefere: "firefox"           # pages ouvertes par Jarvis : firefox (si installe) | systeme (navigateur par defaut)
                                # avec firefox, Jarvis ne lance jamais Chrome lui-meme : lire ou agir sur
                                # une page reste possible dans le raccourci "Chrome + Jarvis" deja ouvert
   firefox_exe: ""              # chemin de firefox.exe si installe hors des emplacements standards
+  chrome_exe: ""               # chemin de chrome.exe ; vide = emplacements standards de Windows
+  profil_dir: ""               # profil du Chrome dedie ; vide = %LOCALAPPDATA%\ChromeJarvis
   cdp_port: 9222               # port de debug (raccourci "Chrome + Jarvis")
   domaines_proteges:           # sites ou Jarvis LIT mais n'AGIT jamais (fais-le toi-meme)
     - "impots.gouv.fr"
@@ -270,7 +282,9 @@ scenes:                        # scenes composites (musique + lumieres + voix + 
 hermes:                        # delegation a Hermes Agent (facultatif ; voir docs/hermes.md)
   api_url: "http://127.0.0.1:8642"   # API locale d'Hermes (gateway, loopback uniquement)
   api_key: ""                        # cle du serveur API d'Hermes (= API_SERVER_KEY de son .env)
-  # api_key_file: ""                 # alternative : chemin d'un fichier contenant la cle
+  api_key_file: ""                   # alternative : chemin d'un fichier contenant la cle
+  transport: "auto"                  # auto (API puis repli CLI) | http | cli
+  workspace: ""                      # dossier de travail partage ; vide = ~/hermes-workspace
   session: "jarvis-delegation"       # repli ; Jarvis genere sinon une session unique par delegation
   modele_facturation: ""              # si l'API ne renvoie pas le modele : ex. "opus" pour estimer le cout
   timeout: 900                       # secondes max d'une delegation (une recherche de fond peut durer)
@@ -306,7 +320,7 @@ hud:                            # interface visuelle locale (http://127.0.0.1:87
 signal_matin:                   # quotidien personnel A4 ; voir docs/signal_matin.md
   actif: false                  # activer seulement apres validation de la preview et de l'impression
   declenchement: "desactive"    # desactive | horaire | premier_demarrage
-  heure: "08:00"                # mode horaire : utilisee par le script Windows
+  heure: "08:00"                # indicatif : l'heure reelle est le parametre -Heure de scripts/installer_journal_matin.ps1
   imprimer: false               # opt-in obligatoire pour l'impression automatique au premier brief
   recto_verso: false            # bord long ; verifier la compatibilite de l'imprimante
   densite: "auto"               # auto | compact | standard | extended
@@ -331,8 +345,12 @@ signal_matin:                   # quotidien personnel A4 ; voir docs/signal_mati
   brief_candidats: 72           # titres collectes dans les flux tech avant le tri
   brief_fenetre_heures: 72      # 24 h privilegiees ; au-dela, seulement un sujet pas encore traite
   brief_historique_jours: 14    # anti-repetition locale (notes/, jamais versionne)
-  brief_budget_secondes: 780    # au-dela, le cahier tech classique est imprime a la place
+  brief_budget_secondes: 780    # borne seulement la recherche de contexte ; doit rester sous la duree max de la
+                                # tache planifiee, moins la collecte, l'enrichissement, le PDF et l'impression
   brief_delai_redaction_secondes: 300 # delai par appel de redaction / relecture (le delai vocal reste openai.timeout)
+  brief_relecture: true         # relecture du brief par un second appel au modele
+  brief_max_tokens: 16000       # longueur max de la redaction du brief
+  brief_hermes_timeout: 420     # secondes max pour le contexte fourni par Hermes (brief_contexte: hermes)
   modele_apprentissage: ""      # vide = local d'abord, puis modele cloud economique si la reserve de mots est epuisee
   extracteur_public: false      # proxy de lecture interdit pour les flux personnels sauf opt-in
   flux: []                      # ex. [{nom: "Media", categorie: "Monde", url: "https://.../rss.xml"}]
@@ -442,6 +460,7 @@ spotify:                       # ajouter les musiques reconnues a une playlist ;
   appareils: {}                # ex. {cuisine: "Jarvis Cuisine"} pour Spotify Connect
   playlist_lancement: ""       # « lance Spotify » dans une piece : playlist jouee (vide = reprend la derniere musique)
   lancement_aleatoire: true    # cette playlist demarre sur un titre au hasard, en mode aleatoire
+  dossier: "logs/spotify"      # jeton de connexion (relatif au projet, non versionne)
   # Connexion une fois : python scripts/spotify_login.py (refresh_token dans logs/spotify/)
 
 cockpit:                       # tableau de bord perso (app web locale) ; docs/cockpit.md
@@ -487,7 +506,7 @@ alexa:                         # EXPERIMENTAL (via alexapy, non officiel) ; voir
   routage_prioritaire: true    # commandes domotiques/routines -> Alexa avant le LLM (false = choix du LLM)
 
 meteo:
-  ville: ""                     # "" = auto par IP (localisation) ; mets ta ville si l'IP se trompe (ex. "Yerres", "Paris")
+  ville: ""                     # "" = auto par IP (localisation) ; mets ta ville si l'IP se trompe (ex. "Lyon", "Paris")
 
 satellites:                    # Jarvis dans d'autres pieces (Raspberry Pi, futur ESP32) — cf. docs/satellite.md
   # LAN uniquement (jamais expose via ngrok). Jarvis ouvre automatiquement le
@@ -526,6 +545,7 @@ satellite_lan:
   whisper_modele: "small"      # modèle dédié au satellite, plus léger que le principal
   whisper_device: "cpu"        # évite de charger un second Whisper sur le GPU
   whisper_compute_type: "int8"
+  detection_voix: true         # filtre VAD de Whisper : ignore les silences et bruits de fond
   conversation_suivie: true    # relance sans répéter « Hey Jarvis » après une réponse
   fenetre_relance: 8.0         # secondes d'écoute pour une question de suivi
   max_relances: 2              # nombre maximal de suivis par « Hey Jarvis » ; évite l'écoute infinie

@@ -51,7 +51,8 @@ jamais silencieusement une source absente par du texte fictif.
 
 Les sorties personnelles (`output/data`, `output/preview`, `output/pdf`) et les
 fichiers locaux (`config.yaml`, jetons Google, `contenus.yaml`) sont ignores par
-Git. Le renderer PDF ne recoit que le JSON normalise et n'accede a aucun secret.
+Git. Le renderer PDF ne recoit que le JSON normalise ; il ne lit aucun secret et,
+en dehors de ce JSON, seulement les illustrations locales de `web/illustrations`.
 
 ## Architecture
 
@@ -87,9 +88,10 @@ backend d'impression explicite
   contenu avant l'export.
 - `printer.py` ne peut imprimer que lors d'un appel explicite avec confirmation.
 
-Les anciens `core/journal_matin.py`, `core/journal_pdf.py` et
-`scripts/imprimer_journal_matin.py` sont conserves comme facades afin de ne pas
-casser une automatisation existante.
+Seul `scripts/imprimer_journal_matin.py` reste une facade de compatibilite : il
+genere l'edition sans imprimer. `core/journal_matin.py` ne fait plus que
+collecter et mettre en forme les sections, et `core/journal_pdf.py` ne sert plus
+qu'a convertir l'ancien format (champs tronques).
 
 ## Densite adaptative
 
@@ -115,6 +117,11 @@ sujets courts sont regroupes en 2 x 2 et le decoupage evite les fins de cahier
 leur composition et peuvent recevoir une illustration editoriale ; les pages
 denses gagnent automatiquement une ou plusieurs continuations. Aucun article
 n'est omis pour respecter un nombre de pages predefini.
+
+Le champ `illustration.path` du JSON d'edition n'embarque qu'un fichier image
+(`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.svg`) de 5 Mo au plus, place dans
+`web/illustrations`. Tout autre chemin (autre dossier, autre type, fichier trop
+gros ou absent) retombe sur le dessin SVG integre.
 
 Une legere reduction, limitee a 95 %, reste autorisee uniquement pour absorber
 les minuscules ecarts de rendu des polices ou du pilote PDF. Un vrai surplus de
@@ -233,11 +240,18 @@ Chaine de production (`core/signal_matin/tech_brief.py`) :
 
 Le papier affiche le nom du media et la date, jamais les adresses web. Un
 historique local dans `notes/` evite de repeter un sujet deja traite, sauf fait
-nouveau. Si une etape echoue, si moins de deux informations sont verifiees ou si
-`brief_budget_secondes` est depasse, le cahier tech classique est imprime a la
-place. Le brief allonge la generation de plusieurs minutes : prevoir une heure
-de lancement plus precoce et une duree d'execution suffisante pour la tache
-planifiee.
+nouveau. Si une etape echoue ou si moins de deux informations sont verifiees, le
+cahier tech classique est imprime a la place.
+
+`brief_budget_secondes` ne borne que la phase de recherche de contexte. La
+redaction et la relecture ajoutent ensuite chacune jusqu'a
+`brief_delai_redaction_secondes` (relances du SDK comprises), et le repli vers le
+cahier classique n'a lieu qu'en cas d'echec, pas sur simple depassement de
+duree. Le brief allonge donc la generation de plusieurs minutes : prevoir une
+heure de lancement plus precoce et une duree maximale de tache d'au moins
+30 minutes, via `installer_journal_matin.ps1 -DureeMaxMinutes 30` (15 par
+defaut) ou, sur H24, `synchroniser_serveur_h24.ps1 -Action definir_heure
+-DureeMinutes 30`.
 
 ## JSON externe
 
@@ -386,6 +400,19 @@ fichier prive `config.yaml` :
 powershell -ExecutionPolicy Bypass -File .\scripts\installer_journal_matin.ps1 `
   -Mode premier_demarrage -RectoVerso -Imprimante "Nom exact de la file Windows"
 ```
+
+Avant de passer en `premier_demarrage`, retirer la tache horaire, sinon le
+journal serait imprime deux fois :
+
+```powershell
+Disable-ScheduledTask -TaskName "Jarvis - Signal Matin"
+# ou, pour la supprimer :
+Unregister-ScheduledTask -TaskName "Jarvis - Signal Matin" -Confirm:$false
+```
+
+Le script affiche desormais un avertissement s'il trouve une tache d'impression
+active. Il accepte aussi `-DureeMaxMinutes` (duree maximale de la tache, 15 par
+defaut ; 30 conseille avec le Brief Tech & IA).
 
 Pour revenir au mode fixe, laisser `declenchement: "horaire"` (ou `desactive`,
 car la tache Windows est autonome) et installer la tache planifiee. Ne pas

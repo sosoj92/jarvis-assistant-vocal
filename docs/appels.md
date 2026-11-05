@@ -53,7 +53,12 @@ twilio:
 - **Presentation honnete** : l'appel commence toujours par « Bonjour, je suis l'assistant
   vocal automatise de [ton prenom]... ». Jamais de fausse identite humaine.
 - **Numeros surtaxes bloques** (089x, numeros courts 3xxx / 118xxx / 10xx). Liste
-  ajustable via `appels.prefixes_interdits`.
+  ajustable via `appels.prefixes_interdits`. Les surtaxes ne sont plus seulement
+  francais : une liste de prefixes etrangers au format E.164 (ex. `+449`, `+882`)
+  est aussi bloquee, en V1 comme en V2, et se remplace via
+  `appels.prefixes_interdits_etrangers`.
+- **Validation commune des numeros** (V1 et V2) : 8 a 15 chiffres, sans texte ;
+  un numero mal forme est refuse avant toute preparation de l'appel.
 - **Jamais** de donnees bancaires ou de mot de passe communiques.
 - **Transcription** sauvegardee dans `logs/calls/` (gitignore) ; rien de plus n'est
   conserve de l'interlocuteur.

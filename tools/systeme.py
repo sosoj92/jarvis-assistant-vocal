@@ -1,6 +1,7 @@
 """Outils systeme Windows : lancer une application, controler le media, le volume,
 et l'extinction propre du PC (N3, avec delai annulable)."""
 import ctypes
+import logging
 import os
 import subprocess
 import time
@@ -8,6 +9,8 @@ from pathlib import Path
 
 from core.config import reglage
 from core.registre import outil
+
+LOG = logging.getLogger("jarvis")
 
 # Codes des touches multimedia Windows
 _TOUCHES = {
@@ -183,12 +186,26 @@ def _annonce_extinction(_args):
 )
 def eteindre_pc() -> str:
     """Scene d'extinction (lumieres) PUIS arret Windows programme, annulable (shutdown /a)."""
-    # 1) Scene d'extinction AVANT l'arret (coupe les lumieres, etc.).
-    try:
-        from tools import modes
-        modes.activer(reglage("assistant.scene_extinction", "off"))
-    except Exception:
-        pass
+    # 1) Scene d'extinction AVANT l'arret (coupe les lumieres, etc.). On ne dit
+    # « Lumieres coupees » que si le pont Hue a vraiment applique la scene ; sans
+    # Hue configure, l'etape est sautee sans rien annoncer (comme eteindre_tout).
+    debut = ""
+    if reglage("hue.pont", "") and reglage("hue.cle", ""):
+        scene = reglage("assistant.scene_extinction", "off")
+        try:
+            from tools import modes
+            cle, echecs = modes.appliquer(scene)
+            if cle is None:
+                debut = f"Lumieres non coupees (scene d'extinction « {scene} » inconnue). "
+            elif not echecs:
+                debut = "Lumieres coupees. "
+            elif echecs[0].startswith("Hue injoignable"):
+                debut = "Lumieres non coupees (Hue injoignable). "
+            else:
+                debut = f"Lumieres non coupees ({echecs[0].rstrip('.')}). "
+        except Exception:
+            LOG.exception("eteindre_pc : scene d'extinction")
+            debut = "Lumieres non coupees (erreur inattendue). "
     # 2) Arret programme, annulable pendant le delai.
     delai = max(5, int(reglage("assistant.delai_extinction", 30)))
     try:
@@ -202,7 +219,7 @@ def eteindre_pc() -> str:
             return f"Je n'ai pas pu programmer l'extinction ({(r.stderr or '').strip()[:120]})."
     except Exception as e:
         return f"Je n'ai pas pu programmer l'extinction ({e})."
-    return (f"Lumieres coupees. Le PC s'eteint dans {delai} secondes. "
+    return (f"{debut}Le PC s'eteint dans {delai} secondes. "
             "Dis « annule l'extinction » si tu changes d'avis.")
 
 

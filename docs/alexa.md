@@ -60,7 +60,11 @@ navigateur**, le proxy capture la session.
 uv run python scripts/alexa_login.py
 ```
 Le script affiche une adresse **`http://127.0.0.1:3000`** → **ouvre-la dans ton
-navigateur, sur ce PC**. Connecte-toi à Amazon comme d'habitude (email/mot de passe
+navigateur, sur ce PC**. Le proxy de connexion n'écoute que sur `127.0.0.1` : il
+faut l'ouvrir depuis le PC où tourne `scripts/alexa_login.py`. Sur une machine
+sans écran (H24), ouvre l'URL à travers un tunnel
+`ssh -L 3000:127.0.0.1:3000 <compte>@<machine>`, jamais par l'adresse IP du réseau
+local. Connecte-toi à Amazon comme d'habitude (email/mot de passe
 **pré-remplis**, puis **captcha / 2FA** dans le navigateur). **Va jusqu'à la page
 « Successfully logged in »** : c'est ce moment qui capture la session. Le script
 enregistre alors l'appareil et **sauvegarde les tokens OAuth durables**

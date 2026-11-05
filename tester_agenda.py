@@ -9,7 +9,9 @@ from tools.agenda import get_events, _service
 
 print("Connexion a Google Agenda...")
 try:
-    svc = _service()
+    # Diagnostic manuel : l'autorisation peut s'ouvrir meme sur un poste
+    # configure en serveur sans peripheriques.
+    svc = _service(interactif=True)
     cals = svc.calendarList().list().execute().get("items", [])
     print(f"OK — {len(cals)} agenda(s) accessibles :",
           ", ".join(c.get("summary", "") for c in cals))

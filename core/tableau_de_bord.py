@@ -197,8 +197,13 @@ def _service_agenda():
     from google.oauth2.credentials import Credentials
     jeton = Credentials.from_authorized_user_file(str(fichier), agenda.SCOPES)
     if not jeton.valid and not (jeton.expired and jeton.refresh_token):
+        if agenda._serveur_sans_peripheriques():
+            # Personne ne peut consentir sur ce poste sans ecran.
+            raise NonConfigure("Agenda Google à reconnecter depuis un poste avec écran "
+                               "(uv run python -m tools.agenda), puis copier "
+                               "google_token.json sur le serveur.")
         raise NonConfigure("Agenda Google à reconnecter : demande-moi ton agenda à la voix.")
-    return agenda._service()
+    return agenda._service(interactif=False)
 
 
 def source_agenda(maintenant=None):
