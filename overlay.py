@@ -82,10 +82,12 @@ def memoriser(texte, type="reponse", extra=None):
 
 
 def reafficher():
-    """Réaffiche la dernière réponse mémorisée (surcharge vocale « affiche-le »)."""
+    """Réaffiche la dernière réponse mémorisée (surcharge vocale « affiche-le »).
+
+    Surcharge PONCTUELLE : la réponse va directement dans la file, sans toucher à
+    `actif`. Un overlay masqué le reste pour les réponses suivantes."""
     if not _DERNIERE.get("texte"):
         return False
-    _CFG["actif"] = True
     _Q.put(("afficher", {"texte": _DERNIERE["texte"], "type": _DERNIERE["type"],
                          "extra": _DERNIERE["extra"], "duree": None}))
     return True
